@@ -2,19 +2,7 @@
 .vscode-test/**
 src/**
 out/**/*.map
-# ─── node_modules 优化：排除不需要的大包和非本平台二进制 ───
-# 顶层 onnxruntime-node：@huggingface/transformers 自带嵌套副本，不需要顶层的
-node_modules/onnxruntime-node/**
-# onnxruntime-web：未直接使用
-node_modules/onnxruntime-web/**
-# sharp：图片处理原生模块，可选依赖，不需要
-node_modules/sharp/**
-# pino-pretty：仅开发模式使用
-node_modules/pino-pretty/**
-# 排除非 linux-x64 平台的 onnxruntime 原生二进制（节省约 150MB）
-**/onnxruntime-node/bin/napi-v6/darwin/**
-**/onnxruntime-node/bin/napi-v6/win32/**
-**/onnxruntime-node/bin/napi-v6/linux/arm64/**
+node_modules/**
 .gitignore
 .eslintrc.*
 **/tsconfig*.json
