@@ -1,7 +1,0 @@
-fix(ui): ToolCard.tsx 中 isShellTool 在 useRef/useEffect 前定义，避免 TDZ 导致白屏
-
-const isShellTool 原本在第 177 行定义，但在第 155-170 行的 useState/useEffect
-依赖数组中已被引用。JS 的 Temporal Dead Zone 会在此处抛出 ReferenceError，
-导致整个 React 组件树崩溃、应用白屏。
-
-修复：将 isShellTool 的定义移到 useState/useEffect 之前。

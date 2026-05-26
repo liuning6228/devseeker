@@ -1,0 +1,37 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "env": {
+    "node": true,
+    "es2022": true
+  },
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-unused-vars": "warn",
+    "@typescript-eslint/no-var-requires": "off",
+    "no-console": "off",
+    "no-debugger": "warn",
+    "prefer-const": "warn",
+    "no-var": "error",
+    "no-empty": "warn",
+    "no-control-regex": "off",
+    "no-constant-condition": "warn",
+    "no-useless-escape": "warn"
+  },
+  "ignorePatterns": [
+    "out/",
+    "dist/",
+    "node_modules/",
+    "**/*.test.ts",
+    "webview-ui/"
+  ]
+}
