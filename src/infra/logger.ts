@@ -71,7 +71,11 @@ export function initLogger(config: LoggerConfig): Logger {
     },
     messageKey: 'msg',
     redact: {
-      paths: ['*.apiKey', '*.token', '*.secret', '*.password', '*.authorization'],
+      paths: [
+        '*.apiKey', '*.token', '*.secret', '*.password', '*.authorization',
+        '*.stack',           // 调用栈可能包含文件路径 / IP / URL
+        '*.userHome',        // 用户目录路径
+      ],
       censor: '<redacted>',
     },
   };

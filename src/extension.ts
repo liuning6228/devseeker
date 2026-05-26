@@ -599,14 +599,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
     const err = reason instanceof AgentError ? reason : toAgentError(reason);
-    log.error({ code: err.code, msg: err.message, stack: err.stack }, 'unhandledRejection');
+    // stack 可能包含用户文件路径和 API URL，已由 logger redact 自动脱敏
+    log.error({ code: err.code, msg: err.message }, 'unhandledRejection');
     // 不退出进程——Webview disposed 等场景不应导致扩展宿主崩溃
   };
   process.on('unhandledRejection', unhandledRejectionHandler);
   // W15.10 · 同步异常兆底：防止未捕获的同步异常导致扩展宿主进程崩溃
   uncaughtExceptionHandler = (error: Error) => {
     const err = error instanceof AgentError ? error : toAgentError(error);
-    log.error({ code: err.code, msg: err.message, stack: err.stack }, 'uncaughtException');
+    // stack 已由 logger redact 自动脱敏
+    log.error({ code: err.code, msg: err.message }, 'uncaughtException');
     // 不退出进程——让 VS Code 扩展宿主继续运行，避免整窗口崩溃
   };
   process.on('uncaughtException', uncaughtExceptionHandler);

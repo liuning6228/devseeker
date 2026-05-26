@@ -613,6 +613,12 @@
           "default": 5,
           "minimum": 1,
           "description": "fetch_content QPS 限流（令牌桶每秒补充令牌数）（W8.10）"
+        },
+        "dualMind.telemetry.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "允许收集匿名使用统计以帮助改进 DualMind。默认关闭。不会收集代码、API Key 或个人身份信息。",
+          "scope": "application"
         }
       }
     }

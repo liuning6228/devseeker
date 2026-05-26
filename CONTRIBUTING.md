@@ -41,8 +41,9 @@ npm run watch      # 编译 + 监听
 1. Fork 仓库并创建特性分支：`git checkout -b feat/your-feature`
 2. 确保通过已有测试：`npm test`
 3. 新功能请附带测试用例
-4. PR 标题遵循 Conventional Commits 格式
-5. 等待 CI 通过和 Code Review
+4. **签署 DCO**：每个 commit 末尾加 `Signed-off-by: Your Name <your@email.com>`（`git commit -s` 自动添加）。详见 [CONTRIBUTOR_AGREEMENT.md](.github/CONTRIBUTOR_AGREEMENT.md)
+5. PR 标题遵循 Conventional Commits 格式
+6. 等待 CI 通过和 Code Review
 
 ## 项目结构
 
