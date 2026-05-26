@@ -120,21 +120,43 @@ stashFiles();
 console.log('[vsce-package] Patching @huggingface/transformers node entry...');
 patchTransformersNodeEntry();
 
-const vsixName = `dualmind-${getVersion()}.vsix`;
-const vsixPath = join(ROOT, vsixName);
-if (existsSync(vsixPath)) rmSync(vsixPath);
+const TARGETS = [
+  { name: 'linux-x64',   arg: 'linux-x64'   },
+  { name: 'win32-x64',   arg: 'win32-x64'   },
+];
+
+const version = getVersion();
+const generated = [];
 
 try {
-  console.log('[vsce-package] Running vsce package...');
-  spawnSync('npx', ['vsce', 'package'], {
-    cwd: ROOT,
-    stdio: 'inherit',
-    shell: true,
-  });
+  for (const target of TARGETS) {
+    const vsixName = `dualmind-${version}-${target.name}.vsix`;
+    const vsixPath = join(ROOT, vsixName);
+    if (existsSync(vsixPath)) rmSync(vsixPath);
 
-  if (existsSync(vsixPath)) {
-    const sizeMB = (statSync(vsixPath).size / (1024 * 1024)).toFixed(1);
-    console.log(`[vsce-package] Generated: ${vsixName} (${sizeMB} MB)`);
+    console.log(`[vsce-package] Packaging for ${target.name}...`);
+    const result = spawnSync('npx', ['vsce', 'package', '--target', target.arg], {
+      cwd: ROOT,
+      stdio: 'inherit',
+      shell: true,
+    });
+
+    if (result.status !== 0) {
+      console.error(`[vsce-package] FAILED for ${target.name}`);
+      process.exit(1);
+    }
+
+    // vsce 默认输出 dualmind-<version>.vsix，重命名
+    const defaultVsix = join(ROOT, `dualmind-${version}.vsix`);
+    if (existsSync(defaultVsix)) {
+      renameSync(defaultVsix, vsixPath);
+      const sizeMB = (statSync(vsixPath).size / (1024 * 1024)).toFixed(1);
+      console.log(`[vsce-package] Generated: ${vsixName} (${sizeMB} MB)`);
+      generated.push(vsixName);
+    } else {
+      console.error(`[vsce-package] ${target.name}: expected ${defaultVsix} not found`);
+      process.exit(1);
+    }
   }
 } finally {
   console.log('[vsce-package] Restoring pre-pack adjustments...');
@@ -142,9 +164,9 @@ try {
   restoreFiles();
 }
 
-if (!existsSync(vsixPath)) {
-  console.error('[vsce-package] FAILED — VSIX not generated');
+if (generated.length === 0) {
+  console.error('[vsce-package] FAILED — no VSIX generated');
   process.exit(1);
 }
 
-console.log('[vsce-package] Done!');
+console.log(`[vsce-package] Done! Generated: ${generated.join(', ')}`);

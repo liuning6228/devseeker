@@ -28,7 +28,6 @@ jobs:
 
       - name: Upload VSIX to GitCode Release
         run: |
-          VSIX_FILE=$(ls dualmind-*.vsix | head -1)
           TAG_NAME="${GITHUB_REF_NAME}"
           GITCODE_TOKEN="${{ secrets.GITCODE_TOKEN }}"
           curl -s -X POST \
@@ -38,11 +37,14 @@ jobs:
             -d "{\"tag_name\":\"${TAG_NAME}\",\"name\":\"${TAG_NAME}\",\"body\":\"Release ${TAG_NAME}\"}" > /tmp/gitcode_release.json
           RELEASE_ID=$(cat /tmp/gitcode_release.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
           if [ -n "$RELEASE_ID" ]; then
-            curl -s -X POST \
-              "https://gitcode.com/api/v1/repos/a6228/dualmind/releases/${RELEASE_ID}/assets" \
-              -H "Authorization: token ${GITCODE_TOKEN}" \
-              -F "attachment=@${VSIX_FILE}"
-            echo "Uploaded to GitCode release ${RELEASE_ID}"
+            for VSIX_FILE in dualmind-*.vsix; do
+              echo "Uploading ${VSIX_FILE} to GitCode..."
+              curl -s -X POST \
+                "https://gitcode.com/api/v1/repos/a6228/dualmind/releases/${RELEASE_ID}/assets" \
+                -H "Authorization: token ${GITCODE_TOKEN}" \
+                -F "attachment=@${VSIX_FILE}"
+            done
+            echo "Uploaded all VSIX to GitCode release ${RELEASE_ID}"
           else
             echo "GitCode release creation may have failed, check /tmp/gitcode_release.json"
             cat /tmp/gitcode_release.json
