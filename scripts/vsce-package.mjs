@@ -135,7 +135,8 @@ try {
     if (existsSync(vsixPath)) rmSync(vsixPath);
 
     console.log(`[vsce-package] Packaging for ${target.name}...`);
-    const result = spawnSync('npx', ['vsce', 'package', '--target', target.arg], {
+    // --output 指定精确文件名，避免 vsce 自动加 target 前缀导致冲突
+    const result = spawnSync('npx', ['vsce', 'package', '--target', target.arg, '--output', vsixPath], {
       cwd: ROOT,
       stdio: 'inherit',
       shell: true,
@@ -146,15 +147,12 @@ try {
       process.exit(1);
     }
 
-    // vsce 默认输出 dualmind-<version>.vsix，重命名
-    const defaultVsix = join(ROOT, `dualmind-${version}.vsix`);
-    if (existsSync(defaultVsix)) {
-      renameSync(defaultVsix, vsixPath);
+    if (existsSync(vsixPath)) {
       const sizeMB = (statSync(vsixPath).size / (1024 * 1024)).toFixed(1);
       console.log(`[vsce-package] Generated: ${vsixName} (${sizeMB} MB)`);
       generated.push(vsixName);
     } else {
-      console.error(`[vsce-package] ${target.name}: expected ${defaultVsix} not found`);
+      console.error(`[vsce-package] ${target.name}: expected ${vsixPath} not found`);
       process.exit(1);
     }
   }
