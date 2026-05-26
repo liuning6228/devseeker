@@ -19,7 +19,10 @@ jobs:
 
       - run: npm ci
 
-      - name: Package VSIX
+      - name: Build extension + webview
+        run: npm run build
+
+      - name: Package VSIX (Linux + Windows)
         run: node scripts/vsce-package.mjs
 
       - uses: softprops/action-gh-release@v2
