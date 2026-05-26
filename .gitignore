@@ -1,0 +1,34 @@
+# Build
+out/
+dist/
+*.vsix
+*.tsbuildinfo
+
+# Deps
+node_modules/
+.pnpm-store/
+
+# IDE
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local test fixtures
+tmp/
+coverage/
+test-onnx.js
+test-transformers.js
+
+# Offline BERT model (downloaded by npm run package)
+models/
+
+# Old logo preview page
+logo.html
+
+# DualMind runtime data (checkpoints, sessions, logs, sqlite)
+.dualmind/data/
+.dualmind/logs/
+.dualmind/tmp/
+.dualmind/audit/
