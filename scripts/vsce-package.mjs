@@ -135,8 +135,8 @@ try {
     if (existsSync(vsixPath)) rmSync(vsixPath);
 
     console.log(`[vsce-package] Packaging for ${target.name}...`);
-    // --output 指定精确文件名，避免 vsce 自动加 target 前缀导致冲突
-    const result = spawnSync('npx', ['vsce', 'package', '--target', target.arg, '--output', vsixPath], {
+    // -o 指定精确文件名，避免 vsce 自动加 target 前缀导致冲突
+    const result = spawnSync('npx', ['vsce', 'package', '--target', target.arg, '-o', vsixPath], {
       cwd: ROOT,
       stdio: 'inherit',
       shell: true,
