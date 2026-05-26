@@ -8,11 +8,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dualmind/dualmind"
+    "url": "https://github.com/liuning6228/dualmind"
   },
-  "homepage": "https://github.com/dualmind/dualmind",
+  "homepage": "https://github.com/liuning6228/dualmind",
   "bugs": {
-    "url": "https://github.com/dualmind/dualmind/issues"
+    "url": "https://github.com/liuning6228/dualmind/issues"
   },
   "engines": {
     "vscode": "^1.85.0",
