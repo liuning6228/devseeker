@@ -1,0 +1,1943 @@
+@import "tailwindcss";
+
+/*
+ * DualMind Webview UI — Tailwind CSS v4 入口
+ * 只定义布局骨架类（app/app__body/app__main/message-list/composer/session-drawer/statusbar/index-bar）。
+ * 精细组件样式依赖 TSX 中的 Tailwind utility class，不在此覆盖。
+ */
+
+/* VSCode 主题变量映射 — 让 Tailwind 使用 VSCode 主题色 */
+@theme {
+  --color-vscode-bg: var(--vscode-editor-background);
+  --color-vscode-fg: var(--vscode-editor-foreground);
+  --color-vscode-sidebar-bg: var(--vscode-sidebar-background);
+  --color-vscode-input-bg: var(--vscode-input-background);
+  --color-vscode-input-fg: var(--vscode-input-foreground);
+  --color-vscode-input-border: var(--vscode-input-border);
+  --color-vscode-btn-bg: var(--vscode-button-background);
+  --color-vscode-btn-fg: var(--vscode-button-foreground);
+  --color-vscode-btn-hover-bg: var(--vscode-button-hoverBackground);
+  --color-vscode-error-fg: var(--vscode-errorForeground);
+  --color-vscode-focus: var(--vscode-focusBorder);
+}
+
+/* 基础重置 */
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+/* ═══════════════════════════════════════════════
+   布局 · 主框架
+   ═══════════════════════════════════════════════ */
+
+/* 全局容器 */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+}
+
+/* ─── 消息 + 侧栏 主体区（撑满剩余空间）─── */
+.app__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ─── 右侧主区 ─── */
+.app__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   消息列表
+   ═══════════════════════════════════════════════ */
+
+.message-list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 底部锚点——不可见元素，用于 scrollIntoView */
+.message-list__anchor {
+  display: block;
+  width: 0;
+  height: 0;
+  flex-shrink: 0;
+}
+
+/* 空状态 */
+.message-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 13px;
+  text-align: center;
+  gap: 8px;
+}
+
+.message-empty code {
+  background: var(--vscode-textBlockQuote-background);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* ═══════════════════════════════════════════════
+   消息条目（只有角色标识，内容渲染依赖 Tailwind）
+   ═══════════════════════════════════════════════ */
+
+.message {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.15));
+}
+
+.message--user {
+  background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.05));
+}
+
+.message__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.message__role {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+/* ─── 流式文本占位光标（::after 伪元素，不干扰实际文本内容） ─── */
+.message__text--streaming {
+  position: relative;
+}
+
+.message__text--streaming[data-stream-active]::after {
+  content: '▎';
+  display: inline;
+  color: var(--vscode-terminal-ansiBrightCyan, #4fc1ff);
+  animation: streaming-blink 0.8s step-end infinite;
+  margin-left: 1px;
+}
+
+/* 流式结束后隐藏光标 */
+.message__text--streaming:not([data-stream-active])::after {
+  content: none;
+}
+
+@keyframes streaming-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════
+   Composer（底部输入区）
+   ═══════════════════════════════════════════════ */
+
+.composer {
+  border-top: 1px solid var(--vscode-widget-border, #333);
+  background: var(--vscode-editor-background);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.composer-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding: 4px 0;
+  flex-wrap: wrap;
+  min-height: 22px;
+}
+
+/* CTX 进度条（内联在 topbar，跟在 ctx 百分比后） */
+.composer-topbar__ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer-topbar__ctx-track {
+  display: inline-block;
+  width: 48px;
+  height: 4px;
+  background: var(--vscode-scrollbarSlider-background);
+  border-radius: 2px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.composer-topbar__ctx-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--vscode-descriptionForeground);
+  opacity: 0.4;
+  transition: width 0.3s ease;
+}
+
+.composer-topbar__ctx-pct {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.composer__input {
+  width: 100%;
+  min-height: 48px;
+  max-height: 200px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.composer__input:focus {
+  border-color: var(--vscode-focusBorder);
+}
+
+.composer__input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+  opacity: 0.6;
+}
+
+.composer__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer__select {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border));
+  border-radius: 3px;
+  max-width: 140px;
+  outline: none;
+  cursor: pointer;
+}
+
+.composer__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.composer__icon-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
+.composer__icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.composer__send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border: none;
+  background: var(--vscode-descriptionForeground, #888);
+  color: #fff;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.composer__send-btn:hover {
+  background: var(--vscode-foreground, #ccc);
+}
+
+.composer__send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.composer__stop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border: none;
+  background: var(--vscode-descriptionForeground, #888);
+  color: var(--vscode-descriptionForeground, #888);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.composer__stop-btn:hover {
+  background: var(--vscode-foreground, #ccc);
+}
+
+/* ═══════════════════════════════════════════════
+   历史会话抽屉
+   ═══════════════════════════════════════════════ */
+
+.session-drawer {
+  width: 200px;
+  min-width: 200px;
+  border-right: 1px solid var(--vscode-widget-border, #333);
+  background: var(--vscode-sidebar-background);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.session-drawer__header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground);
+  border-bottom: 1px solid var(--vscode-widget-border, #333);
+}
+
+.session-drawer__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.session-drawer__item {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  margin: 1px 4px;
+}
+
+.session-drawer__item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.session-drawer__item--active {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.session-drawer__title {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+}
+
+.session-drawer__text {
+  display: block;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-drawer__meta {
+  display: block;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 1px;
+}
+
+.session-drawer__delete {
+  background: none;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.session-drawer__item:hover .session-drawer__delete {
+  opacity: 1;
+}
+
+.session-drawer__delete:hover {
+  color: var(--vscode-errorForeground);
+}
+
+/* ═══════════════════════════════════════════════
+   StatusBar
+   ═══════════════════════════════════════════════ */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--vscode-statusBar-background, var(--vscode-editor-background));
+  color: var(--vscode-statusBar-foreground, var(--vscode-foreground));
+  border-bottom: 1px solid var(--vscode-widget-border, #333);
+  flex-shrink: 0;
+}
+
+.statusbar__indicator {
+  font-size: 10px;
+}
+
+.statusbar__indicator--ok {
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.statusbar__indicator--err {
+  color: var(--vscode-testing-iconFailed, #f48771);
+}
+
+.statusbar__brand {
+  font-weight: 600;
+}
+
+.statusbar__spacer {
+  flex: 1;
+}
+
+.statusbar__action {
+  background: none;
+  border: none;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 14px;
+}
+
+.statusbar__action:hover,
+.statusbar__action.is-active {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* ═══════════════════════════════════════════════
+   图片缩略图预览（Composer 内）
+   ═══════════════════════════════════════════════ */
+
+.composer__thumbs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.composer__thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--vscode-widget-border, #333);
+}
+
+.composer__thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.composer__thumb-remove {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 16px;
+  height: 16px;
+  background: rgba(0,0,0,0.6);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  border-radius: 50%;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.composer__paste-error {
+  font-size: 11px;
+  color: var(--vscode-errorForeground);
+  padding: 2px 4px;
+}
+
+/* ═══════════════════════════════════════════════
+   索引进度条
+   ═══════════════════════════════════════════════ */
+
+.index-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--vscode-widget-border, #333);
+  flex-shrink: 0;
+}
+
+.index-bar--info,
+.index-bar--hint {
+  background: var(--vscode-editorInfo-background, transparent);
+  color: var(--vscode-descriptionForeground);
+}
+
+.index-bar__track {
+  flex: 1;
+  height: 4px;
+  background: var(--vscode-scrollbarSlider-background);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.index-bar__fill {
+  height: 100%;
+  background: var(--vscode-progressBar-background);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+.index-bar__text {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.index-bar__path {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.index-bar__action {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.index-bar__action--ghost {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+}
+
+.index-bar__action:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+/* 滚动条全局 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ═══════════════════════════════════════════════
+   齿轮菜单（GearMenu）
+   ═══════════════════════════════════════════════ */
+
+.gear-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.gear-menu__trigger {
+  background: none;
+  border: none;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 14px;
+}
+
+.gear-menu__trigger:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.gear-menu__panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 100;
+  min-width: 200px;
+  background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border, #333));
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  padding: 4px 0;
+  margin-top: 2px;
+}
+
+.gear-menu__row {
+  /* container for item + optional divider */
+}
+
+.gear-menu__divider {
+  height: 1px;
+  background: var(--vscode-widget-border, #333);
+  margin: 4px 8px;
+}
+
+.gear-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.gear-menu__item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.gear-menu__item.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.gear-menu__icon {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.gear-menu__label {
+  flex: 1;
+  min-width: 0;
+}
+
+.gear-menu__meta {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   工具卡片·容器
+   ═══════════════════════════════════════════════ */
+
+/* 卡片容器：背景、圆角、边框、卡片间间距 */
+.tool-card {
+  border-radius: 6px;
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
+  margin-bottom: 6px;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.tool-card:hover {
+  border-color: var(--vscode-focusBorder, rgba(128,128,128,0.4));
+}
+
+/* 连续多个 tool-card 时没有额外间距（margin-bottom 已处理） */
+.tool-card + .tool-card {
+  margin-top: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   工具卡片·子元素样式（补充 Tailwind class 不足的部分）
+   ═══════════════════════════════════════════════ */
+
+/* ─── 终端打开按钮（图标简化版） ─── */
+.tool-card__open-terminal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.tool-card__open-terminal:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* ─── 命令执行行 ─── */
+.tool-card__command-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  font-size: 11px;
+  background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.03));
+  font-family: var(--vscode-editor-font-family, monospace);
+  border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.1));
+}
+
+.tool-card__command-label {
+  color: var(--vscode-descriptionForeground);
+  user-select: none;
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.tool-card__command-text {
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+/* ─── 命令执行行右侧脉冲点 ─── */
+.tool-card__dot-pulse {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--vscode-terminal-ansiYellow, #cca700);
+  animation: tool-pulse 0.8s ease-in-out infinite;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ─── Header 外层容器（flex row：可点击 header + 右侧操作区） ─── */
+.tool-card__header-row {
+  display: flex;
+  align-items: center;
+}
+
+.tool-card__header-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+/* ─── Header 内的元素 ─── */
+.tool-card__header {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: none;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* header 右侧操作区（终端按钮 / 审批按钮） */
+.tool-card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-right: 4px;
+}
+.tool-card__header-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+
+.tool-card__tool-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tool-card__summary {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.tool-card__status-badge {
+  flex-shrink: 1;
+  font-size: 12px;
+  min-width: 18px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.tool-card__running-icon {
+  display: inline-block;
+  animation: tool-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes tool-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.tool-card__diff-badge {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.tool-card__chevron {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+/* ─── 审批按钮区（嵌入 header 右侧，精简无边框） ─── */
+.tool-card__approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tool-card__approval-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: none;
+}
+
+.tool-card__approval-btn--allow {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.tool-card__approval-btn--allow:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.tool-card__approval-btn--deny {
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  border: 1px solid var(--vscode-errorForeground);
+}
+
+.tool-card__approval-btn--deny:hover {
+  background: var(--vscode-errorForeground);
+  color: var(--vscode-button-foreground);
+}
+
+/* ─── 沙箱/终端切换箭头 ─── */
+.tool-card__sandbox-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+
+.tool-card__sandbox-arrow:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
+.tool-card__arrow-icon {
+  flex-shrink: 0;
+}
+
+.tool-card__sandbox-label {
+  line-height: 1;
+}
+
+/* ─── 正在处理指示器（旋转正方体 + 汉字） ─── */
+.tool-card__processing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.tool-card__cube {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--vscode-descriptionForeground);
+  border-top-color: var(--vscode-textLink-foreground, #3794ff);
+  border-radius: 2px;
+  animation: tool-cube-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.tool-card__processing-text {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70px;
+}
+
+@keyframes tool-cube-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ─── body 内的 section ─── */
+.tool-card__section {
+  margin: 4px 0;
+}
+
+.tool-card__label {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+
+.tool-card__pre {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--vscode-textCodeBlock-background, transparent);
+  padding: 4px 6px;
+  border-radius: 3px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ═══════════════════════════════════════════════
+   ChangeSummary（变更文件摘要 + Tasks 进度）
+   ═══════════════════════════════════════════════ */
+
+.change-summary {
+  border-bottom: 1px solid var(--vscode-widget-border, #333);
+  background: var(--vscode-editor-background);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.change-summary__section {
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.1));
+}
+
+.change-summary__section:last-child {
+  border-bottom: none;
+}
+
+.change-summary__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  box-sizing: border-box;
+}
+
+.change-summary__header:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.change-summary__chevron {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+  width: 12px;
+}
+
+.change-summary__title {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.change-summary__count {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+}
+
+/* Task 进度条 — 内联在 header 中跟在 Tasks 文字后 */
+.change-summary__task-progress {
+  display: inline-block;
+  width: 60px;
+  height: 4px;
+  background: var(--vscode-scrollbarSlider-background);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.change-summary__task-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--vscode-testing-iconPassed, #73c991);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+/* 状态徽章 */
+.change-summary__badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.change-summary__badge--running {
+  background: rgba(0, 120, 212, 0.15);
+  color: var(--vscode-testing-iconErrored, #d2a10c);
+}
+
+.change-summary__badge--diff {
+  background: rgba(128, 128, 128, 0.1);
+  color: var(--vscode-descriptionForeground);
+  font-family: monospace;
+}
+
+.change-summary__badge--accepted {
+  background: rgba(115, 201, 145, 0.15);
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.change-summary__badge--pending {
+  background: rgba(200, 170, 0, 0.12);
+  color: var(--vscode-testing-iconErrored, #d2a10c);
+}
+
+/* Batch 按钮区 */
+.change-summary__batch {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.change-summary__batch-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: none;
+  white-space: nowrap;
+}
+
+.change-summary__batch-btn--accept {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.change-summary__batch-btn--accept:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.change-summary__batch-btn--reject {
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  border: 1px solid var(--vscode-errorForeground);
+}
+
+.change-summary__batch-btn--reject:hover {
+  background: var(--vscode-errorForeground);
+  color: var(--vscode-button-foreground);
+}
+
+/* Tasks 列表 */
+.change-summary__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 6px;
+}
+
+.change-summary__task {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.change-summary__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.change-summary__dot--pending {
+  background: var(--vscode-testing-iconActionRetry, #cca700);
+}
+
+.change-summary__dot--in_progress {
+  background: var(--vscode-testing-iconActionRetry, #cca700);
+  animation: change-summary-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes change-summary-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.change-summary__dot--complete {
+  background: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.change-summary__dot--cancelled {
+  background: var(--vscode-descriptionForeground);
+  opacity: 0.4;
+}
+
+.change-summary__task-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.change-summary__task--cancelled .change-summary__task-text,
+.change-summary__task--complete .change-summary__task-text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* 文件列表 */
+.change-summary__list--files {
+  padding: 0 12px 6px;
+}
+
+.change-summary__file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.change-summary__file:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.change-summary__file.is-reverted {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.change-summary__file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: none;
+  border: none;
+  text-align: left;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  padding: 0;
+}
+
+.change-summary__file-path:hover {
+  text-decoration: underline;
+}
+
+.change-summary__file-diff {
+  font-size: 11px;
+  font-family: monospace;
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+}
+
+.change-summary__file-add {
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.change-summary__file-del {
+  color: var(--vscode-testing-iconFailed, #f48771);
+}
+
+/* 文件状态标签 */
+.change-summary__file-status {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.change-summary__file-status--accepted {
+  background: rgba(115, 201, 145, 0.15);
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.change-summary__file-status--rejected {
+  background: rgba(244, 135, 113, 0.15);
+  color: var(--vscode-testing-iconFailed, #f48771);
+}
+
+.change-summary__file-status--reverted {
+  background: rgba(128, 128, 128, 0.1);
+  color: var(--vscode-descriptionForeground);
+}
+
+/* 行内接受/拒绝按钮 */
+.change-summary__file-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.change-summary__file-accept,
+.change-summary__file-reject {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: none;
+  white-space: nowrap;
+}
+
+.change-summary__file-accept {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.change-summary__file-accept:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.change-summary__file-reject {
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  border: 1px solid var(--vscode-errorForeground);
+}
+
+.change-summary__file-reject:hover {
+  background: var(--vscode-errorForeground);
+  color: var(--vscode-button-foreground);
+}
+
+/* ═══════════════════════════════════════════════
+   ApprovalCard（工具审批内联卡片）
+   ═══════════════════════════════════════════════ */
+
+.approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  border: 1px solid var(--vscode-widget-border, #333);
+  border-radius: 6px;
+  background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.03));
+}
+
+.approval-card__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
+}
+
+.approval-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.approval-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.approval-card__label {
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground);
+  min-width: 48px;
+}
+
+.approval-card__value {
+  color: var(--vscode-foreground);
+  word-break: break-all;
+}
+
+.approval-card__badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--vscode-badge-background, rgba(128,128,128,0.15));
+  color: var(--vscode-badge-foreground, var(--vscode-foreground));
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+
+.approval-card__code {
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.05));
+  padding: 2px 6px;
+  border-radius: 3px;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.approval-card__code-block {
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.08));
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin: 2px 0;
+  overflow-x: auto;
+  max-height: 160px;
+  overflow-y: auto;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-widget-border, #333);
+}
+
+.approval-card__row--command {
+  flex-direction: column;
+}
+
+.approval-card__args {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--vscode-descriptionForeground);
+}
+
+.approval-card__hint {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding: 6px 8px;
+  background: var(--vscode-editorInfo-background, rgba(0,120,212,0.08));
+  border-radius: 4px;
+  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+  line-height: 1.4;
+}
+
+.approval-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--vscode-widget-border, #333);
+}
+
+.approval-card__btn {
+  font-size: 12px;
+  padding: 4px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: none;
+  white-space: nowrap;
+}
+
+.approval-card__btn--allow {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.approval-card__btn--allow:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.approval-card__btn--deny {
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  border: 1px solid var(--vscode-errorForeground);
+}
+
+.approval-card__btn--deny:hover {
+  background: var(--vscode-errorForeground);
+  color: var(--vscode-button-foreground);
+}
+
+.approval-card__btn--remember {
+  background: transparent;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  border: 1px solid var(--vscode-textLink-foreground, #3794ff);
+}
+
+.approval-card__btn--remember:hover {
+  background: var(--vscode-textLink-foreground, #3794ff);
+  color: var(--vscode-button-foreground);
+}
+
+/* ═══════════════════════════════════════════════
+   ToolCard · Qoder 风格审批面板（bash 等待审批时）
+   ═══════════════════════════════════════════════ */
+
+/* 覆盖 tool-card 容器，审批模式下无左侧彩条 */
+.tool-card--awaiting-approval {
+  border-left: none !important;
+  background: var(--vscode-editor-background);
+}
+
+/* 审批面板整体容器 */
+.tool-card__approval-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  position: relative;
+}
+
+/* ─── 顶栏：风险警告 ─── */
+.tool-card__approval-topbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 200, 0, 0.08);
+  border-bottom: 1px solid rgba(255, 200, 0, 0.2);
+  user-select: none;
+}
+
+.tool-card__approval-warning-icon {
+  color: #e8b400;
+  flex-shrink: 0;
+}
+
+.tool-card__approval-warning-text {
+  font-size: 12px;
+  color: #e8b400;
+  font-weight: 500;
+}
+
+/* ─── 命令展示区（类似终端输入框） ─── */
+.tool-card__approval-command-box {
+  padding: 8px 10px;
+  background: var(--vscode-input-background, rgba(30, 30, 30, 0.95));
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
+}
+
+.tool-card__approval-command-text {
+  margin: 0;
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Fira Code', 'Consolas', monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--vscode-input-foreground, #d4d4d4);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+
+.tool-card__approval-command-text code {
+  font-family: inherit;
+}
+
+/* ─── 审批面板输出预览（替代 CommandOutputRow，简化为纯文本块） ─── */
+.tool-card__approval-output-preview {
+  margin: 0;
+  padding: 6px 10px;
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', 'Fira Code', 'Consolas', monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--vscode-input-foreground, #d4d4d4);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+  max-height: 120px;
+  overflow-y: auto;
+  background: var(--vscode-input-background, rgba(30, 30, 30, 0.95));
+  border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
+}
+
+/* ─── 底部操作栏 ─── */
+.tool-card__approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--vscode-editor-background);
+  user-select: none;
+}
+
+/* 取消按钮 */
+.tool-card__approval-btn-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.15));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.4;
+  transition: background 0.15s;
+}
+
+.tool-card__approval-btn-cancel:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.25));
+}
+
+/* 沙箱运行按钮 */
+.tool-card__approval-btn-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  background: var(--vscode-button-background, #007acc);
+  color: var(--vscode-button-foreground, #ffffff);
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.4;
+  transition: background 0.15s;
+}
+
+.tool-card__approval-btn-run:hover {
+  background: var(--vscode-button-hoverBackground, #005a9e);
+}
+
+.tool-card__approval-btn-run svg {
+  flex-shrink: 0;
+}
+
+.tool-card__approval-shortcut {
+  font-size: 10px;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+
+/* ─── 分裂按钮：沙箱运行 ▾ ─── */
+.tool-card__approval-btn-split {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.tool-card__approval-btn-split .tool-card__approval-btn-run {
+  border-radius: 4px 0 0 4px;
+}
+
+.tool-card__approval-run-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  font-size: 10px;
+  background: var(--vscode-button-background, #007acc);
+  color: var(--vscode-button-foreground, #ffffff);
+  border: none;
+  border-left: 1px solid rgba(255,255,255,0.15);
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.tool-card__approval-run-arrow:hover {
+  background: var(--vscode-button-hoverBackground, #005a9e);
+}
+
+/* ─── 分裂按钮下拉菜单 ─── */
+.tool-card__approval-dropdown {
+  position: absolute;
+  right: 12px;
+  bottom: 44px;
+  z-index: 10;
+  min-width: 120px;
+  background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+
+.tool-card__approval-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.tool-card__approval-dropdown-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+}
+
+.tool-card__approval-dropdown-item svg {
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   Markdown 排版样式（W9.14 补充）
+   ═══════════════════════════════════════════════ */
+
+/* 标题层级 */
+.md-h {
+  line-height: 1.3;
+}
+.md-h1 { font-size: 18px; font-weight: 700; margin: 12px 0 6px; }
+.md-h2 { font-size: 15px; font-weight: 600; margin: 10px 0 5px; }
+.md-h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
+.md-h4 { font-size: 12px; font-weight: 600; margin: 6px 0 3px; }
+.md-h5,
+.md-h6 { font-size: 11px; font-weight: 600; margin: 4px 0 2px; color: var(--vscode-descriptionForeground); }
+
+/* 段落间距 */
+.md-p { margin: 4px 0; line-height: 1.5; }
+
+/* 列表 */
+.md-list { margin: 4px 0; padding-left: 20px; }
+.md-list--ordered { list-style: decimal; }
+.md-list--unordered { list-style: disc; }
+.md-list-item { margin: 2px 0; line-height: 1.5; }
+
+/* 表格 */
+.md-table-wrapper { overflow-x: auto; margin: 8px 0; }
+.md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.md-table th,
+.md-table td {
+  border: 1px solid var(--vscode-widget-border, #333);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.md-table th {
+  background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.08));
+  font-weight: 600;
+}
+.md-table tr:nth-child(even) td {
+  background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.03));
+}
+
+/* 引用块 */
+.md-blockquote {
+  margin: 6px 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+  background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.05));
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 分隔线 */
+.md-hr {
+  border: none;
+  border-top: 1px solid var(--vscode-widget-border, #333);
+  margin: 12px 0;
+}
+
+/* ═══════════════════════════════════════════════
+   Ask User Question — 模态弹窗
+   ═══════════════════════════════════════════════ */
+
+.ask-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.ask-modal {
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-widget-border, #333);
+  border-radius: 8px;
+  padding: 20px 24px;
+  max-width: 520px;
+  width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.ask-modal__title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.ask-modal__hint {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #999);
+  margin-bottom: 16px;
+}
+
+.ask-modal__question {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--vscode-sidebar-background, #252526);
+  border-radius: 6px;
+}
+
+.ask-modal__header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ask-modal__chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #fff);
+}
+
+.ask-modal__multi {
+  font-size: 10px;
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+
+.ask-modal__text {
+  font-size: 13px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.ask-modal__select-hint {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #999);
+  margin-bottom: 6px;
+}
+
+.ask-modal__options {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* 选项整行可点击 */
+.ask-modal__option {
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  outline: none;
+}
+
+.ask-modal__option:hover,
+.ask-modal__option:focus-visible {
+  background: var(--vscode-list-hoverBackground, #2a2a2a);
+}
+
+.ask-modal__option--checked {
+  background: var(--vscode-list-activeSelectionBackground, #094771);
+}
+
+.ask-modal__option--checked:hover {
+  background: var(--vscode-list-activeSelectionBackground, #094771);
+  opacity: 0.9;
+}
+
+.ask-modal__option:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007acc);
+  outline-offset: -2px;
+}
+
+.ask-modal__option-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.ask-modal__option-indicator {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  width: 16px;
+  text-align: center;
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+
+.ask-modal__option-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ask-modal__option-label {
+  font-size: 13px;
+  font-weight: 500;
+  display: block;
+}
+
+.ask-modal__option-desc {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #999);
+  display: block;
+  margin-top: 2px;
+}
+
+.ask-modal__other {
+  margin-top: 12px;
+}
+
+.ask-modal__other-header {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #999);
+  margin-bottom: 4px;
+}
+
+.ask-modal__other-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: 4px;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #ccc);
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.ask-modal__other-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #007acc);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder, #007acc);
+}
+
+.ask-modal__other-input::placeholder {
+  color: var(--vscode-input-placeholderForeground, #777);
+}
+
+.ask-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--vscode-widget-border, #333);
+}
+
+.ask-modal__btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ask-modal__btn--cancel {
+  background: var(--vscode-button-secondaryBackground, #3a3a3a);
+  color: var(--vscode-button-secondaryForeground, #ccc);
+}
+
+.ask-modal__btn--cancel:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #4a4a4a);
+}
+
+.ask-modal__btn--submit {
+  background: var(--vscode-button-background, #007acc);
+  color: var(--vscode-button-foreground, #fff);
+}
+
+.ask-modal__btn--submit:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #0098ff);
+}
+
+.ask-modal__btn--submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

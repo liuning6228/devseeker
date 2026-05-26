@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="body" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#D4953E"/>
+      <stop offset="100%" style="stop-color:#B87A2C"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#B87A2C"/>
+      <stop offset="100%" style="stop-color:#9C6520"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圆底 -->
+  <circle cx="64" cy="64" r="62" fill="#1E1E2E"/>
+
+  <!-- 左立耳 -->
+  <polygon points="40,32 52,60 60,52" fill="url(#ear)" stroke="#8B5E1E" stroke-width="1"/>
+
+  <!-- 右立耳 -->
+  <polygon points="88,32 76,60 68,52" fill="url(#ear)" stroke="#8B5E1E" stroke-width="1"/>
+
+  <!-- 脸 -->
+  <ellipse cx="64" cy="66" rx="28" ry="26" fill="url(#body)"/>
+
+  <!-- 左眼 -->
+  <ellipse cx="54" cy="64" rx="5" ry="6" fill="#2A1A0A"/>
+  <ellipse cx="55" cy="63" rx="2" ry="2.5" fill="white" opacity="0.8"/>
+
+  <!-- 右眼 -->
+  <ellipse cx="74" cy="64" rx="5" ry="6" fill="#2A1A0A"/>
+  <ellipse cx="75" cy="63" rx="2" ry="2.5" fill="white" opacity="0.8"/>
+
+  <!-- 鼻 -->
+  <ellipse cx="64" cy="73" rx="4" ry="3" fill="#2A1A0A"/>
+
+  <!-- 嘴 -->
+  <path d="M 64 76 Q 64 80 60 80" fill="none" stroke="#2A1A0A" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M 64 76 Q 64 80 68 80" fill="none" stroke="#2A1A0A" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- 双色 halo -->
+  <circle cx="64" cy="64" r="62" fill="none" stroke="#6C8EE0" stroke-width="3" opacity="0.6" stroke-dasharray="195 195" stroke-dashoffset="97.5"/>
+</svg>

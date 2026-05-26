@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#D4953E"/>
+      <stop offset="100%" style="stop-color:#B87A2C"/>
+    </linearGradient>
+    <linearGradient id="earGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#B87A2C"/>
+      <stop offset="100%" style="stop-color:#9C6520"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 深色圆形画布 -->
+  <circle cx="256" cy="256" r="240" fill="#1E1E2E"/>
+
+  <!-- 颈部 -->
+  <ellipse cx="256" cy="420" rx="140" ry="100" fill="url(#bodyGrad)"/>
+
+  <!-- 左立耳 -->
+  <polygon points="175,145 200,240 240,215" fill="url(#earGrad)" stroke="#8B5E1E" stroke-width="2"/>
+
+  <!-- 右立耳 -->
+  <polygon points="337,145 312,240 272,215" fill="url(#earGrad)" stroke="#8B5E1E" stroke-width="2"/>
+
+  <!-- 大头 -->
+  <ellipse cx="256" cy="260" rx="90" ry="85" fill="url(#bodyGrad)"/>
+
+  <!-- 额头花纹 -->
+  <ellipse cx="256" cy="230" rx="40" ry="25" fill="#E0B060" opacity="0.6"/>
+
+  <!-- 左眼 -->
+  <ellipse cx="225" cy="260" rx="14" ry="16" fill="#2A1A0A"/>
+  <ellipse cx="228" cy="257" rx="5" ry="6" fill="white" opacity="0.8"/>
+
+  <!-- 右眼 -->
+  <ellipse cx="287" cy="260" rx="14" ry="16" fill="#2A1A0A"/>
+  <ellipse cx="290" cy="257" rx="5" ry="6" fill="white" opacity="0.8"/>
+
+  <!-- 鼻梁 -->
+  <ellipse cx="256" cy="278" rx="8" ry="12" fill="#8B5E1E" opacity="0.3"/>
+
+  <!-- 鼻子 -->
+  <ellipse cx="256" cy="288" rx="12" ry="9" fill="#2A1A0A"/>
+  <ellipse cx="258" cy="286" rx="3" ry="2" fill="#5A3A1A" opacity="0.5"/>
+
+  <!-- 嘴 -->
+  <path d="M 256 297 Q 256 310 240 310" fill="none" stroke="#2A1A0A" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 256 297 Q 256 310 272 310" fill="none" stroke="#2A1A0A" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- 吐舌 -->
+  <path d="M 248 310 Q 248 330 256 335 Q 264 330 264 310" fill="#E85D75"/>
+
+  <!-- 双色分割（Dual 概念） -->
+  <path d="M 256 16 A 240 240 0 0 1 496 256" fill="none" stroke="#6C8EE0" stroke-width="6" opacity="0.6"/>
+  <circle cx="256" cy="256" r="240" fill="none" stroke="#D4953E" stroke-width="6" opacity="0.6" stroke-dasharray="377 377" stroke-dashoffset="377"/>
+
+  <!-- 星点 -->
+  <circle cx="120" cy="120" r="3" fill="#6C8EE0" opacity="0.5"/>
+  <circle cx="400" cy="150" r="2" fill="#6C8EE0" opacity="0.4"/>
+
+  <!-- 品牌名 -->
+  <text x="256" y="480" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="700" fill="#D4953E" text-anchor="middle" letter-spacing="5">DualMind</text>
+</svg>

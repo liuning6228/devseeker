@@ -1,0 +1,660 @@
+{
+  "name": "dualmind",
+  "displayName": "DualMind",
+  "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
+  "icon": "logo.png",
+  "version": "0.1.0",
+  "publisher": "dualmind",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dualmind/dualmind"
+  },
+  "homepage": "https://github.com/dualmind/dualmind",
+  "bugs": {
+    "url": "https://github.com/dualmind/dualmind/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=18"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Chat",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "coding agent",
+    "deepseek",
+    "copilot",
+    "assistant",
+    "codebase index",
+    "semantic search",
+    "autonomous"
+  ],
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
+  "qna": "https://github.com/dualmind/dualmind/discussions",
+  "markdown": "github",
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "dualMind.openPanel",
+        "title": "Open Panel",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.showLogs",
+        "title": "Show Logs",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.reindex",
+        "title": "Reindex Codebase",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.revertCheckpoint",
+        "title": "Revert to Checkpoint…",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.showCheckpointTimeline",
+        "title": "Show Checkpoint Timeline",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.inlineEdit",
+        "title": "Inline Edit (将选区送入输入框)",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.reactivateSearchKeys",
+        "title": "重新激活失效的搜索 API Key",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.perf.exportReport",
+        "title": "Export Performance Report",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.session.export",
+        "title": "Export Session (md/json)",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.askSelection",
+        "title": "Ask About Selection",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.showContext",
+        "title": "Show Context (L0/L1/L2/L3)",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.showCost",
+        "title": "Show Cost Panel",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.showRules",
+        "title": "Show Rules Panel",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.showHooks",
+        "title": "Show Hooks Panel",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.showGit",
+        "title": "Show Git Panel",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.showPreview",
+        "title": "Show Preview Panel",
+        "category": "DualMind"
+      },
+      {
+        "command": "dualMind.inlineDiff.accept",
+        "title": "Accept Hunk",
+        "category": "DualMind Diff"
+      },
+      {
+        "command": "dualMind.inlineDiff.reject",
+        "title": "Reject Hunk",
+        "category": "DualMind Diff"
+      },
+      {
+        "command": "dualMind.inlineDiff.acceptAll",
+        "title": "Accept All Hunks",
+        "category": "DualMind Diff"
+      },
+      {
+        "command": "dualMind.inlineDiff.rejectAll",
+        "title": "Reject All Hunks",
+        "category": "DualMind Diff"
+      },
+      {
+        "command": "dualMind.inlineDiff.nextHunk",
+        "title": "Next Hunk",
+        "category": "DualMind Diff"
+      },
+      {
+        "command": "dualMind.inlineDiff.prevHunk",
+        "title": "Previous Hunk",
+        "category": "DualMind Diff"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "dualMind.inlineEdit",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "dualMind.askSelection",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "dualMind.inlineDiff.accept",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && dualMind.inlineDiffActive"
+      },
+      {
+        "command": "dualMind.inlineDiff.reject",
+        "key": "ctrl+backspace",
+        "mac": "cmd+backspace",
+        "when": "editorTextFocus && dualMind.inlineDiffActive"
+      },
+      {
+        "command": "dualMind.inlineDiff.nextHunk",
+        "key": "alt+down",
+        "mac": "alt+down",
+        "when": "editorTextFocus && dualMind.inlineDiffActive"
+      },
+      {
+        "command": "dualMind.inlineDiff.prevHunk",
+        "key": "alt+up",
+        "mac": "alt+up",
+        "when": "editorTextFocus && dualMind.inlineDiffActive"
+      }
+    ],
+
+    "menus": {
+      "editor/context": [
+        {
+          "command": "dualMind.askSelection",
+          "when": "editorHasSelection",
+          "group": "dualMind@1"
+        },
+        {
+          "command": "dualMind.inlineEdit",
+          "when": "editorTextFocus",
+          "group": "dualMind@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DualMind",
+      "properties": {
+        "dualMind.models.llm.level1.provider": {
+          "type": "string",
+          "enum": [
+            "deepseek",
+            "openai",
+            "qwen",
+            "anthropic",
+            "ollama",
+            "custom-openai"
+          ],
+          "default": "deepseek",
+          "description": "LLM 主力模型（Level 1）的 Provider 类型"
+        },
+        "dualMind.models.llm.level1.model": {
+          "type": "string",
+          "default": "deepseek-chat",
+          "description": "LLM Level 1 模型名称"
+        },
+        "dualMind.models.llm.level1.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 1 API Key",
+          "scope": "application"
+        },
+        "dualMind.models.llm.level1.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "LLM Level 1 备用 API Key 列表（429 时同级轮换，全部耗尽才降级）",
+          "scope": "application"
+        },
+        "dualMind.models.llm.level1.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 1 Base URL（留空则使用 Provider 默认值）"
+        },
+        "dualMind.models.llm.level1.reasoningModel": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 1 推理模型（如 deepseek-reasoner，留空则无）"
+        },
+        "dualMind.models.llm.level1.contextWindow": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "LLM Level 1 上下文窗口大小（token 数）。0 = 使用 Provider 默认值（DeepSeek 1M / OpenAI 128K / Anthropic 200K）。设置后覆盖 Provider 硬编码值，适用于自定义模型。"
+        },
+        "dualMind.models.llm.level2.provider": {
+          "type": "string",
+          "enum": [
+            "deepseek",
+            "openai",
+            "qwen",
+            "anthropic",
+            "ollama",
+            "custom-openai"
+          ],
+          "default": "",
+          "description": "LLM 备选模型（Level 2）的 Provider 类型（留空=不配置）"
+        },
+        "dualMind.models.llm.level2.model": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 2 模型名称"
+        },
+        "dualMind.models.llm.level2.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 2 API Key",
+          "scope": "application"
+        },
+        "dualMind.models.llm.level2.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "LLM Level 2 备用 API Key 列表（429 时同级轮换）",
+          "scope": "application"
+        },
+        "dualMind.models.llm.level2.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 2 Base URL（留空则使用 Provider 默认值）"
+        },
+        "dualMind.models.llm.level2.reasoningModel": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 2 推理模型"
+        },
+        "dualMind.models.llm.level2.contextWindow": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "LLM Level 2 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
+        },
+        "dualMind.models.llm.level3.provider": {
+          "type": "string",
+          "enum": [
+            "deepseek",
+            "openai",
+            "qwen",
+            "anthropic",
+            "ollama",
+            "custom-openai"
+          ],
+          "default": "",
+          "description": "LLM 兜底模型（Level 3）的 Provider 类型（留空=不配置，推荐 Ollama）"
+        },
+        "dualMind.models.llm.level3.model": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 3 模型名称"
+        },
+        "dualMind.models.llm.level3.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 3 API Key（Ollama 留空）",
+          "scope": "application"
+        },
+        "dualMind.models.llm.level3.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "LLM Level 3 备用 API Key 列表（429 时同级轮换）",
+          "scope": "application"
+        },
+        "dualMind.models.llm.level3.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 3 Base URL（Ollama 默认 http://localhost:11434/v1）"
+        },
+        "dualMind.models.llm.level3.reasoningModel": {
+          "type": "string",
+          "default": "",
+          "description": "LLM Level 3 推理模型"
+        },
+        "dualMind.models.llm.level3.contextWindow": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "LLM Level 3 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
+        },
+        "dualMind.models.vllm.level1.provider": {
+          "type": "string",
+          "enum": [
+            "deepseek",
+            "openai",
+            "qwen",
+            "anthropic",
+            "ollama",
+            "custom-openai"
+          ],
+          "default": "qwen",
+          "description": "VLLM 主力视觉模型（Level 1）的 Provider 类型"
+        },
+        "dualMind.models.vllm.level1.model": {
+          "type": "string",
+          "default": "qwen-vl-max-latest",
+          "description": "VLLM Level 1 模型名称"
+        },
+        "dualMind.models.vllm.level1.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "VLLM Level 1 API Key",
+          "scope": "application"
+        },
+        "dualMind.models.vllm.level1.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "VLLM Level 1 备用 API Key 列表（429 时同级轮换）",
+          "scope": "application"
+        },
+        "dualMind.models.vllm.level1.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "VLLM Level 1 Base URL（留空则使用 Provider 默认值）"
+        },
+        "dualMind.models.vllm.level1.contextWindow": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "VLLM Level 1 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
+        },
+        "dualMind.models.vllm.level2.provider": {
+          "type": "string",
+          "enum": [
+            "deepseek",
+            "openai",
+            "qwen",
+            "anthropic",
+            "ollama",
+            "custom-openai"
+          ],
+          "default": "",
+          "description": "VLLM 备选视觉模型（Level 2）的 Provider 类型"
+        },
+        "dualMind.models.vllm.level2.model": {
+          "type": "string",
+          "default": "",
+          "description": "VLLM Level 2 模型名称"
+        },
+        "dualMind.models.vllm.level2.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "VLLM Level 2 API Key",
+          "scope": "application"
+        },
+        "dualMind.models.vllm.level2.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "VLLM Level 2 备用 API Key 列表（429 时同级轮换）",
+          "scope": "application"
+        },
+        "dualMind.models.vllm.level2.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "VLLM Level 2 Base URL"
+        },
+        "dualMind.models.vllm.level2.contextWindow": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "VLLM Level 2 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
+        },
+        "dualMind.models.vllm.level3.provider": {
+          "type": "string",
+          "enum": [
+            "deepseek",
+            "openai",
+            "qwen",
+            "anthropic",
+            "ollama",
+            "custom-openai"
+          ],
+          "default": "",
+          "description": "VLLM 兜底视觉模型（Level 3）的 Provider 类型"
+        },
+        "dualMind.models.vllm.level3.model": {
+          "type": "string",
+          "default": "",
+          "description": "VLLM Level 3 模型名称"
+        },
+        "dualMind.models.vllm.level3.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "VLLM Level 3 API Key（Ollama 留空）",
+          "scope": "application"
+        },
+        "dualMind.models.vllm.level3.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "VLLM Level 3 备用 API Key 列表（429 时同级轮换）",
+          "scope": "application"
+        },
+        "dualMind.models.vllm.level3.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "VLLM Level 3 Base URL"
+        },
+        "dualMind.models.vllm.level3.contextWindow": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "VLLM Level 3 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
+        },
+        "dualMind.maxTurns": {
+          "type": "integer",
+          "default": 150,
+          "minimum": 25,
+          "maximum": 500,
+          "description": "Agent 单次任务的最大循环轮次（防死循环上限）。长重构/跨多文件编辑场景建议 150–300；简单问答场景 25–50 即可。rc.4 从 25 提升默认值至 150。"
+        },
+        "dualMind.logLevel": {
+          "type": "string",
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "日志级别"
+        },
+        "dualMind.codebaseIndex.embedProvider": {
+          "type": "string",
+          "enum": [
+            "local-bert",
+            "dashscope",
+            "bm25"
+          ],
+          "default": "local-bert",
+          "description": "Embedding 引擎：local-bert（默认，离线，Xenova/multilingual-e5-small，384 维）/ dashscope（需 API Key，text-embedding-v3，1024 维）/ bm25（零模型 lexical 保底，无需下载模型，冷启动 <1s，适合低配置机器 / CI / 隐私场景）。切换后会重建索引（向量库与 BM25 快照互不干扰）。"
+        },
+        "dualMind.codebaseIndex.embedModel": {
+          "type": "string",
+          "default": "text-embedding-v3",
+          "description": "DashScope provider 专用：代码库索引使用的 Embedding 模型名（共用 DashScope key）。local-bert provider 忽略该项。"
+        },
+        "dualMind.codebaseIndex.embedDimension": {
+          "type": "integer",
+          "default": 1024,
+          "minimum": 1,
+          "description": "Embedding 向量维度（text-embedding-v3 为 1024）"
+        },
+        "dualMind.codebaseIndex.embedBatchSize": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 25,
+          "description": "代码库索引单次调用 embedding 接口的批大小（DashScope text-embedding-v3 服务端 2026-Q1 起上限 10；若频繁遇到超时可降到 5 绕过 DashScope 慢路径）"
+        },
+        "dualMind.codebaseIndex.embedTimeoutMs": {
+          "type": "integer",
+          "default": 60000,
+          "minimum": 5000,
+          "maximum": 300000,
+          "description": "单次 embedding HTTP 请求超时时间（毫秒）。默认 60s；网络慢 / DashScope 冷启动频繁超时可调至 90000-120000"
+        },
+        "dualMind.webResearch.defaultProvider": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "tavily",
+            "bocha"
+          ],
+          "default": "auto",
+          "description": "联网搜索默认 Provider（auto=按查询语言选择：中文走博查，英文走 Tavily）"
+        },
+        "dualMind.webResearch.tavily.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Tavily API Key 列表（支持多个 Key 随机选择 + 自动 failover）\n\n[重新激活失效 Key](command:dualMind.reactivateSearchKeys)",
+          "scope": "application"
+        },
+        "dualMind.webResearch.bocha.apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "博查 API Key 列表（支持多个 Key 随机选择 + 自动 failover）\n\n[重新激活失效 Key](command:dualMind.reactivateSearchKeys)",
+          "scope": "application"
+        },
+        "dualMind.webResearch.bing.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Microsoft Bing Web Search API Key（备选 provider，W8.11）",
+          "scope": "application"
+        },
+        "dualMind.webResearch.duckduckgo.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 DuckDuckGo HTML 抓取兆底 provider（无需 API Key，W8.11）"
+        },
+        "dualMind.webResearch.useJinaReader": {
+          "type": "boolean",
+          "default": true,
+          "description": "fetch_content readable 模式是否走 Jina Reader 代理（https://r.jina.ai/<url>）"
+        },
+        "dualMind.webResearch.blocklist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "URL 域名黑名单（如 '*.internal.example.com'）"
+        },
+        "dualMind.webResearch.fetch.cacheTtlSec": {
+          "type": "number",
+          "default": 3600,
+          "minimum": 0,
+          "description": "fetch_content LRU 缓存 TTL（秒）；0 表示不过期（W8.10）"
+        },
+        "dualMind.webResearch.fetch.qps": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "fetch_content QPS 限流（令牌桶每秒补充令牌数）（W8.10）"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build:webview && npm run build:ext",
+    "build:ext": "node esbuild.mjs",
+    "build:webview": "npm --prefix webview-ui run build",
+    "watch": "node esbuild.mjs --watch",
+    "watch:webview": "npm --prefix webview-ui run dev",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit && npm --prefix webview-ui run type-check",
+    "download-model": "node scripts/download-model.mjs",
+    "package": "npm run download-model && npm run build && node scripts/vsce-package.mjs"
+  },
+  "workspaces": [
+    "webview-ui"
+  ],
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.28.0",
+    "pino-pretty": "^11.0.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.5.0"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "better-sqlite3": "^12.9.0",
+    "js-tiktoken": "^1.0.21",
+    "onnxruntime-node": "^1.25.1",
+    "partial-json": "^0.1.7",
+    "pino": "^9.0.0",
+    "sql.js": "^1.14.1",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.26.8"
+  }
+}

@@ -27,8 +27,5 @@ models/
 # Old logo preview page
 logo.html
 
-# DualMind runtime data (checkpoints, sessions, logs, sqlite)
-.dualmind/data/
-.dualmind/logs/
-.dualmind/tmp/
-.dualmind/audit/
+# DualMind runtime data — must NOT be in open-source repo
+.dualmind/

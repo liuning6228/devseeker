@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+        os: [ubuntu-latest]
+        include:
+          - os: windows-latest
+            node-version: 22
+          - os: macos-latest
+            node-version: 22
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check (extension)
+        run: npx tsc --noEmit
+
+      - name: Type check (webview)
+        run: npm --prefix webview-ui run type-check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Dependency audit
+        run: npm audit --omit=dev
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify VSIX packaging (not full package, just dry-run)
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22'
+        run: npx vsce ls 2>/dev/null || echo '[warn] vsce ls not available (expected in CI without publishing)'

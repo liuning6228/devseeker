@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- 头部 -->
+  <ellipse cx="12" cy="12" rx="8" ry="7" fill="#D4A040"/>
+
+  <!-- 左耳 -->
+  <path d="M6,8 L4,2 L9,6" fill="#C89030"/>
+
+  <!-- 右耳 -->
+  <path d="M18,8 L20,2 L15,6" fill="#C89030"/>
+
+  <!-- 白色嘴部 -->
+  <ellipse cx="12" cy="15" rx="4" ry="3" fill="#F5E8D0"/>
+
+  <!-- 眉斑 -->
+  <ellipse cx="9" cy="9" rx="2.5" ry="1.2" fill="#E8C56E" opacity="0.5"/>
+  <ellipse cx="15" cy="9" rx="2.5" ry="1.2" fill="#E8C56E" opacity="0.5"/>
+
+  <!-- 左眼 -->
+  <ellipse cx="9" cy="11" rx="2" ry="2.2" fill="#2A1A0A"/>
+  <circle cx="9.8" cy="10.2" r="0.5" fill="white"/>
+
+  <!-- 右眼 -->
+  <ellipse cx="15" cy="11" rx="2" ry="2.2" fill="#2A1A0A"/>
+  <circle cx="15.8" cy="10.2" r="0.5" fill="white"/>
+
+  <!-- 鼻子 -->
+  <ellipse cx="12" cy="14" rx="1.5" ry="1" fill="#2A1A0A"/>
+
+  <!-- 嘴巴 -->
+  <path d="M10.5,16 Q12,17.5 13.5,16" fill="none" stroke="#6B4226" stroke-width="0.8" stroke-linecap="round"/>
+</svg>
