@@ -146,6 +146,7 @@ describe('CodebaseIndex incremental', () => {
       db,
       storePath,
     });
+    idxArr.push(index2);
     const hits = await index2.search('bbb', 5);
     expect(hits.length).toBeGreaterThan(0);
   });
