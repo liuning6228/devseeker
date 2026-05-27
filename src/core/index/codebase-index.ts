@@ -120,6 +120,14 @@ export class CodebaseIndex implements CodebaseIndexLike {
     this.indexDb = indexDb;
   }
 
+  /** 关闭索引专用的 SQLite 连接，释放底层文件锁（Windows 上删除前必须先调用）。 */
+  dispose(): void {
+    if (this.indexDb) {
+      this.indexDb.close();
+      this.indexDb = undefined;
+    }
+  }
+
   /**
    * 工厂：打开索引专用 SQLite 库，从其中加载向量索引。
    * 若索引库中无数据则尝试从旧 JSON 迁移。
