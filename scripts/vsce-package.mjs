@@ -73,32 +73,41 @@ function collectFilesToStash(target) {
   );
 
   // 2. 非目标平台的 onnxruntime-node 原生二进制（根 node_modules）
-  const rootOnnxBase = join(ROOT, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
-  const dirsToRemove = platformDirsToRemove(target);
-  for (const dir of dirsToRemove) {
-    const platformDir = join(rootOnnxBase, dir);
-    if (existsSync(platformDir)) {
-      for (const entry of readdirSync(platformDir)) {
-        const f = join(platformDir, entry);
-        if (statSync(f).isFile()) {
-          files.push(`node_modules/onnxruntime-node/bin/napi-v6/${dir}/${entry}`);
-        }
-      }
-    }
-  }
+  collectOnnxBinaries(files, join(ROOT, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6'), target, 'node_modules/onnxruntime-node');
 
   // 3. @huggingface/transformers 嵌套的 onnxruntime-node 非目标平台二进制
-  const nestedOnnxBase = join(ROOT, 'node_modules', '@huggingface', 'transformers', 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
-  for (const dir of dirsToRemove) {
-    const platformDir = join(nestedOnnxBase, dir);
-    if (existsSync(platformDir)) {
-      for (const f of readdirSync(platformDir)) {
-        files.push(`node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/${dir}/${f}`);
-      }
-    }
-  }
+  collectOnnxBinaries(
+    files,
+    join(ROOT, 'node_modules', '@huggingface', 'transformers', 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6'),
+    target,
+    'node_modules/@huggingface/transformers/node_modules/onnxruntime-node',
+  );
 
   return files;
+}
+
+/** 收集 onnxruntime-node 中非目标平台的所有文件（递归，支持目录+文件混合结构） */
+function collectOnnxBinaries(files, baseDir, target, prefix) {
+  const dirsToRemove = platformDirsToRemove(target);
+  for (const dir of dirsToRemove) {
+    const platformDir = join(baseDir, dir);
+    if (existsSync(platformDir)) {
+      collectAllFiles(platformDir, files, `${prefix}/bin/napi-v6/${dir}`);
+    }
+  }
+}
+
+/** 递归收集某个目录下的所有文件 */
+function collectAllFiles(dir, files, prefix) {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const rel = `${prefix}/${entry}`;
+    if (statSync(full).isDirectory()) {
+      collectAllFiles(full, files, rel);
+    } else {
+      files.push(rel);
+    }
+  }
 }
 
 function stashFiles(target) {
