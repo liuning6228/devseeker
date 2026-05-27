@@ -72,9 +72,23 @@ function collectFilesToStash(target) {
     'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jspi.mjs',
   );
 
-  // 2. @huggingface/transformers 嵌套的 onnxruntime-node 非目标平台二进制
-  const nestedOnnxBase = join(ROOT, 'node_modules', '@huggingface', 'transformers', 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
+  // 2. 非目标平台的 onnxruntime-node 原生二进制（根 node_modules）
+  const rootOnnxBase = join(ROOT, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
   const dirsToRemove = platformDirsToRemove(target);
+  for (const dir of dirsToRemove) {
+    const platformDir = join(rootOnnxBase, dir);
+    if (existsSync(platformDir)) {
+      for (const entry of readdirSync(platformDir)) {
+        const f = join(platformDir, entry);
+        if (statSync(f).isFile()) {
+          files.push(`node_modules/onnxruntime-node/bin/napi-v6/${dir}/${entry}`);
+        }
+      }
+    }
+  }
+
+  // 3. @huggingface/transformers 嵌套的 onnxruntime-node 非目标平台二进制
+  const nestedOnnxBase = join(ROOT, 'node_modules', '@huggingface', 'transformers', 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
   for (const dir of dirsToRemove) {
     const platformDir = join(nestedOnnxBase, dir);
     if (existsSync(platformDir)) {
