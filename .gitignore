@@ -29,3 +29,6 @@ logo.html
 
 # DualMind runtime data — must NOT be in open-source repo
 .dualmind/
+
+# DevSeeker runtime data
+.devseeker/
