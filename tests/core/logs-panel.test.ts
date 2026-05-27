@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -160,7 +160,7 @@ describe('logs-panel · collectLogPanelInput', () => {
 
   beforeEach(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'logs-panel-test-'));
-    logsDir = path.join(tmp, '.dualmind', 'logs');
+    logsDir = path.join(tmp, '.devseeker', 'logs');
     await fs.mkdir(logsDir, { recursive: true });
   });
 
@@ -242,8 +242,8 @@ describe('logs-panel · buildLogsPanelHtml', () => {
     const html = buildLogsPanelHtml(
       {
         workspaceRoot: '/ws',
-        runtimePath: '/ws/.dualmind/logs/runtime.log',
-        errorPath: '/ws/.dualmind/logs/error.log',
+        runtimePath: '/ws/.devseeker/logs/runtime.log',
+        errorPath: '/ws/.devseeker/logs/error.log',
         runtimeExists: true,
         errorExists: false,
         entries: [],
@@ -263,7 +263,7 @@ describe('logs-panel · buildLogsPanelHtml', () => {
     expect(html).toContain('no log entries');
     expect(html).toContain("Content-Security-Policy");
     expect(html).toContain('nonce-xyz');
-    expect(html).toContain('DualMind · Logs');
+    expect(html).toContain('DevSeeker · Logs');
   });
 
   it('非空 entries → 渲染表格 + 行', () => {
@@ -292,8 +292,8 @@ describe('logs-panel · buildLogsPanelHtml', () => {
     const html = buildLogsPanelHtml(
       {
         workspaceRoot: '/ws',
-        runtimePath: '/ws/.dualmind/logs/runtime.log',
-        errorPath: '/ws/.dualmind/logs/error.log',
+        runtimePath: '/ws/.devseeker/logs/runtime.log',
+        errorPath: '/ws/.devseeker/logs/error.log',
         runtimeExists: true,
         errorExists: true,
         entries,

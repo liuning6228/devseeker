@@ -34,7 +34,7 @@ export interface MessageItemProps {
 
 const ROLE_LABEL: Record<UiMessage['role'], string> = {
   user: 'You',
-  assistant: 'DualMind',
+  assistant: 'DevSeeker',
   tool: 'Tool',
   system: 'System',
 };

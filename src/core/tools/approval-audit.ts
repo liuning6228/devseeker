@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -11,7 +11,7 @@
  * 所有工具调用经过 decideApproval 后，将决策结果记录到审计日志。
  *
  * 存储格式：JSON Lines（.jsonl）
- * 路径：<workspaceRoot>/.dualmind/audit/approval.jsonl
+ * 路径：<workspaceRoot>/.devseeker/audit/approval.jsonl
  *
  * 单条格式：
  * ```jsonl
@@ -52,14 +52,14 @@ export interface ApprovalAuditSink {
 }
 
 /**
- * 默认实现：追加写 <workspaceRoot>/.dualmind/audit/approval.jsonl
+ * 默认实现：追加写 <workspaceRoot>/.devseeker/audit/approval.jsonl
  */
 export class FileApprovalAuditSink implements ApprovalAuditSink {
   private readonly dir: string;
   private readonly file: string;
 
   constructor(workspaceRoot: string) {
-    this.dir = path.join(workspaceRoot, '.dualmind', 'audit');
+    this.dir = path.join(workspaceRoot, '.devseeker', 'audit');
     this.file = path.join(this.dir, 'approval.jsonl');
   }
 

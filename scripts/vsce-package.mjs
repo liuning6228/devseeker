@@ -130,7 +130,7 @@ const generated = [];
 
 try {
   for (const target of TARGETS) {
-    const vsixName = `dualmind-${version}-${target.name}.vsix`;
+    const vsixName = `devseeker-${version}-${target.name}.vsix`;
     const vsixPath = join(ROOT, vsixName);
     if (existsSync(vsixPath)) rmSync(vsixPath);
 

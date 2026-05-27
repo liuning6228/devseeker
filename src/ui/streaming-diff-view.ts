@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -10,8 +10,8 @@
  * P0-7 v3: 虚拟 URI + 临时文件 + WorkspaceEdit
  *
  * 架构：
- * - 左侧：虚拟 URI（dualmind-diff:filename?base64(originalContent)），由 TextDocumentContentProvider 提供
- * - 右侧：临时文件（workspaceRoot/.dualmind/tmp/filename.tmp），用 WorkspaceEdit 修改
+ * - 左侧：虚拟 URI（devseeker-diff:filename?base64(originalContent)），由 TextDocumentContentProvider 提供
+ * - 右侧：临时文件（workspaceRoot/.devseeker/tmp/filename.tmp），用 WorkspaceEdit 修改
  *
  * 为什么要用临时文件而不是目标文件：
  * - StreamingFileWriter 同时在用 fs.writeFile 写目标文件
@@ -35,13 +35,13 @@ const log = getLogger('streaming-diff-view');
 // ─────────── 虚拟 URI scheme ───────────
 
 /** Diff 编辑器左侧原始内容使用的 URI scheme */
-export const DIFF_VIEW_URI_SCHEME = 'dualmind-diff';
+export const DIFF_VIEW_URI_SCHEME = 'devseeker-diff';
 
 /** Diff 编辑器标签页标题后缀 */
-const DIFF_VIEW_LABEL_CHANGES = "Original ↔ DualMind's Changes";
+const DIFF_VIEW_LABEL_CHANGES = "Original ↔ DevSeeker's Changes";
 
 /** 临时文件目录名 */
-const TMP_DIR_NAME = '.dualmind';
+const TMP_DIR_NAME = '.devseeker';
 
 // ─────────── 装饰类型 ───────────
 
@@ -175,8 +175,8 @@ export class StreamingDiffViewProvider implements vscode.Disposable {
 
   /**
    * 打开 Diff 编辑器。
-   * 左侧：虚拟 URI（dualmind-diff:filename?base64(originalContent)）
-   * 右侧：临时文件（.dualmind/tmp/filename.diff.tmp）
+   * 左侧：虚拟 URI（devseeker-diff:filename?base64(originalContent)）
+   * 右侧：临时文件（.devseeker/tmp/filename.diff.tmp）
    */
   private async openDiffEditor(): Promise<vscode.TextEditor> {
     if (!this.tempFileUri) throw new Error('tempFileUri not set');
@@ -432,7 +432,7 @@ export class StreamingDiffViewProvider implements vscode.Disposable {
     }
   }
 
-  /** 关闭所有 dualmind-diff 的 Diff 编辑器 tab（包括 dirty 的） */
+  /** 关闭所有 devseeker-diff 的 Diff 编辑器 tab（包括 dirty 的） */
   private async closeAllDiffViews(): Promise<void> {
     // 先清理装饰，避免在编辑器关闭后还尝试操作
     this.clearDecorations();

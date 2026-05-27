@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -14,7 +14,7 @@
  * - prune(sessionId, max) 按时间升序裁剪（超上限者连同文件引用一起清）
  *
  * 文件布局：
- *   <workspaceRoot>/.dualmind/checkpoints/
+ *   <workspaceRoot>/.devseeker/checkpoints/
  *     files/<sha256>                      # 全局内容池（跨 session 去重）
  *     <sessionId>/
  *       index.json                        # CheckpointMeta[]
@@ -45,7 +45,7 @@ import { DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_PER_SESSION } from './types.js';
 
 const log = getLogger('checkpoint.store');
 
-const ROOT_DIR = '.dualmind/checkpoints';
+const ROOT_DIR = '.devseeker/checkpoints';
 const FILES_DIR = 'files';
 const INDEX_FILE = 'index.json';
 

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,7 +7,7 @@
 /**
  * JSONL → .md 迁移脚本（Phase 5 Phase C Step 10）
  *
- * 启动时检测 `memories.jsonl` 存在且 `.dualmind/memories/` 不存在时触发。
+ * 启动时检测 `memories.jsonl` 存在且 `.devseeker/memories/` 不存在时触发。
  * 逐条读取 → 按 category 分写 `.md` 文件（§ 分隔）+ `.index/bm25.json` + `.index/vectors.arr`。
  * 迁移完成写 `# migrated at ...` 标记，永不二次迁移。
  *

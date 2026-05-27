@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,7 +7,7 @@
 /**
  * B-1.0.1-A · 打开工作区自动后台索引
  *
- * 目标：用户打开 VS Code 进入一个项目工作区时，DualMind 扩展激活后在后台
+ * 目标：用户打开 VS Code 进入一个项目工作区时，DevSeeker 扩展激活后在后台
  * 悄悄建立代码库索引，避免「代码库未索引」黄条常驻。
  *
  * 设计要点：
@@ -16,7 +16,7 @@
  *    录不触发。
  *  - 激活后延迟 3s 执行，避开冷启动与其他 activate 任务争抢 CPU。
  *  - 24h 内只触发一次（workspaceState 持久化时间戳）；后续打开直接加载已
- *    持久化的 `.dualmind/codebase-index.json`。
+ *    持久化的 `.devseeker/codebase-index.json`。
  *  - 如果 `CodebaseIndex.create` loadFromFile 到非空数据（`size() > 0`），说
  *    明已有现成索引，直接更新 marker、跳过 reindex。
  *  - API Key 缺失 / embedder 构造失败 / reindex 失败：只打 log，不弹 UI，
@@ -65,7 +65,7 @@ export const PROJECT_MARKER_FILES: readonly string[] = [
 export const AUTO_INDEX_DELAY_MS = 3_000;
 
 /** workspaceState 中保存「上次自动索引时间戳」的 key。 */
-export const AUTO_INDEX_MARKER_KEY = 'dualMind.autoIndex.lastRun';
+export const AUTO_INDEX_MARKER_KEY = 'devSeeker.autoIndex.lastRun';
 
 /** 同一工作区多久之内不重跑自动索引（ms）。 */
 export const AUTO_INDEX_RERUN_MS = 24 * 60 * 60 * 1000;
@@ -164,7 +164,7 @@ export async function maybeAutoReindex(deps: AutoIndexerDeps): Promise<AutoIndex
   const useDefaultEmbedder = deps.buildEmbedder === undefined;
   const buildEmbedder =
     deps.buildEmbedder ?? ((cfg) => defaultBuildEmbedder(cfg, context.extensionPath));
-  const config = vscode.workspace.getConfiguration('dualMind');
+  const config = vscode.workspace.getConfiguration('devSeeker');
   const provider = (
     config.get<string>('codebaseIndex.embedProvider', 'local-bert') || 'local-bert'
   ).trim();
@@ -334,7 +334,7 @@ async function runAutoReindex(params: {
  *
  * 与 `runAutoReindex` 对称但绕过 embedder：
  *   - 直接创建 `Bm25CodebaseIndex`（通过 `createBm25Index` DI，可注入）
- *   - 落盘到 `<workspaceRoot>/.dualmind/bm25-index.json`（与向量库分家）
+ *   - 落盘到 `<workspaceRoot>/.devseeker/bm25-index.json`（与向量库分家）
  *   - 其它分支（已有数据跳过 / 0 文件诊断 / 失败软降级）逻辑与向量路径一致
  */
 async function runBm25AutoReindex(params: {

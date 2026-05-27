@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -58,7 +58,7 @@ function ctx(signal?: AbortSignal) {
 
 beforeEach(async () => {
   tmpRoot = await fs.mkdtemp(join(os.tmpdir(), 'sct-'));
-  storePath = join(tmpRoot, '.dualmind', 'index.json');
+  storePath = join(tmpRoot, '.devseeker', 'index.json');
   try {
     db = await openSqliteDatabase({ dbPath: join(tmpRoot, 'test.sqlite') });
   } catch {

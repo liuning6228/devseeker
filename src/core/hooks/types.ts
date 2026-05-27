@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,7 +7,7 @@
 /**
  * Hooks 子系统类型定义（W5 批次 1）
  *
- * 设计参考 Claude Code hooks：用户在 .dualmind/hooks.json 中声明式订阅生命周期事件，
+ * 设计参考 Claude Code hooks：用户在 .devseeker/hooks.json 中声明式订阅生命周期事件，
  * 事件触发时执行 shell 命令（stdin 传入 JSON payload）。
  * pre_* 事件可通过命令非零退出码 deny（阻断后续执行）。
  */

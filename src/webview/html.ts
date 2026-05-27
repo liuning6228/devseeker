@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -61,7 +61,7 @@ export function getWebviewHtml(
     connect-src 'none';
   " />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>DualMind</title>
+  <title>DevSeeker</title>
   <link rel="stylesheet" href="${cssUrl}" />
 </head>
 <body>

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -83,7 +83,7 @@ describe('CheckpointCoordinator.onToolExec', () => {
     // 读取池内容应为 "original"（任务前状态）
     const poolPath = path.join(
       tmpRoot,
-      '.dualmind/checkpoints/files',
+      '.devseeker/checkpoints/files',
       cp!.fileSnapshots[0].contentHash,
     );
     expect(await fs.readFile(poolPath, 'utf-8')).toBe('original');
@@ -144,7 +144,7 @@ describe('CheckpointCoordinator.onToolExec', () => {
     expect(cp!.fileSnapshots).toHaveLength(1);
     const poolPath = path.join(
       tmpRoot,
-      '.dualmind/checkpoints/files',
+      '.devseeker/checkpoints/files',
       cp!.fileSnapshots[0].contentHash,
     );
     expect(await fs.readFile(poolPath, 'utf-8')).toBe('v1');

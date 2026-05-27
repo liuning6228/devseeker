@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -30,7 +30,7 @@ function emptyByEvent(): Record<HookEvent, number> {
 function makeInput(overrides: Partial<HooksPanelInput> = {}): HooksPanelInput {
   const base: HooksPanelInput = {
     workspaceRoot: '/ws',
-    configPath: '/ws/.dualmind/hooks.json',
+    configPath: '/ws/.devseeker/hooks.json',
     configExists: true,
     parseError: undefined,
     hooks: [],
@@ -214,7 +214,7 @@ describe('collectHooksPanelInput', () => {
     const input = await collectHooksPanelInput({
       workspaceRoot: '/not/exist/xyz123',
     });
-    expect(input.configPath).toBe('/not/exist/xyz123/.dualmind/hooks.json'.replace(/\//g, require('path').sep));
+    expect(input.configPath).toBe('/not/exist/xyz123/.devseeker/hooks.json'.replace(/\//g, require('path').sep));
     expect(input.configExists).toBe(false);
     expect(input.hooks).toEqual([]);
   });

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -291,7 +291,7 @@ export class CodebaseIndex implements CodebaseIndexLike {
     if (this.store.size() === 0) {
       throw new AgentError({
         code: ErrorCodes.INDEX_NOT_READY,
-        message: '代码库尚未建立索引，请先运行 DualMind: Reindex Codebase',
+        message: '代码库尚未建立索引，请先运行 DevSeeker: Reindex Codebase',
       });
     }
     const trimmed = query.trim();
@@ -417,7 +417,7 @@ function truncateForEmbedding(s: string): string {
 
 /** 导出默认索引文件相对路径（供 panel / extension 使用） */
 export function defaultIndexStorePath(workspaceRoot: string): string {
-  return joinPath(workspaceRoot, '.dualmind', 'codebase-index.json');
+  return joinPath(workspaceRoot, '.devseeker', 'codebase-index.json');
 }
 
 // ─────────── §8.15.2 · 编辑后符号引用验证 ───────────

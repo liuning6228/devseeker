@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -28,7 +28,7 @@ export interface InlineEditRecord {
 }
 
 /** memento 中存储的 key */
-const STORAGE_KEY = 'dualMind.inlineEditHistory.v1';
+const STORAGE_KEY = 'devSeeker.inlineEditHistory.v1';
 /** 最大保留条数 */
 const MAX_RECORDS = 50;
 

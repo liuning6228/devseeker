@@ -56,8 +56,8 @@ export function WelcomeView({ onTaskSelect, recentSessions, onSessionSelect, onB
     <div className={cn('flex flex-col gap-6 p-6', className)}>
       {/* 品牌区域 */}
       <div className="text-center py-6 relative">
-        <img src={logoSvg} alt="DualMind" className="w-24 h-24 mx-auto mb-4" />
-        <h1 className="text-2xl font-bold text-vscode-fg">DualMind</h1>
+        <img src={logoSvg} alt="DevSeeker" className="w-24 h-24 mx-auto mb-4" />
+        <h1 className="text-2xl font-bold text-vscode-fg">DevSeeker</h1>
         <p className="text-sm text-vscode-fg/60 mt-2">
           技术 leader 型 AI 编码助手
         </p>

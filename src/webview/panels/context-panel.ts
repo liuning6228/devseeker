@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -229,7 +229,7 @@ export function buildContextPanelHtml(
 ): string {
   const body = renderBody(input);
   return renderBaseHtml({
-    title: 'DualMind · Context',
+    title: 'DevSeeker · Context',
     nonce,
     cspSource,
     body,
@@ -241,7 +241,7 @@ export function buildContextPanelHtml(
 function renderBody(input: ContextPanelInput): string {
   const generatedAt = new Date(input.generatedAt).toLocaleString();
   return `
-<h1>DualMind · Context <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(generatedAt)}</span></h1>
+<h1>DevSeeker · Context <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(generatedAt)}</span></h1>
 
 <div class="hdr">
   <div><strong>Mode:</strong> <span class="pill">${escapeHtml(input.mode)}</span></div>
@@ -390,8 +390,8 @@ export async function openContextPanel(
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
   const panel = vscode.window.createWebviewPanel(
-    'dualMind.contextPanel',
-    'DualMind · Context',
+    'devSeeker.contextPanel',
+    'DevSeeker · Context',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,

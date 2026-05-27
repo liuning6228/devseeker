@@ -16,11 +16,10 @@ const common = {
   minify: isProd,
   logLevel: 'info',
   // vscode 必须 external（由宿主提供）
-  // pino-pretty 只在开发模式使用，生产模式不捆绑避免巨大的依赖树
-  // sql.js 是 WASM SQLite（零原生依赖，替代 better-sqlite3）
-  // @huggingface/transformers v4：含动态 import + WASM 文件 + ONNX 模型资源，esbuild bundle 后资源路径解析失败
-  // onnxruntime-web：含 WASM 文件，需运行时加载
-  external: ['vscode', 'pino-pretty', 'sql.js', 'better-sqlite3', '@huggingface/transformers', 'onnxruntime-web', 'onnxruntime-node'],
+  // pino-pretty 只在开发模式使用，生产模式不捆绑
+  // @huggingface/transformers：含动态 import + WASM + ONNX .node 二进制，无法 bundle
+  // onnxruntime-node/web：含原生 .node 二进制和 WASM
+  external: ['vscode', 'pino-pretty', '@huggingface/transformers', 'onnxruntime-web', 'onnxruntime-node'],
 };
 
 const extensionConfig = {

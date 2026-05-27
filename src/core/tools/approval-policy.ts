@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -63,9 +63,9 @@ export interface ApprovalContext {
   hasRisk?: boolean;
   /** 仅终端类工具传入：原始 command，用于 classifyCommand */
   command?: string;
-  /** 可选覆写表（从 .dualmind/approval-policy.yaml defaults 读入） */
+  /** 可选覆写表（从 .devseeker/approval-policy.yaml defaults 读入） */
   policy?: Partial<ApprovalPolicyTable>;
-  /** 可选工具级覆写（从 .dualmind/approval-policy.yaml overrides 读入） */
+  /** 可选工具级覆写（从 .devseeker/approval-policy.yaml overrides 读入） */
   overrides?: ToolOverride[];
   /** 工具名（用于匹配 overrides） */
   toolName?: string;

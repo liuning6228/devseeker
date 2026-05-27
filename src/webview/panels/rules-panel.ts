@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -134,7 +134,7 @@ export function buildRulesPanelHtml(
   cspSource: string,
 ): string {
   return renderBaseHtml({
-    title: 'DualMind · Rules',
+    title: 'DevSeeker · Rules',
     nonce,
     cspSource,
     style: STYLE,
@@ -147,7 +147,7 @@ function renderBody(input: RulesPanelInput): string {
   const ts = new Date(input.generatedAt).toLocaleString();
   const { counts } = input;
   return `
-<h1>DualMind · Rules <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(ts)}</span>
+<h1>DevSeeker · Rules <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(ts)}</span>
   <span style="float:right;">
     <button data-action="refresh">Reload</button>
   </span>
@@ -182,8 +182,8 @@ function renderRules(rules: readonly RulesPanelRule[]): string {
   if (rules.length === 0) {
     return `<section><h2>Rules (0)</h2>
       <div class="empty-note">
-        No rules loaded. Drop .md/.mdx files under <code>~/.dualmind/rules/</code>
-        or <code>&lt;workspace&gt;/.dualmind/rules/</code> with YAML frontmatter
+        No rules loaded. Drop .md/.mdx files under <code>~/.devseeker/rules/</code>
+        or <code>&lt;workspace&gt;/.devseeker/rules/</code> with YAML frontmatter
         (name, kind, description, glob, priority).
       </div>
     </section>`;
@@ -241,8 +241,8 @@ function renderErrors(errors: readonly { file: string; message: string }[]): str
 export async function openRulesPanel(context: vscode.ExtensionContext): Promise<vscode.WebviewPanel> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const panel = vscode.window.createWebviewPanel(
-    'dualMind.rulesPanel',
-    'DualMind · Rules',
+    'devSeeker.rulesPanel',
+    'DevSeeker · Rules',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,

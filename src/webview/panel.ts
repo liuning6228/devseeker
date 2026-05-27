@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -184,14 +184,14 @@ import { InlineEditHistory } from '../core/inline-edit/history.js';
 
 const log = getLogger('webview.panel');
 
-const VIEW_TYPE = 'dualMind.chat';
-const PREFERRED_PROVIDER_KEY = 'dualMind.preferredProvider.v1';
+const VIEW_TYPE = 'devSeeker.chat';
+const PREFERRED_PROVIDER_KEY = 'devSeeker.preferredProvider.v1';
 // W7d3 · 记录上次 reindex 扫到的文件数（用于黄条识别"空工作区"）
-const LAST_REINDEX_FILES_SCANNED_KEY = 'dualMind.index.lastFilesScanned.v1';
+const LAST_REINDEX_FILES_SCANNED_KEY = 'devSeeker.index.lastFilesScanned.v1';
 // W7e4 · todo 列表持久化（workspaceState 天然绑定工作区，切换自动隔离）
-const TODO_LIST_KEY = 'dualMind.todoList.v1';
+const TODO_LIST_KEY = 'devSeeker.todoList.v1';
 // B-P1-13 · M10.1 首轮标记：workspace_tree 仅在会话首轮注入，避免循环占用 token。
-const HAS_EMITTED_WORKSPACE_TREE_KEY = 'dualMind.hasEmittedWorkspaceTree.v1';
+const HAS_EMITTED_WORKSPACE_TREE_KEY = 'devSeeker.hasEmittedWorkspaceTree.v1';
 
 // W3.6 · DEFAULT_SYSTEM_PROMPT 已迁移到 src/core/prompts/layers/identity.ts（L0 层）
 // 原地拼接逻辑由 PromptBuilder 负责，下方 buildSystemPrompt() 仅做数据采集。
@@ -329,7 +329,7 @@ export class DualMindChatPanel {
       return;
     }
 
-    const panel = vscode.window.createWebviewPanel(VIEW_TYPE, 'DualMind', column, {
+    const panel = vscode.window.createWebviewPanel(VIEW_TYPE, 'DevSeeker', column, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'out', 'webview')],
@@ -361,7 +361,7 @@ export class DualMindChatPanel {
         getIndex: () => this.codebaseIndex,
       }),
     );
-    // W14.2 · search_knowledge 工具：懒加载私有知识库（.dualmind/knowledge/**/*.md）
+    // W14.2 · search_knowledge 工具：懒加载私有知识库（.devseeker/knowledge/**/*.md）
     this.toolRegistry.register(
       new SearchKnowledgeTool({
         getIndex: () => this.getKnowledgeIndex(),
@@ -398,7 +398,7 @@ export class DualMindChatPanel {
     // 项目技能工具：懒获取 loader
     const getSkillLoader = () => this.getSkillLoader();
     this.toolRegistry.register(new SkillTool({ getLoader: getSkillLoader, dedup: this.skillDedup }));
-    // W14.3 · create_skill：把对话沉淀为 .dualmind/skills/<slug>/SKILL.md
+    // W14.3 · create_skill：把对话沉淀为 .devseeker/skills/<slug>/SKILL.md
     this.toolRegistry.register(
       new CreateSkillTool({
         getWorkspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
@@ -408,7 +408,7 @@ export class DualMindChatPanel {
         },
       }),
     );
-    // W14.4 · create_agent：把对话沉淀为 .dualmind/agents/<slug>/AGENT.md
+    // W14.4 · create_agent：把对话沉淀为 .devseeker/agents/<slug>/AGENT.md
     this.toolRegistry.register(
       new CreateAgentTool({
         getWorkspaceRoot: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
@@ -506,7 +506,7 @@ export class DualMindChatPanel {
     );
 
     // Provider Registry 初始化
-    const config = vscode.workspace.getConfiguration('dualMind');
+    const config = vscode.workspace.getConfiguration('devSeeker');
     const registry = getProviderRegistry();
     registry.initFromConfig(config);
 
@@ -542,10 +542,10 @@ export class DualMindChatPanel {
     let configDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     vscode.workspace.onDidChangeConfiguration(
       (e) => {
-        if (!e.affectsConfiguration('dualMind')) return;
+        if (!e.affectsConfiguration('devSeeker')) return;
         if (configDebounceTimer) clearTimeout(configDebounceTimer);
         configDebounceTimer = setTimeout(() => {
-          const cfg = vscode.workspace.getConfiguration('dualMind');
+          const cfg = vscode.workspace.getConfiguration('devSeeker');
           const reg = getProviderRegistry();
           reg.initFromConfig(cfg);
           this.router.update({
@@ -654,7 +654,7 @@ export class DualMindChatPanel {
         payload: {
           ok: false,
           errorMessage:
-            '未配置任何 Provider。请在 VSCode 设置中填入 dualMind.models.llm.level1.apiKey',
+            '未配置任何 Provider。请在 VSCode 设置中填入 devSeeker.models.llm.level1.apiKey',
           availableProviders: [],
           groupedProviders: { llm: [], vllm: [] },
           preferredProvider: preferred,
@@ -697,7 +697,7 @@ export class DualMindChatPanel {
 
   /** 读取当前 VS Code 配置并推送给 Webview */
   private pushModelConfig(): void {
-    const config = vscode.workspace.getConfiguration('dualMind');
+    const config = vscode.workspace.getConfiguration('devSeeker');
     const registry = getProviderRegistry();
     const modelsConfig = registry.readModelsConfigPublic(config);
 
@@ -750,7 +750,7 @@ export class DualMindChatPanel {
     field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'apiKeys',
     value: string | string[],
   ): void {
-    const config = vscode.workspace.getConfiguration('dualMind');
+    const config = vscode.workspace.getConfiguration('devSeeker');
     const key = `models.${track}.level${level}.${field}`;
     log.info({ track, level, field, valueType: typeof value }, 'Updating model config');
 
@@ -904,7 +904,7 @@ export class DualMindChatPanel {
 
       case 'reindex':
         // W7c2 · 黄条"立即建索引"按钮 → 转到统一命令入口（与命令面板一致）
-        void vscode.commands.executeCommand('dualMind.reindex');
+        void vscode.commands.executeCommand('devSeeker.reindex');
         break;
 
       case 'load_session':
@@ -1205,7 +1205,7 @@ export class DualMindChatPanel {
 
   /** 记忆管理 */
   private handleOpenMemory(): void {
-    void vscode.commands.executeCommand('dualMind.openMemory');
+    void vscode.commands.executeCommand('devSeeker.openMemory');
   }
 
   /** 导出当前会话 */
@@ -1214,7 +1214,7 @@ export class DualMindChatPanel {
       void vscode.window.showInformationMessage('当前无活跃会话可导出。');
       return;
     }
-    void vscode.commands.executeCommand('dualMind.session.export');
+    void vscode.commands.executeCommand('devSeeker.session.export');
   }
 
   /** 检查更新 */
@@ -1225,7 +1225,7 @@ export class DualMindChatPanel {
   /** 关于 */
   private handleAbout(): void {
     void vscode.window.showInformationMessage(
-      `DualMind v${this.context.extension?.packageJSON?.version ?? '?'}\n` +
+      `DevSeeker v${this.context.extension?.packageJSON?.version ?? '?'}\n` +
       '技术 leader 型 AI 编码助手 · 双模型智能路由 · 自主 Agent',
     );
   }
@@ -1271,7 +1271,7 @@ export class DualMindChatPanel {
           reason: 'error',
           errorCode: ErrorCodes.PROVIDER_AUTH_INVALID_API_KEY,
           errorMessage:
-            '未配置任何 Provider API Key。请在 VSCode 设置中搜索 "dualMind" 并填入任一 Provider 的 apiKey。',
+            '未配置任何 Provider API Key。请在 VSCode 设置中搜索 "devSeeker" 并填入任一 Provider 的 apiKey。',
         },
       });
       return;
@@ -1518,8 +1518,8 @@ export class DualMindChatPanel {
     coordinator?.beginTurn();
 
     // rc.4 · Bug-C：从 VS Code Settings 读取最大轮次（默认 150）
-    // 用户可在 File → Preferences → Settings → DualMind → Max Turns 覆盖。
-    const cfg = vscode.workspace.getConfiguration('dualMind');
+    // 用户可在 File → Preferences → Settings → DevSeeker → Max Turns 覆盖。
+    const cfg = vscode.workspace.getConfiguration('devSeeker');
     const maxTurns = cfg.get<number>('maxTurns', 150);
 
     // 审计日志 sink（v1.8.0）
@@ -1616,7 +1616,7 @@ export class DualMindChatPanel {
                   toolArgs: event.args,
                 })
                 .then((cp) => {
-                  if (cp) void vscode.commands.executeCommand('dualMind.checkpoints.refresh');
+                  if (cp) void vscode.commands.executeCommand('devSeeker.checkpoints.refresh');
                   return cp?.id;
                 });
             }
@@ -2025,12 +2025,12 @@ export class DualMindChatPanel {
         // ── User-visible notification for terminal errors ──
         if (terminalReason === 'billing') {
           void vscode.window.showWarningMessage(
-            `DualMind: 当前 API（${provider.id}）余额不足（Insufficient Balance），任务已终止。` +
-            `请充值或修改 dualMind.models.llm.level1.apiKey 后重试。`,
+            `DevSeeker: 当前 API（${provider.id}）余额不足（Insufficient Balance），任务已终止。` +
+            `请充值或修改 devSeeker.models.llm.level1.apiKey 后重试。`,
           );
         } else if (terminalReason === 'context_overflow') {
           void vscode.window.showWarningMessage(
-            `DualMind: 消息历史过长，已被截断拦截以防止上下文溢出。` +
+            `DevSeeker: 消息历史过长，已被截断拦截以防止上下文溢出。` +
             `请点击清除对话或新建会话后重试。`,
           );
         }
@@ -2051,7 +2051,7 @@ export class DualMindChatPanel {
           });
           log.info('runWithProvider finally: checkpoint finalized');
           // 通知 Checkpoints 侧边栏刷新（W5b3）
-          void vscode.commands.executeCommand('dualMind.checkpoints.refresh');
+          void vscode.commands.executeCommand('devSeeker.checkpoints.refresh');
         }
         log.info('runWithProvider finally: done');
       }
@@ -2156,7 +2156,7 @@ export class DualMindChatPanel {
   private getRuleLoader(): RuleLoader | undefined {
     if (this.ruleLoader) return this.ruleLoader;
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    // 即使没打开工作区，也允许加载 global 规则（~/.dualmind/rules/）
+    // 即使没打开工作区，也允许加载 global 规则（~/.devseeker/rules/）
     this.ruleLoader = new RuleLoader({ workspaceRoot });
     return this.ruleLoader;
   }
@@ -2181,7 +2181,7 @@ export class DualMindChatPanel {
 
   /**
    * W14.4 · 合成 SubagentRegistry（内置 + 用户自定义）。
-   * 异步：首次调用会 load `.dualmind/agents/`；AgentTool 在 execute 中 await。
+   * 异步：首次调用会 load `.devseeker/agents/`；AgentTool 在 execute 中 await。
    * 无工作区 / 加载失败 → 返回 undefined，AgentTool 自行降级到内置 registry。
    */
   private async getSubagentRegistry(): Promise<ReturnType<typeof createSubagentRegistry> | undefined> {
@@ -2196,7 +2196,7 @@ export class DualMindChatPanel {
   }
 
   /**
-   * 懒加载 / 初始化 HookManager；读取 `.dualmind/hooks.json`（若存在）。
+   * 懒加载 / 初始化 HookManager；读取 `.devseeker/hooks.json`（若存在）。
    * 加载失败（配置非法）以 toast 报警但不中断任务。
    */
   private async getHookManager(): Promise<HookManager | undefined> {
@@ -2208,7 +2208,7 @@ export class DualMindChatPanel {
       const result = await loadHookConfig(workspaceRoot);
       if (result.error) {
         void vscode.window.showWarningMessage(
-          `[DualMind] .dualmind/hooks.json 解析失败：${result.error}`,
+          `[DevSeeker] .devseeker/hooks.json 解析失败：${result.error}`,
         );
       } else if (result.config) {
         mgr.setConfig(result.config);
@@ -2222,7 +2222,7 @@ export class DualMindChatPanel {
   }
 
   /**
-   * W11.3 · 外部 listHooks 接口（供 `DualMind: Show Hooks` 命令使用）
+   * W11.3 · 外部 listHooks 接口（供 `DevSeeker: Show Hooks` 命令使用）
    * 返回当前已加载的 hook spec 列表。若未初始化则触发一次加载。
    */
   async listLoadedHooks(): Promise<HookSpec[]> {
@@ -2234,7 +2234,7 @@ export class DualMindChatPanel {
   /**
    * B-P3-6 · 导出指定会话（或当前会话）为 md / json 字符串。
    * 当 sessionId 省略时导出 currentSession；找不到时返回 undefined。
-   * 实际写盘由 extension.ts 的 `dualMind.session.export` 命令负责。
+   * 实际写盘由 extension.ts 的 `devSeeker.session.export` 命令负责。
    */
   exportSessionContent(
     format: 'md' | 'json',
@@ -2682,7 +2682,7 @@ export class DualMindChatPanel {
         message: '未打开工作区，无法创建代码库索引',
       });
     }
-    const config = vscode.workspace.getConfiguration('dualMind');
+    const config = vscode.workspace.getConfiguration('devSeeker');
     const provider = (
       config.get<string>('codebaseIndex.embedProvider', 'local-bert') || 'local-bert'
     ).trim();
@@ -2784,7 +2784,7 @@ export class DualMindChatPanel {
       throw new AgentError({
         code: ErrorCodes.PROVIDER_AUTH_INVALID_API_KEY,
         message:
-          '建立代码库索引需要 DashScope API Key。请在 VSCode 设置中填入 dualMind.qwenVl.apiKey（与 Qwen-VL 共用同一密钥）。',
+          '建立代码库索引需要 DashScope API Key。请在 VSCode 设置中填入 devSeeker.qwenVl.apiKey（与 Qwen-VL 共用同一密钥）。',
       });
     }
     const baseUrl = config.get<string>('qwenVl.baseUrl', '').trim();
@@ -2868,7 +2868,7 @@ export class DualMindChatPanel {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const rel = wsRoot ? vscode.workspace.asRelativePath(absPath) : absPath;
     const picked = await vscode.window.showInformationMessage(
-      `DualMind 已产出 Plan 文档：${rel}`,
+      `DevSeeker 已产出 Plan 文档：${rel}`,
       { modal: true, detail: '请先打开文件审阅；批准后会自动切回 Agent 模式并把 Plan 路径交给下一轮执行。' },
       '批准并切回 Agent',
       '继续在 Plan 模式打磨',
@@ -2932,7 +2932,7 @@ export class DualMindChatPanel {
    * - 多 Key 支持：apiKeys 数组支持多 Key，自动 Pool + failover
    */
   private buildWebSearchRegistry(): WebSearchRegistry {
-    const cfg = vscode.workspace.getConfiguration('dualMind.webResearch');
+    const cfg = vscode.workspace.getConfiguration('devSeeker.webResearch');
     const tavilyKeysRaw = cfg.get<string[]>('tavily.apiKeys') ?? [];
     const bochaKeysRaw = cfg.get<string[]>('bocha.apiKeys') ?? [];
     const bingKey = cfg.get<string>('bing.apiKey')?.trim() ?? '';
@@ -2985,7 +2985,7 @@ export class DualMindChatPanel {
    * - W8.10：提供缓存 TTL + QPS 限流配置（默认 1h / 5 rps）。
    */
   private buildFetchContentDeps() {
-    const cfg = vscode.workspace.getConfiguration('dualMind.webResearch');
+    const cfg = vscode.workspace.getConfiguration('devSeeker.webResearch');
     const cacheTtlSec = cfg.get<number>('fetch.cacheTtlSec') ?? 3600;
     const rps = cfg.get<number>('fetch.qps') ?? 5;
     return {
@@ -2995,7 +2995,7 @@ export class DualMindChatPanel {
       rps,
       getEmbedder: (): Embedder | undefined => {
         try {
-          return this.buildEmbedderSync(vscode.workspace.getConfiguration('dualMind'));
+          return this.buildEmbedderSync(vscode.workspace.getConfiguration('devSeeker'));
         } catch {
           return undefined;
         }
@@ -3020,7 +3020,7 @@ export class DualMindChatPanel {
     if (!provider) {
       throw new AgentError({
         code: ErrorCodes.SUBAGENT_FAILED,
-        message: '无可用 Provider，请先在 DualMind 设置中填入 API Key。',
+        message: '无可用 Provider，请先在 DevSeeker 设置中填入 API Key。',
       });
     }
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -3085,7 +3085,7 @@ export class DualMindChatPanel {
   /** 继续暂停的 Agent 任务（用保存的历史创建新 loop 继续对话） */
   async resumeTask(): Promise<void> {
     if (!this.pausedContext) {
-      vscode.window.showWarningMessage('DualMind: 没有可继续的任务');
+      vscode.window.showWarningMessage('DevSeeker: 没有可继续的任务');
       return;
     }
 
@@ -3096,7 +3096,7 @@ export class DualMindChatPanel {
     const registry = getProviderRegistry();
     const provider = registry.get(ctx.providerId);
     if (!provider) {
-      vscode.window.showErrorMessage('DualMind: 暂停时的 Provider 不可用，请手动发送新指令');
+      vscode.window.showErrorMessage('DevSeeker: 暂停时的 Provider 不可用，请手动发送新指令');
       return;
     }
 
@@ -3215,7 +3215,7 @@ export class DualMindChatPanel {
     this.pushSessionList();
     this.pushCostSummary();
     // 通知 Checkpoints 侧边栏刷新（W5b3）
-    void vscode.commands.executeCommand('dualMind.checkpoints.refresh');
+    void vscode.commands.executeCommand('devSeeker.checkpoints.refresh');
     return result;
   }
 
@@ -3227,7 +3227,7 @@ export class DualMindChatPanel {
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: 'DualMind：建立代码库语义索引',
+        title: 'DevSeeker：建立代码库语义索引',
         cancellable: true,
       },
       async (progress, token) => {
@@ -3373,17 +3373,17 @@ export class DualMindChatPanel {
       if (!relPath) return;
 
       // Rules 文件变更 → 失效规则缓存，下次 send 时重读
-      if (/^[.]dualmind[\\/]rules[\\/].+\.mdx?$/i.test(relPath)) {
+      if (/^[.]devseeker[\\/]rules[\\/].+\.mdx?$/i.test(relPath)) {
         this.ruleLoader?.invalidate();
       }
 
       // Skills 文件变更 → 失效技能缓存
-      if (/^[.]dualmind[\\/]skills[\\/].+\.mdx?$/i.test(relPath)) {
+      if (/^[.]devseeker[\\/]skills[\\/].+\.mdx?$/i.test(relPath)) {
         this.skillLoader?.invalidate();
       }
 
       // Hooks 配置变更 → 丢弃 HookManager，下次 send 时重读
-      if (/^[.]dualmind[\\/]hooks\.json$/i.test(relPath)) {
+      if (/^[.]devseeker[\\/]hooks\.json$/i.test(relPath)) {
         log.info('hooks.json changed; hook manager will reload on next send');
         this.hookManager = undefined;
       }
@@ -3858,7 +3858,7 @@ export class DualMindChatPanel {
             beforeContent = null; // 文件不存在
           } else if (snap.contentHash) {
             // 从内容池读取
-            const poolPath = path.join(workspaceRoot, '.dualmind', 'files', snap.contentHash);
+            const poolPath = path.join(workspaceRoot, '.devseeker', 'files', snap.contentHash);
             try {
               beforeContent = await fs.readFile(poolPath, 'utf-8');
             } catch {

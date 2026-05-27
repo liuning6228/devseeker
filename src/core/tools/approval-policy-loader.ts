@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -8,7 +8,7 @@
  * Approval Policy Loader（v1.8.0 · DESIGN §M9.5）
  *
  * 职责：
- * - 从 `.dualmind/approval-policy.yaml` 加载审批策略配置
+ * - 从 `.devseeker/approval-policy.yaml` 加载审批策略配置
  * - 提供工具名匹配（通配符 *）和命令模式匹配
  * - 监听文件变更自动重载
  *
@@ -110,11 +110,11 @@ export function matchCommandPattern(command: string, pattern: string): boolean {
 }
 
 /**
- * 默认策略路径：<workspaceRoot>/.dualmind/approval-policy.yaml
+ * 默认策略路径：<workspaceRoot>/.devseeker/approval-policy.yaml
  */
 export function getDefaultPolicyPath(workspaceRoot?: string): string | undefined {
   if (!workspaceRoot) return undefined;
-  return path.join(workspaceRoot, '.dualmind', 'approval-policy.yaml');
+  return path.join(workspaceRoot, '.devseeker', 'approval-policy.yaml');
 }
 
 /**

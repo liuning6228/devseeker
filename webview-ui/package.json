@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "DualMind Chat Panel Webview UI (Vite + React).",
+  "description": "DevSeeker Chat Panel Webview UI (Vite + React).",
   "scripts": {
     "dev": "vite build --watch --mode development",
     "build": "vite build",

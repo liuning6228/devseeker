@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -9,9 +9,9 @@
  *
  * 规约（SPEC/error-model.md §9）：
  * - 所有 error 日志必须含：ts / lvl / module / code / msg / context / traceId / subagentId
- * - error/fatal 进 .dualmind/logs/error.log
- * - warn/info 进 .dualmind/logs/runtime.log
- * - 子代理额外进 .dualmind/logs/subagents/<id>.jsonl（由 M8 实现注入）
+ * - error/fatal 进 .devseeker/logs/error.log
+ * - warn/info 进 .devseeker/logs/runtime.log
+ * - 子代理额外进 .devseeker/logs/subagents/<id>.jsonl（由 M8 实现注入）
  * - 滚动：单文件 10MB，保留 5 份（由 pino.transport 处理）
  *
  * 双模式：
@@ -26,7 +26,7 @@ import pino, { type Logger, type LoggerOptions, type DestinationStream } from 'p
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 export interface LoggerConfig {
-  /** 日志目录，通常是 `<workspaceRoot>/.dualmind/logs` */
+  /** 日志目录，通常是 `<workspaceRoot>/.devseeker/logs` */
   logDir: string;
   /** 日志级别，默认 'info' */
   level?: LogLevel;

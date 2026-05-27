@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * DualMind Webview UI — Tailwind CSS v4 入口
+ * DevSeeker Webview UI — Tailwind CSS v4 入口
  * 只定义布局骨架类（app/app__body/app__main/message-list/composer/session-drawer/statusbar/index-bar）。
  * 精细组件样式依赖 TSX 中的 Tailwind utility class，不在此覆盖。
  */

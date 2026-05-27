@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -9,8 +9,8 @@
  *
  * 存储格式：每条记忆一行 JSON（JSONL），便于追加写、避免整表重写风险
  * 默认路径：
- * - workspace scope: `<workspaceRoot>/.dualmind/memories.jsonl`
- * - global scope:    `<os.homedir()>/.dualmind/memories.jsonl`
+ * - workspace scope: `<workspaceRoot>/.devseeker/memories.jsonl`
+ * - global scope:    `<os.homedir()>/.devseeker/memories.jsonl`
  *
  * 工具层不直接操作文件，全部经由 MemoryStore 方法。
  *
@@ -39,7 +39,7 @@ export interface MemoryStoreOptions {
 }
 
 const DEFAULT_FILE = 'memories.jsonl';
-const DEFAULT_DIR = '.dualmind';
+const DEFAULT_DIR = '.devseeker';
 
 export class MemoryStore {
   private readonly workspacePath: string | undefined;

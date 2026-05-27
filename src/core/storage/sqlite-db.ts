@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -10,7 +10,7 @@
  * v1.8.3 · 从 sql.js 回退到 better-sqlite3（原生 C 模块）
  * ─────────────────────────────────────────────────────
  * 根因：sql.js（WASM SQLite）是纯内存数据库，DELETE 不归还 WASM 堆，
- *      导致 dualmind.sqlite 文件持续膨胀到几百 MB；搜索时全表反序列化
+ *      导致 devseeker.sqlite 文件持续膨胀到几百 MB；搜索时全表反序列化
  *      BLOB→JS number[] 打爆 Extension Host 堆内存。
  *
  * better-sqlite3 是原生 C 模块，数据在 SQLite 页缓存中由 C 层管理，
@@ -524,7 +524,7 @@ export function applyMigrations(db: SqliteDatabaseLike): void {
     db.pragma('user_version = 1');
   }
   if (current < 2) {
-    // 双库分离 v2：删除会话库中的旧索引表（索引已迁移到 dualmind-index.sqlite）
+    // 双库分离 v2：删除会话库中的旧索引表（索引已迁移到 devseeker-index.sqlite）
     db.exec(`
       DROP TABLE IF EXISTS vec_records;
       DROP TABLE IF EXISTS vec_meta;
@@ -588,12 +588,12 @@ export function setMetaString(db: SqliteDatabaseLike, key: string, value: string
   ).run(key, value);
 }
 
-/** 决定 workspace 下 sqlite db 的默认路径：`<root>/.dualmind/data/dualmind.sqlite` */
+/** 决定 workspace 下 sqlite db 的默认路径：`<root>/.devseeker/data/devseeker.sqlite` */
 export function defaultSqlitePath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, '.dualmind', 'data', 'dualmind.sqlite');
+  return path.join(workspaceRoot, '.devseeker', 'data', 'devseeker.sqlite');
 }
 
-/** 向量索引专用库路径（与会话/用量分库）：`<root>/.dualmind/data/dualmind-index.sqlite` */
+/** 向量索引专用库路径（与会话/用量分库）：`<root>/.devseeker/data/devseeker-index.sqlite` */
 export function defaultIndexSqlitePath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, '.dualmind', 'data', 'dualmind-index.sqlite');
+  return path.join(workspaceRoot, '.devseeker', 'data', 'devseeker-index.sqlite');
 }

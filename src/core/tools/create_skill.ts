@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,7 +7,7 @@
 /**
  * W14.3 · create_skill 工具
  *
- * 职责：让 Agent/用户通过对话在 `.dualmind/skills/<slug>/SKILL.md` 快速沉淀自定义技能。
+ * 职责：让 Agent/用户通过对话在 `.devseeker/skills/<slug>/SKILL.md` 快速沉淀自定义技能。
  *
  * 参数：
  *   - name: 人类可读的 skill 标识（会被 slugify 成目录名）
@@ -23,7 +23,7 @@
  * 设计要点：
  *   - slug：[a-z0-9-]，长度 1-64，非 ascii 字符剥离（避免 FS 兼容问题）
  *   - frontmatter：`description: "..."` + `arguments: "..."`（YAML-lite，与 SkillLoader 解析器对齐）
- *   - 路径前缀白名单：只允许落盘在 `<ws>/.dualmind/skills/<slug>/` 下（防越权）
+ *   - 路径前缀白名单：只允许落盘在 `<ws>/.devseeker/skills/<slug>/` 下（防越权）
  */
 
 import * as fs from 'node:fs/promises';
@@ -45,7 +45,7 @@ const parameters = {
     name: {
       type: 'string',
       description:
-        '技能名（人类可读）。将被 slugify 为目录名 `<slug>`，文件落于 `.dualmind/skills/<slug>/SKILL.md`。示例："commit" / "review-pr" / "deploy-staging"。',
+        '技能名（人类可读）。将被 slugify 为目录名 `<slug>`，文件落于 `.devseeker/skills/<slug>/SKILL.md`。示例："commit" / "review-pr" / "deploy-staging"。',
     },
     description: {
       type: 'string',
@@ -79,7 +79,7 @@ export interface CreateSkillDeps {
 export class CreateSkillTool implements ITool<CreateSkillArgs, ToolResult> {
   readonly name = 'create_skill';
   readonly description =
-    '创建一个项目级 skill（工作流模板）：在 `.dualmind/skills/<slug>/SKILL.md` 落盘。下一次对话中用户或 Agent 通过 `skill` 工具按 name 触发即可复用该指令集。适合把对话中反复出现的"固定套路"沉淀为可复用模板。';
+    '创建一个项目级 skill（工作流模板）：在 `.devseeker/skills/<slug>/SKILL.md` 落盘。下一次对话中用户或 Agent 通过 `skill` 工具按 name 触发即可复用该指令集。适合把对话中反复出现的"固定套路"沉淀为可复用模板。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'workspace_write';
 
@@ -106,7 +106,7 @@ export class CreateSkillTool implements ITool<CreateSkillArgs, ToolResult> {
       );
     }
 
-    const skillsRoot = path.join(ws, '.dualmind', 'skills');
+    const skillsRoot = path.join(ws, '.devseeker', 'skills');
     const skillDir = path.join(skillsRoot, slug);
     const skillFile = path.join(skillDir, 'SKILL.md');
 

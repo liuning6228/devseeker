@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -55,8 +55,8 @@ export interface SessionStoreSnapshot {
 }
 
 const DEFAULT_MAX_SESSIONS = 100;
-const KEY_SESSIONS = 'dualMind.sessions.v1';
-const KEY_TOTAL_COST = 'dualMind.totalCost.v1';
+const KEY_SESSIONS = 'devSeeker.sessions.v1';
+const KEY_TOTAL_COST = 'devSeeker.totalCost.v1';
 
 export class SessionStore {
   private readonly memento: MementoLike;

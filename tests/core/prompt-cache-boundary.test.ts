@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -98,7 +98,7 @@ describe('PromptBuilder · L0 identity is stable across all ctx changes', () => 
   it('L0 字节级非空且包含 identity + web_research 关键标识', () => {
     const { L0 } = PromptBuilder.build(emptyCtx);
     expect(L0.length).toBeGreaterThan(1000); // 粗略下限
-    expect(L0).toMatch(/You are DualMind/);
+    expect(L0).toMatch(/You are DevSeeker/);
     expect(L0).toMatch(/search_web/); // 来自 WEB_RESEARCH_PROMPT_MODULE
   });
 });

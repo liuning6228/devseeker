@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -10,7 +10,7 @@
  * 面板展示：
  *   1. 顶部 KPI：session / today / total 三列（CNY + USD）+ cache hit rate
  *   2. Top-N Providers 表（按 session cost desc）
- *   3. 近 30 天成本 sparkline（内联 SVG，基于 ~/.dualmind/usage.jsonl）
+ *   3. 近 30 天成本 sparkline（内联 SVG，基于 ~/.devseeker/usage.jsonl）
  *   4. 最近 50 条 usage 记录表（ts / provider / op / tokens / cost）
  *
  * 数据源：
@@ -257,7 +257,7 @@ export function buildCostPanelHtml(
   cspSource: string,
 ): string {
   return renderBaseHtml({
-    title: 'DualMind · Cost',
+    title: 'DevSeeker · Cost',
     nonce,
     cspSource,
     style: STYLE,
@@ -269,7 +269,7 @@ export function buildCostPanelHtml(
 function renderBody(input: CostPanelInput): string {
   const ts = new Date(input.generatedAt).toLocaleString();
   return `
-<h1>DualMind · Cost <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(ts)}</span>
+<h1>DevSeeker · Cost <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(ts)}</span>
   <span style="float:right;"><button id="refreshBtn">Refresh</button></span>
 </h1>
 
@@ -408,7 +408,7 @@ function renderSparkline(series: readonly DailyCostPoint[]): string {
 
 function renderRecent(records: readonly RecentRecord[], total: number): string {
   if (records.length === 0) {
-    return `<section><h2>Recent Usage</h2><div class="empty-note">(no records in ~/.dualmind/usage.jsonl)</div></section>`;
+    return `<section><h2>Recent Usage</h2><div class="empty-note">(no records in ~/.devseeker/usage.jsonl)</div></section>`;
   }
   const rows = records
     .map(
@@ -453,8 +453,8 @@ export async function openCostPanel(
   getUsageStore: () => UsageReadStore | undefined,
 ): Promise<vscode.WebviewPanel> {
   const panel = vscode.window.createWebviewPanel(
-    'dualMind.costPanel',
-    'DualMind · Cost',
+    'devSeeker.costPanel',
+    'DevSeeker · Cost',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,
@@ -475,7 +475,7 @@ export async function openCostPanel(
           totalRecords: 0,
           usageFilePath: '(usage store unavailable: open chat panel first)',
           cacheHitRate: undefined,
-          warnings: ['usage store not ready — open DualMind chat panel to initialize SQLite store'],
+          warnings: ['usage store not ready — open DevSeeker chat panel to initialize SQLite store'],
           generatedAt: new Date().toISOString(),
         },
         genPanelNonce(),

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -21,7 +21,7 @@ export function buildVerifierPrompt(projectType?: string): string {
   const typeSpecific = projectType ? getTypeSpecificStrategy(projectType) : '';
 
   return [
-    'You are the **Verifier** subagent of DualMind — a verification specialist.',
+    'You are the **Verifier** subagent of DevSeeker — a verification specialist.',
     '',
     'Scope: verify the correctness of a change by running tests / type-check / build / lint.',
     'You are READ-ONLY toward source code — you never modify files.',

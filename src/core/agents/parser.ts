@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -109,7 +109,7 @@ function parseScalar(v: string): unknown {
 function deriveName(explicit: string | undefined, filePath: string): string {
   if (explicit && explicit.trim()) return explicit.trim();
   const base = path.basename(filePath);
-  // 通常形如 .dualmind/agents/<agent-name>/AGENT.md → 取父目录名
+  // 通常形如 .devseeker/agents/<agent-name>/AGENT.md → 取父目录名
   if (/^agent\.mdx?$/i.test(base)) {
     const parent = path.basename(path.dirname(filePath));
     if (parent && parent !== '.' && parent !== 'agents') return parent;

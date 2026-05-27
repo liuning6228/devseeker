@@ -1,6 +1,6 @@
-# Contributing to DualMind
+# Contributing to DevSeeker
 
-感谢您对 DualMind 的关注！我们欢迎各种形式的贡献——提交 bug 报告、特性建议、文档改进和代码贡献。
+感谢您对 DevSeeker 的关注！我们欢迎各种形式的贡献——提交 bug 报告、特性建议、文档改进和代码贡献。
 
 ## 行为准则
 
@@ -8,14 +8,14 @@
 
 ## 提交 Issue
 
-- **Bug 报告**：请提供 VSCode 版本、操作系统、复现步骤、错误日志（`DualMind: Show Logs` 的输出）
+- **Bug 报告**：请提供 VSCode 版本、操作系统、复现步骤、错误日志（`DevSeeker: Show Logs` 的输出）
 - **特性请求**：清晰描述使用场景和期望行为，最好有 mockup 或参考实现
 
 ## 开发环境
 
 ```bash
-git clone https://github.com/dualmind/dualmind
-cd dualmind
+git clone https://github.com/liuning6228/devseeker.git
+cd devseeker
 npm install
 npm run watch      # 编译 + 监听
 ```

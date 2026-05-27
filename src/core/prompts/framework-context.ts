@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -19,7 +19,7 @@
  * 2. **稳定排序**：字段顺序固定，同输入字节级恒等输出。
  * 3. **轻量注入**：仅出现在 L3 层，不影响 L0/L1/L2 前缀缓存。
  * 4. **一次性目录树**：`isFirstTurn=true` 才输出 workspace_tree；后续由
- *    panel 用 workspaceState 键 `dualMind.hasEmittedWorkspaceTree` 控制。
+ *    panel 用 workspaceState 键 `devSeeker.hasEmittedWorkspaceTree` 控制。
  * 5. **Debug 独占 staged**：避免 Ask/Agent 常规对话被 diff 噪音淹没。
  *
  * 与 git-context（B-P1-11）的分工：

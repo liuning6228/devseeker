@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -112,9 +112,9 @@ export interface ToolRunnerOptions {
   approvalGate?: ToolApprovalGate;
   /** 审计日志 sink（v1.8.0） */
   auditSink?: ApprovalAuditSink;
-  /** 审批策略覆写（从 .dualmind/approval-policy.yaml 加载） */
+  /** 审批策略覆写（从 .devseeker/approval-policy.yaml 加载） */
   approvalOverrides?: import('./approval-policy-loader.js').ToolOverride[];
-  /** 审批策略默认值覆写（从 .dualmind/approval-policy.yaml defaults 加载） */
+  /** 审批策略默认值覆写（从 .devseeker/approval-policy.yaml defaults 加载） */
   approvalPolicyTable?: Partial<import('./approval-policy.js').ApprovalPolicyTable>;
   /**
    * DebugModeGate：在 Debug 模式下拒绝无证修改。

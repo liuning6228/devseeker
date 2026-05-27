@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -131,7 +131,7 @@ export class AppendFileTool implements ITool<AppendFileArgs, ToolResult> {
 
     // 6. 重复追加检测已移除（v2 架构：StreamingFileWriter 只写临时文件，不再污染真实文件）
     //    原检测逻辑因 SSE 断裂导致 LLM 反复追加相同章节而存在，
-    //    现在 StreamingFileWriter v2 只写 .dualmind/tmp/ 临时文件，
+    //    现在 StreamingFileWriter v2 只写 .devseeker/tmp/ 临时文件，
     //    真实文件仅在工具正式执行时才被写入，不再出现重复追加问题。
 
     // 7. 追加写入

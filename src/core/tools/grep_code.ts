@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -151,7 +151,7 @@ function runGrep(
     // 包含 node_modules/.git/dist 的排除规则
     const excludeDirs = isWin
       ? '/d /s'
-      : `--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=out --exclude-dir=.dualmind`;
+      : `--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=out --exclude-dir=.devseeker`;
 
     // 搜索源代码文件（常见扩展名 + 无扩展名）
     const includeExts = isWin ? '' : `--include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.json' --include='*.md' --include='*.css' --include='*.html' --include='*.yaml' --include='*.yml'`;

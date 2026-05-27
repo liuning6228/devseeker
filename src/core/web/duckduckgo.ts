@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -143,7 +143,7 @@ export class DuckDuckGoProvider implements ISearchProvider {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'User-Agent':
-            'Mozilla/5.0 (compatible; DualMind/0.1; +https://github.com/local/dualmind)',
+            'Mozilla/5.0 (compatible; DevSeeker/0.1; +https://github.com/liuning6228/devseeker)',
           Accept: 'text/html',
         },
         body: body.toString(),

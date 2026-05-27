@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -25,7 +25,7 @@
  * - 时钟：performance.now() 高精度毫秒（小数位）
  *
  * 测试与导出：
- * - VS Code 命令 `dualMind.perf.exportReport` → .dualmind/perf/perf-<ts>.json
+ * - VS Code 命令 `devSeeker.perf.exportReport` → .devseeker/perf/perf-<ts>.json
  * - 单例导出 perfProbe；测试用 __resetPerfProbeForTest()
  */
 

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -8,8 +8,8 @@
  * W14.1+W14.2 · 私有知识库 · KnowledgeIndex
  *
  * 设计目标：
- *   - 只在 `.dualmind/knowledge/**\/*.md` 下做 lexical 检索
- *   - 与 codebase 索引完全分家：单独 store (`.dualmind/knowledge-index.json`)、
+ *   - 只在 `.devseeker/knowledge/**\/*.md` 下做 lexical 检索
+ *   - 与 codebase 索引完全分家：单独 store (`.devseeker/knowledge-index.json`)、
  *     单独 workspaceRoot（设为 knowledgeRoot 本身，避免扫到整个仓库）
  *   - 零依赖、零网络、零模型：复用 `Bm25CodebaseIndex` 实现（BM25 作为 bg engine）
  *
@@ -88,7 +88,7 @@ export class KnowledgeIndex implements CodebaseIndexLike {
       if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
         throw new AgentError({
           code: ErrorCodes.KNOWLEDGE_BASE_EMPTY,
-          message: `知识库目录不存在：${knowledgeRoot}。请先创建 .dualmind/knowledge/ 并放入 .md 文档。`,
+          message: `知识库目录不存在：${knowledgeRoot}。请先创建 .devseeker/knowledge/ 并放入 .md 文档。`,
         });
       }
       if (e instanceof AgentError) throw e;

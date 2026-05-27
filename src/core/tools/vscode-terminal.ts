@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -81,7 +81,7 @@ export class TerminalRegistry {
   static createTerminal(cwd?: string | vscode.Uri, shellPath?: string, name?: string): TerminalInfo {
     const terminalOptions: vscode.TerminalOptions = {
       cwd,
-      name: name ?? 'DualMind',
+      name: name ?? 'DevSeeker',
       env: { DUALMIND_ACTIVE: 'true' },
     };
     if (shellPath) {
@@ -815,7 +815,7 @@ export class VscodeTerminalManager implements ITerminalPool {
 
     // 终端已关闭（被用户手动关闭了）→ 重建，shellIntegration 需重新确认
     log.info({ cwd }, 'Creating sandbox terminal (first time or was closed)');
-    const info = TerminalRegistry.createTerminal(cwd, undefined, 'DualMind (沙箱)');
+    const info = TerminalRegistry.createTerminal(cwd, undefined, 'DevSeeker (沙箱)');
     // 沙箱终端创建后隐藏回终端面板，不抢前台焦点
     info.terminal.show(false);
     this.sandboxTerminal = info;
@@ -835,7 +835,7 @@ export class VscodeTerminalManager implements ITerminalPool {
     }
 
     log.info({ cwd }, 'Creating user-visible terminal');
-    const info = TerminalRegistry.createTerminal(cwd, undefined, 'DualMind (终端)');
+    const info = TerminalRegistry.createTerminal(cwd, undefined, 'DevSeeker (终端)');
     // 用户可见终端：显示在终端面板，不抢焦点但用户能看到
     info.terminal.show(true);
     this.userTerminal = info;

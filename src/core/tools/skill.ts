@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -10,7 +10,7 @@
  * 职责：按 name 取 Skill 的指令内容，拼上调用者传入的 args，以工具结果形式返回给 LLM。
  * LLM 在下一轮会根据这段指令继续执行任务。
  *
- * 安全分级：external（由用户通过 .dualmind/skills 显式提供的工作流）
+ * 安全分级：external（由用户通过 .devseeker/skills 显式提供的工作流）
  */
 
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -9,9 +9,9 @@
  *
  * 职责：
  * - 扫描多层 rules 目录（DESIGN §M13.3）：
- *     global     = `~/.dualmind/rules/`（跨项目默认）
- *     workspace  = `<workspaceRoot>/.dualmind/rules/`（项目级）
- *     nested     = `<subdir>/.dualmind/rules/`（MVP 保留字段，暂未扫描）
+ *     global     = `~/.devseeker/rules/`（跨项目默认）
+ *     workspace  = `<workspaceRoot>/.devseeker/rules/`（项目级）
+ *     nested     = `<subdir>/.devseeker/rules/`（MVP 保留字段，暂未扫描）
  * - 就近覆盖：同名规则按 `nested > workspace > global` 选胜者
  * - 每个规则打上 `source` 标签，便于 UI / 调试展示
  * - 排序：按 `priority` 降序，同 priority 按 name 升序
@@ -36,10 +36,10 @@ export interface LoadResult {
 
 export interface RuleLoaderOptions {
   workspaceRoot: string | undefined;
-  /** 自定义 workspace rules 目录（测试用）。默认 `<workspaceRoot>/.dualmind/rules` */
+  /** 自定义 workspace rules 目录（测试用）。默认 `<workspaceRoot>/.devseeker/rules` */
   rulesDir?: string;
   /**
-   * 全局 rules 目录（DESIGN §M13.3）。默认 `~/.dualmind/rules`。
+   * 全局 rules 目录（DESIGN §M13.3）。默认 `~/.devseeker/rules`。
    * 传空字符串可显式关闭 global 扫描（测试用）。
    */
   globalRulesDir?: string;
@@ -63,14 +63,14 @@ export class RuleLoader {
   get rulesDir(): string | undefined {
     if (this.opts.rulesDir) return this.opts.rulesDir;
     if (!this.opts.workspaceRoot) return undefined;
-    return path.join(this.opts.workspaceRoot, '.dualmind', 'rules');
+    return path.join(this.opts.workspaceRoot, '.devseeker', 'rules');
   }
 
   /** global 规则目录绝对路径；传空字符串关闭 */
   get globalRulesDir(): string | undefined {
     if (this.opts.globalRulesDir === '') return undefined;
     if (this.opts.globalRulesDir) return this.opts.globalRulesDir;
-    return path.join(os.homedir(), '.dualmind', 'rules');
+    return path.join(os.homedir(), '.devseeker', 'rules');
   }
 
   async load(force = false): Promise<LoadResult> {

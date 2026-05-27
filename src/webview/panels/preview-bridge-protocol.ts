@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -8,7 +8,7 @@
  * C7 · Preview Bridge 协议（B-P1-2）
  *
  * 场景：用户本机 dev server 通过 `<script src="https://raw…/preview-bridge.sample.js">`
- *      或自行集成在页面里，实现 postMessage 桥接回 DualMind 父 webview。
+ *      或自行集成在页面里，实现 postMessage 桥接回 DevSeeker 父 webview。
  *
  * 安全：
  *  - 父 → 子 postMessage 只对 **允许的目标 origin** 发送（即 validatePreviewUrl 过的 origin）
@@ -27,7 +27,7 @@
  *    - ready          {}            （无 nonce）页面加载完成宣告 bridge 在线
  */
 
-export const BRIDGE_SOURCE = 'dualMind-preview-bridge';
+export const BRIDGE_SOURCE = 'devSeeker-preview-bridge';
 
 export type BridgeType =
   | 'inspect:start'

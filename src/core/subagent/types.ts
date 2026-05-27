@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -25,7 +25,7 @@ export type BuiltinSubagentType = 'Browser' | 'Research' | 'Guide' | 'Verify' | 
 
 /**
  * 子代理类型放宽为字符串：
- * 内置 5 种 + 用户自定义 agent（来自 `.dualmind/agents/<name>/AGENT.md`）。
+ * 内置 5 种 + 用户自定义 agent（来自 `.devseeker/agents/<name>/AGENT.md`）。
  */
 export type SubagentType = BuiltinSubagentType | string;
 

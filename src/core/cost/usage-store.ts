@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,7 +7,7 @@
 /**
  * UsageJsonlStore —— 基于 JSONL 的 IUsageRecord 持久化（DESIGN §M16.6 MVP 替代）
  *
- * 存储格式：默认 `~/.dualmind/usage.jsonl`
+ * 存储格式：默认 `~/.devseeker/usage.jsonl`
  * - 每行一条 IUsageRecord（UTF-8 JSON.stringify）
  * - append 追加写入，永不锁文件之外做复杂操作
  * - 损坏行（解析失败）在 readAll/readSince 中被跳过并计入 warning log
@@ -26,12 +26,13 @@ import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { getLogger } from '../../infra/logger.js';
+import { WORKSPACE_DIR_NAME } from '../constants.js';
 import type { CostSink, IUsageRecord, UsageFilter } from './types.js';
 
 const log = getLogger('cost.usage-store');
 
 export interface UsageJsonlStoreOptions {
-  /** 完整 jsonl 文件路径；默认 `~/.dualmind/usage.jsonl` */
+  /** 完整 jsonl 文件路径；默认 `~/.devseeker/usage.jsonl` */
   filePath?: string;
 }
 
@@ -39,7 +40,7 @@ export class UsageJsonlStore implements CostSink {
   private readonly filePath: string;
 
   constructor(opts: UsageJsonlStoreOptions = {}) {
-    this.filePath = opts.filePath ?? path.join(os.homedir(), '.dualmind', 'usage.jsonl');
+    this.filePath = opts.filePath ?? path.join(os.homedir(), WORKSPACE_DIR_NAME, 'usage.jsonl');
   }
 
   getFilePath(): string {

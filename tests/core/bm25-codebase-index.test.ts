@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -40,7 +40,7 @@ async function mkfile(rel: string, content: string): Promise<void> {
 
 beforeEach(async () => {
   tmpRoot = await fs.mkdtemp(join(os.tmpdir(), 'bm25-codebase-idx-'));
-  storePath = join(tmpRoot, '.dualmind', 'bm25-index.json');
+  storePath = join(tmpRoot, '.devseeker', 'bm25-index.json');
 });
 
 afterEach(async () => {
@@ -56,7 +56,7 @@ describe('W13.4-C-1 · Bm25CodebaseIndex', () => {
     });
 
     it('损坏的 storePath → 容错为空库', async () => {
-      await fs.mkdir(join(tmpRoot, '.dualmind'), { recursive: true });
+      await fs.mkdir(join(tmpRoot, '.devseeker'), { recursive: true });
       await fs.writeFile(storePath, '{invalid-json', 'utf-8');
       const idx = await Bm25CodebaseIndex.create({ workspaceRoot: tmpRoot, storePath });
       expect(idx.size()).toBe(0);
@@ -230,9 +230,9 @@ describe('W13.4-C-1 · Bm25CodebaseIndex', () => {
   });
 
   describe('defaultBm25IndexStorePath', () => {
-    it('默认路径在 workspaceRoot/.dualmind/bm25-index.json', () => {
+    it('默认路径在 workspaceRoot/.devseeker/bm25-index.json', () => {
       const p = defaultBm25IndexStorePath('/abs/workspace');
-      expect(p).toMatch(/\.dualmind[\\/]bm25-index\.json$/);
+      expect(p).toMatch(/\.devseeker[\\/]bm25-index\.json$/);
     });
   });
 });

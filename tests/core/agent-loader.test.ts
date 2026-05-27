@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -73,7 +73,7 @@ describe('W14.4 · parseAgentFile', () => {
       'You are a security reviewer.',
     ].join('\n');
     const { agent, error } = parseAgentFile(
-      '/tmp/.dualmind/agents/security-reviewer/AGENT.md',
+      '/tmp/.devseeker/agents/security-reviewer/AGENT.md',
       raw,
     );
     expect(error).toBeUndefined();
@@ -87,7 +87,7 @@ describe('W14.4 · parseAgentFile', () => {
 
   it('缺省 frontmatter → description 为空 / toolNames 为 undefined', () => {
     const { agent } = parseAgentFile(
-      '/tmp/.dualmind/agents/minimal/AGENT.md',
+      '/tmp/.devseeker/agents/minimal/AGENT.md',
       'just body',
     );
     expect(agent).toBeDefined();
@@ -172,7 +172,7 @@ describe('W14.4 · AgentLoader', () => {
   });
 
   it('推荐布局 <name>/AGENT.md', async () => {
-    const dir = path.join(ws, '.dualmind', 'agents', 'reviewer');
+    const dir = path.join(ws, '.devseeker', 'agents', 'reviewer');
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, 'AGENT.md'),
@@ -189,7 +189,7 @@ describe('W14.4 · AgentLoader', () => {
   });
 
   it('扁平 <name>.md 兼容', async () => {
-    const dir = path.join(ws, '.dualmind', 'agents');
+    const dir = path.join(ws, '.devseeker', 'agents');
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, 'quick.md'), 'just body', 'utf-8');
     const loader = new AgentLoader({ workspaceRoot: ws });
@@ -198,7 +198,7 @@ describe('W14.4 · AgentLoader', () => {
   });
 
   it('name 与内置冲突 → 过滤 + 记录 error', async () => {
-    const dir = path.join(ws, '.dualmind', 'agents', 'browser');
+    const dir = path.join(ws, '.devseeker', 'agents', 'browser');
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, 'AGENT.md'),
@@ -213,7 +213,7 @@ describe('W14.4 · AgentLoader', () => {
   });
 
   it('body 空 → error', async () => {
-    const dir = path.join(ws, '.dualmind', 'agents', 'empty');
+    const dir = path.join(ws, '.devseeker', 'agents', 'empty');
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, 'AGENT.md'),
@@ -227,7 +227,7 @@ describe('W14.4 · AgentLoader', () => {
   });
 
   it('invalidate 后再次 load 读取最新内容', async () => {
-    const dir = path.join(ws, '.dualmind', 'agents', 'x');
+    const dir = path.join(ws, '.devseeker', 'agents', 'x');
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(
       path.join(dir, 'AGENT.md'),
@@ -253,7 +253,7 @@ describe('W14.4 · AgentLoader', () => {
   });
 
   it('多个 agents 按 name 升序排序', async () => {
-    const base = path.join(ws, '.dualmind', 'agents');
+    const base = path.join(ws, '.devseeker', 'agents');
     for (const name of ['zebra', 'alpha', 'middle']) {
       const d = path.join(base, name);
       await fs.mkdir(d, { recursive: true });
@@ -276,14 +276,14 @@ describe('W14.4 · createSubagentRegistry', () => {
 
   it('合并自定义 agent', () => {
     const custom: SubagentDefinition = {
-      type: 'dualmind',
+      type: 'devseeker',
       allowedTools: new Set(['read_file']),
       systemPrompt: 'hi',
       maxTurns: 5,
       isBuiltin: false,
     };
     const reg = createSubagentRegistry([custom]);
-    expect(reg.resolve('dualmind')?.maxTurns).toBe(5);
+    expect(reg.resolve('devseeker')?.maxTurns).toBe(5);
     expect(reg.list()).toHaveLength(6);
   });
 

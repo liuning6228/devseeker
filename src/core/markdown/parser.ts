@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -450,7 +450,7 @@ export function guardIdentity(text: string): { text: string; triggered: boolean 
   for (const re of patterns) {
     out = out.replace(re, () => {
       triggered = true;
-      return 'DualMind';
+      return 'DevSeeker';
     });
   }
   return { text: out, triggered };

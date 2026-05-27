@@ -11,7 +11,7 @@ interface TelemetryBannerProps {
   className?: string;
 }
 
-const TELEMETRY_DISMISSED_KEY = 'dualmind.telemetry_dismissed';
+const TELEMETRY_DISMISSED_KEY = 'devSeeker.telemetry_dismissed';
 
 /**
  * TelemetryBanner — 遥测同意/拒绝横幅
@@ -45,7 +45,7 @@ export function TelemetryBanner({ onAccept, onDecline, className }: TelemetryBan
     )}>
       <BarChart3 className="h-5 w-5 text-vscode-btn-bg mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-vscode-fg">帮助改进 DualMind</div>
+        <div className="text-sm font-medium text-vscode-fg">帮助改进 DevSeeker</div>
         <div className="text-xs text-vscode-fg/60 mt-1">
           发送匿名使用数据帮助我们改善产品体验。
           不会收集代码内容或个人信息。

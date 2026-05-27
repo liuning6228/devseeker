@@ -1,15 +1,15 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
 
 /**
- * DualMind VSCode 扩展入口
+ * DevSeeker VSCode 扩展入口
  *
  * W1 最小激活路径：
  * - activate() 时初始化 logger
- * - 注册命令：dualMind.openPanel / dualMind.showLogs
+ * - 注册命令：devSeeker.openPanel / devSeeker.showLogs
  * - 创建 StatusBar 指示器
  * - deactivate() 时 flush 日志
  *
@@ -46,7 +46,7 @@ let uncaughtExceptionHandler: ((error: Error) => void) | undefined;
 
 // 注册虚拟 URI scheme：Diff 编辑器左侧的"原始内容"文档
 // 参考 Cline/Roo Code 的 TextDocumentContentProvider 方案：
-// 左侧用 dualmind-diff:file?base64(originalContent)，右侧用 file://path
+// 左侧用 devseeker-diff:file?base64(originalContent)，右侧用 file://path
 // 流式更新用 WorkspaceEdit.replace() 修改右侧文档，不触发文件系统事件
 const diffContentProvider = new (class implements vscode.TextDocumentContentProvider {
   provideTextDocumentContent(uri: vscode.Uri): string {
@@ -60,10 +60,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const workspaceRoot = getWorkspaceRoot();
   const logDir = workspaceRoot
-    ? join(workspaceRoot, '.dualmind', 'logs')
+    ? join(workspaceRoot, '.devseeker', 'logs')
     : join(context.globalStorageUri.fsPath, 'logs');
 
-  const config = vscode.workspace.getConfiguration('dualMind');
+  const config = vscode.workspace.getConfiguration('devSeeker');
   const level = (config.get<string>('logLevel') ?? 'info') as LogLevel;
 
   try {
@@ -74,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   } catch (e) {
     // logger 初始化失败不阻塞扩展激活
-    console.error('[DualMind] logger init failed:', e);
+    console.error('[DevSeeker] logger init failed:', e);
   }
 
   const log = getLogger('extension');
@@ -85,7 +85,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       workspaceRoot,
       logDir,
     },
-    'DualMind activating',
+    'DevSeeker activating',
   );
 
   // P0-7 · 注册虚拟 URI scheme（流式 Diff 渲染左侧原始文档）
@@ -95,7 +95,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 注册命令：打开主面板
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.openPanel', () => {
+    vscode.commands.registerCommand('devSeeker.openPanel', () => {
       log.info('command: openPanel');
       DualMindChatPanel.createOrShow(context);
     }),
@@ -103,11 +103,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 注册命令：暂停/继续 Agent 任务（供 EditorChangeBar 调用）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.pauseTask', () => {
+    vscode.commands.registerCommand('devSeeker.pauseTask', () => {
       log.info('command: pauseTask');
       DualMindChatPanel.current?.pauseTask();
     }),
-    vscode.commands.registerCommand('dualMind.resumeTask', () => {
+    vscode.commands.registerCommand('devSeeker.resumeTask', () => {
       log.info('command: resumeTask');
       DualMindChatPanel.current?.resumeTask();
     }),
@@ -115,11 +115,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 注册命令：重新激活已失效的 Tavily/Bocha API Key
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.reactivateSearchKeys', async () => {
+    vscode.commands.registerCommand('devSeeker.reactivateSearchKeys', async () => {
       log.info('command: reactivateSearchKeys');
       const panel = DualMindChatPanel.current;
       if (!panel) {
-        vscode.window.showWarningMessage('DualMind: 未打开面板，无法重激活 Key');
+        vscode.window.showWarningMessage('DevSeeker: 未打开面板，无法重激活 Key');
         return;
       }
       const result = panel.reactivateSearchKeys();
@@ -127,16 +127,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const parts: string[] = [];
         if (result.tavily > 0) parts.push(`Tavily ${result.tavily} 个`);
         if (result.bocha > 0) parts.push(`Bocha ${result.bocha} 个`);
-        vscode.window.showInformationMessage(`DualMind: 已重新激活 ${parts.join('、')} Key`);
+        vscode.window.showInformationMessage(`DevSeeker: 已重新激活 ${parts.join('、')} Key`);
       } else {
-        vscode.window.showInformationMessage('DualMind: 没有需要重激活的失效 Key');
+        vscode.window.showInformationMessage('DevSeeker: 没有需要重激活的失效 Key');
       }
     }),
   );
 
   // B-P1-14 · 注册命令：显示日志面板（替代原「打开 runtime.log」，该功能由面板内按钮提供）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.showLogs', async () => {
+    vscode.commands.registerCommand('devSeeker.showLogs', async () => {
       log.info('command: showLogs');
       try {
         await openLogsPanel(context);
@@ -150,10 +150,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // B-P1-15 · 注册命令：显示 Checkpoint 时间线面板（Compare Diff + 多轮分组）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.showCheckpointTimeline', async () => {
+    vscode.commands.registerCommand('devSeeker.showCheckpointTimeline', async () => {
       log.info('command: showCheckpointTimeline');
       if (!DualMindChatPanel.current) {
-        vscode.window.showWarningMessage('请先打开 DualMind 面板并开始一个会话后再查看 Checkpoint 时间线。');
+        vscode.window.showWarningMessage('请先打开 DevSeeker 面板并开始一个会话后再查看 Checkpoint 时间线。');
         return;
       }
       const current = DualMindChatPanel.current;
@@ -174,7 +174,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 注册命令：重建代码库索引
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.reindex', async () => {
+    vscode.commands.registerCommand('devSeeker.reindex', async () => {
       log.info('command: reindex');
       DualMindChatPanel.createOrShow(context);
       try {
@@ -189,10 +189,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 注册命令：列出并回滚到某 checkpoint（W5b2b）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.revertCheckpoint', async () => {
+    vscode.commands.registerCommand('devSeeker.revertCheckpoint', async () => {
       log.info('command: revertCheckpoint');
       if (!DualMindChatPanel.current) {
-        vscode.window.showWarningMessage('请先打开 DualMind 面板并开始一个会话后再使用 Revert。');
+        vscode.window.showWarningMessage('请先打开 DevSeeker 面板并开始一个会话后再使用 Revert。');
         return;
       }
       try {
@@ -238,21 +238,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // StatusBar 指示器
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBarItem.text = '$(rocket) DualMind';
-  statusBarItem.tooltip = 'DualMind v' + context.extension.packageJSON.version;
-  statusBarItem.command = 'dualMind.openPanel';
+  statusBarItem.text = '$(rocket) DevSeeker';
+  statusBarItem.tooltip = 'DevSeeker v' + context.extension.packageJSON.version;
+  statusBarItem.command = 'devSeeker.openPanel';
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
   // W11.3 · 旧 showHooks 命令已被 B-P1-3 openHooksPanel 取代，下方重新注册。
 
-  // W12.3 · 导出性能压测报告（PerfProbe dump → .dualmind/perf/perf-<ts>.json）
+  // W12.3 · 导出性能压测报告（PerfProbe dump → .devseeker/perf/perf-<ts>.json）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.perf.exportReport', async () => {
+    vscode.commands.registerCommand('devSeeker.perf.exportReport', async () => {
       log.info('command: perf.exportReport');
       const report = perfProbe.dump();
       const perfDir = workspaceRoot
-        ? join(workspaceRoot, '.dualmind', 'perf')
+        ? join(workspaceRoot, '.devseeker', 'perf')
         : join(context.globalStorageUri.fsPath, 'perf');
       try {
         mkdirSync(perfDir, { recursive: true });
@@ -267,7 +267,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         const fileUri = vscode.Uri.file(filePath);
         const pick = await vscode.window.showInformationMessage(
-          `DualMind 性能报告已导出：${name}（${report.summary.turnsCount} 轮）`,
+          `DevSeeker 性能报告已导出：${name}（${report.summary.turnsCount} 轮）`,
           '打开',
         );
         if (pick === '打开') {
@@ -281,21 +281,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // B-P3-6 · 导出当前会话（或从列表挑一条）为 md/json，写入 .dualmind/sessions/<ts>-<title>.<ext>
+  // B-P3-6 · 导出当前会话（或从列表挑一条）为 md/json，写入 .devseeker/sessions/<ts>-<title>.<ext>
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.session.export', async () => {
+    vscode.commands.registerCommand('devSeeker.session.export', async () => {
       log.info('command: session.export');
       if (!DualMindChatPanel.current) {
         DualMindChatPanel.createOrShow(context);
       }
       const panel = DualMindChatPanel.current;
       if (!panel) {
-        void vscode.window.showWarningMessage('[DualMind] 面板未就绪');
+        void vscode.window.showWarningMessage('[DevSeeker] 面板未就绪');
         return;
       }
       const summaries = panel.listSessionSummaries();
       if (summaries.length === 0) {
-        void vscode.window.showInformationMessage('[DualMind] 尚无可导出的会话');
+        void vscode.window.showInformationMessage('[DevSeeker] 尚无可导出的会话');
         return;
       }
       // 选会话
@@ -324,11 +324,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       const result = panel.exportSessionContent(pickFormat.value, pickSession.id);
       if (!result) {
-        void vscode.window.showErrorMessage('[DualMind] 会话内容为空或已失效');
+        void vscode.window.showErrorMessage('[DevSeeker] 会话内容为空或已失效');
         return;
       }
       const sessionsDir = workspaceRoot
-        ? join(workspaceRoot, '.dualmind', 'sessions')
+        ? join(workspaceRoot, '.devseeker', 'sessions')
         : join(context.globalStorageUri.fsPath, 'sessions');
       try {
         mkdirSync(sessionsDir, { recursive: true });
@@ -343,7 +343,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         writeFileSync(filePath, result.content, 'utf8');
         log.info({ filePath, format: pickFormat.value }, 'session exported');
         const pick = await vscode.window.showInformationMessage(
-          `DualMind 会话已导出：${filePath.split(/[\\/]/).pop()}`,
+          `DevSeeker 会话已导出：${filePath.split(/[\\/]/).pop()}`,
           '打开',
         );
         if (pick === '打开') {
@@ -360,12 +360,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // B-P1-10 · 选区右键「Ask DualMind About Selection」
   // 从当前编辑器选区抽片段 → Panel.pushSelectedCode（会累积） → 切到 Ask Mode
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.askSelection', async () => {
+    vscode.commands.registerCommand('devSeeker.askSelection', async () => {
       log.info('command: askSelection');
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         void vscode.window.showWarningMessage(
-          '[DualMind] 请先打开一个文件并选中片段再调用 Ask Selection。',
+          '[DevSeeker] 请先打开一个文件并选中片段再调用 Ask Selection。',
         );
         return;
       }
@@ -373,14 +373,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const sel = editor.selection;
       if (sel.isEmpty) {
         void vscode.window.showWarningMessage(
-          '[DualMind] 当前无选区（Ask Selection 要求隐式选区，空选区时请使用 Inline Edit）。',
+          '[DevSeeker] 当前无选区（Ask Selection 要求隐式选区，空选区时请使用 Inline Edit）。',
         );
         return;
       }
       const range = new vscode.Range(sel.start, sel.end);
       const snippet = doc.getText(range);
       if (!snippet.trim()) {
-        void vscode.window.showWarningMessage('[DualMind] 选区为空。');
+        void vscode.window.showWarningMessage('[DevSeeker] 选区为空。');
         return;
       }
       const wsFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
@@ -391,7 +391,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!DualMindChatPanel.current) DualMindChatPanel.createOrShow(context);
       const panel = DualMindChatPanel.current;
       if (!panel) {
-        void vscode.window.showWarningMessage('[DualMind] 面板未就绪，请重试。');
+        void vscode.window.showWarningMessage('[DevSeeker] 面板未就绪，请重试。');
         return;
       }
       panel.pushSelectedCode(
@@ -405,12 +405,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 把当前编辑器选区（或整行）连同周围上下文注入 <selected_codes>，
   // 同时将精简草稿推送到 Composer，设置 inlineEdit 标记限制工具范围。
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.inlineEdit', async () => {
+    vscode.commands.registerCommand('devSeeker.inlineEdit', async () => {
       log.info('command: inlineEdit');
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         void vscode.window.showWarningMessage(
-          '[DualMind] 请先打开一个代码文件并选择（或把光标放在）目标行再调用 Inline Edit。',
+          '[DevSeeker] 请先打开一个代码文件并选择（或把光标放在）目标行再调用 Inline Edit。',
         );
         return;
       }
@@ -424,7 +424,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const snippet = doc.getText(range);
       if (!snippet.trim()) {
         void vscode.window.showWarningMessage(
-          '[DualMind] 当前选区/行为空，无内容可引用。',
+          '[DevSeeker] 当前选区/行为空，无内容可引用。',
         );
         return;
       }
@@ -473,7 +473,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!DualMindChatPanel.current) DualMindChatPanel.createOrShow(context);
       const panel = DualMindChatPanel.current;
       if (!panel) {
-        void vscode.window.showWarningMessage('[DualMind] 面板未就绪，请重试。');
+        void vscode.window.showWarningMessage('[DevSeeker] 面板未就绪，请重试。');
         return;
       }
       // W15.4a · 注入 <selected_codes> 到 L3（选区 + 上下文 + import）
@@ -498,7 +498,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // B-P1-5 · Context 可视化面板（L0/L1/L2/L3 chars + tokens + cacheKeys + rules/skills/memories 摘要）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.showContext', async () => {
+    vscode.commands.registerCommand('devSeeker.showContext', async () => {
       log.info('command: showContext');
       try {
         await openContextPanel(context, () => DualMindChatPanel.current?.getCurrentMode() ?? 'agent');
@@ -512,7 +512,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // B-P1-6 · Cost Panel UI（session/today/total KPI + Top-5 + 30d sparkline + recent usage）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.showCost', async () => {
+    vscode.commands.registerCommand('devSeeker.showCost', async () => {
       log.info('command: showCost');
       try {
         await openCostPanel(
@@ -530,7 +530,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // B-P1-7 · Rules 管理 UI 面板（列出 global + workspace rules、解析 errors、打开对应 md）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.showRules', async () => {
+    vscode.commands.registerCommand('devSeeker.showRules', async () => {
       log.info('command: showRules');
       try {
         await openRulesPanel(context);
@@ -544,7 +544,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // B-P1-3 · Hooks 配置 UI 面板（hooks.json 预览 + 运行期订阅合并展示）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.showHooks', async () => {
+    vscode.commands.registerCommand('devSeeker.showHooks', async () => {
       log.info('command: showHooks');
       try {
         await openHooksPanel(context, () => DualMindChatPanel.current?.listLoadedHooks() ?? []);
@@ -558,7 +558,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // B-P1-4 · Git 面板 UI（status/diff/log）
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.showGit', async () => {
+    vscode.commands.registerCommand('devSeeker.showGit', async () => {
       log.info('command: showGit');
       try {
         await openGitPanel(context);
@@ -572,7 +572,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // B-P1-1 + B-P1-2 · 真 Preview WebView 同时注册 DOM 拾取回调
   context.subscriptions.push(
-    vscode.commands.registerCommand('dualMind.showPreview', async (presetUrl?: string) => {
+    vscode.commands.registerCommand('devSeeker.showPreview', async (presetUrl?: string) => {
       log.info({ presetUrl }, 'command: showPreview');
       try {
         await openPreviewPanelInteractive(context, presetUrl, async (payload) => {
@@ -629,7 +629,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // B-1.0.1-A · 打开工作区自动后台索引（检测到项目标识文件且 24h 内未跑过时触发）
   // 全程不弹 UI、失败只打 log，不影响激活主路径
-  // v1.8.3 · 索引库与会话库分离：auto-indexer 内部打开 dualmind-index.sqlite，
+  // v1.8.3 · 索引库与会话库分离：auto-indexer 内部打开 devseeker-index.sqlite，
   //          不再需要外部传入 SQLite 连接
   const sessionDb = vscode.workspace.workspaceFolders?.[0]
     ? await openSqliteDatabase({ dbPath: defaultSqlitePath(vscode.workspace.workspaceFolders[0].uri.fsPath) })
@@ -643,12 +643,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     onStateChange: (state, info) => setIndexStatusBar(state, info),
   });
 
-  log.info('DualMind activated successfully');
+  log.info('DevSeeker activated successfully');
 }
 
 export async function deactivate(): Promise<void> {
   const log = getLogger('extension');
-  log.info('DualMind deactivating');
+  log.info('DevSeeker deactivating');
 
   // 移除 process 全局监听器，防止重启后泄漏（每次 activate 都注册新监听器）
   if (unhandledRejectionHandler) {

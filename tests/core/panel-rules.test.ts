@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -17,8 +17,8 @@ import {
 function makeInput(overrides: Partial<RulesPanelInput> = {}): RulesPanelInput {
   const base: RulesPanelInput = {
     workspaceRoot: '/ws',
-    globalRulesDir: '/home/u/.dualmind/rules',
-    workspaceRulesDir: '/ws/.dualmind/rules',
+    globalRulesDir: '/home/u/.devseeker/rules',
+    workspaceRulesDir: '/ws/.devseeker/rules',
     rules: [],
     errors: [],
     counts: {
@@ -69,7 +69,7 @@ describe('buildRulesPanelHtml', () => {
             priority: 10,
             description: 'test rule',
             globs: ['**/*.ts', 'src/**'],
-            filePath: '/ws/.dualmind/rules/my-rule.md',
+            filePath: '/ws/.devseeker/rules/my-rule.md',
             contentChars: 256,
           },
         ],
@@ -89,7 +89,7 @@ describe('buildRulesPanelHtml', () => {
     expect(html).toContain('**/*.ts');
     expect(html).toContain('256');
     expect(html).toContain('data-action="openFile"');
-    expect(html).toContain('data-path="/ws/.dualmind/rules/my-rule.md"');
+    expect(html).toContain('data-path="/ws/.devseeker/rules/my-rule.md"');
   });
 
   it('rule name / description / filePath 含 HTML 被 escape', () => {
@@ -128,7 +128,7 @@ describe('buildRulesPanelHtml', () => {
     const html = buildRulesPanelHtml(
       makeInput({
         errors: [
-          { file: '/ws/.dualmind/rules/bad.md', message: 'YAML: <syntax>' },
+          { file: '/ws/.devseeker/rules/bad.md', message: 'YAML: <syntax>' },
         ],
       }),
       'N',
@@ -136,7 +136,7 @@ describe('buildRulesPanelHtml', () => {
     );
     expect(html).toContain('Parse Errors (1)');
     expect(html).toContain('&lt;syntax&gt;');
-    expect(html).toContain('data-path="/ws/.dualmind/rules/bad.md"');
+    expect(html).toContain('data-path="/ws/.devseeker/rules/bad.md"');
   });
 
   it('stat pills 反映 counts', () => {

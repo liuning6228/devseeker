@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -12,12 +12,12 @@
  * 工作原理：
  *   1. tool_start 时记录 tool name 和 id
  *   2. 每次 tool_args_delta 时，从部分 JSON 中增量提取 content 字段
- *   3. 写入 .dualmind/tmp/stream-{toolCallId}.partial 临时文件
+ *   3. 写入 .devseeker/tmp/stream-{toolCallId}.partial 临时文件
  *   4. 工具正常完成时：write_file 工具自己写真实文件，StreamingFileWriter 清理临时文件
  *   5. SSE 断裂时：临时文件保留，真实文件不受影响；保存断点信息供 LLM 参考
  *
  * 安全：
- *   - 临时文件在 .dualmind/tmp/ 目录下，不会污染工作区源码
+ *   - 临时文件在 .devseeker/tmp/ 目录下，不会污染工作区源码
  *   - 真实文件只在 write_file/append_file 工具正式执行时才被写入
  *   - SSE 断裂后真实文件完好，LLM 可参考断点信息续写
  */
@@ -29,7 +29,7 @@ import { getLogger } from '../../infra/logger.js';
 const log = getLogger('streaming-file-writer');
 
 /** 临时文件目录名 */
-const TMP_DIR_NAME = '.dualmind';
+const TMP_DIR_NAME = '.devseeker';
 const TMP_SUBDIR = 'tmp';
 
 /** 需要流式写入的工具名 */
@@ -309,7 +309,7 @@ export class StreamingFileWriter {
   }
 
   /**
-   * 保存断点信息到 .dualmind/tmp/breakpoint-{sanitized-filename}.json
+   * 保存断点信息到 .devseeker/tmp/breakpoint-{sanitized-filename}.json
    */
   private async saveBreakpointInfo(filePath: string, writtenContent: string, tmpPath?: string): Promise<void> {
     await this.ensureTmpDir();

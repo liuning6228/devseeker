@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo "$(dirname "$0")/..")"
 
 ROOT=$(pwd)
-VSIX_NAME="dualmind-$(node -p "require('./package.json').version").vsix"
+VSIX_NAME="devseeker-$(node -p "require('./package.json').version").vsix"
 SKIP_TC=false
 SKIP_TEST=false
 for arg in "$@"; do

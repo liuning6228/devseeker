@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -13,7 +13,7 @@
  * 2. `SandboxApprovalGate` — 当模型发起 `required_permissions='all'` 时触发的审批回调；
  *    返回 `{ approved: true }` 才允许执行；拒绝 → 工具返回 `TOOL_SANDBOX_ESCALATION_DENIED`。
  * 3. `SandboxAuditSink.append()` — 把每次 escalated=true 的命令追加到审计记录。
- *    MVP：写到 `<workspaceRoot>/.dualmind/audit/sandbox.jsonl`。
+ *    MVP：写到 `<workspaceRoot>/.devseeker/audit/sandbox.jsonl`。
  *
  * 关键约定：
  * - escalation **不能** 绕过命令黑名单（rm -rf / format / shutdown / sudo ...）
@@ -82,12 +82,12 @@ export interface SandboxAuditSink {
   append(entry: SandboxAuditEntry): Promise<void>;
 }
 
-/** 默认实现：追加写 `<workspaceRoot>/.dualmind/audit/sandbox.jsonl` */
+/** 默认实现：追加写 `<workspaceRoot>/.devseeker/audit/sandbox.jsonl` */
 export class FileSandboxAuditSink implements SandboxAuditSink {
   constructor(private readonly workspaceRoot: string) {}
 
   async append(entry: SandboxAuditEntry): Promise<void> {
-    const dir = path.join(this.workspaceRoot, '.dualmind', 'audit');
+    const dir = path.join(this.workspaceRoot, '.devseeker', 'audit');
     await fs.mkdir(dir, { recursive: true });
     const file = path.join(dir, 'sandbox.jsonl');
     const line = JSON.stringify(entry) + '\n';

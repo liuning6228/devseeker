@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -8,7 +8,7 @@
  * Skills 子系统类型定义（W4 批次 4）
  *
  * 对齐 Qoder Skills：
- * - 每个 skill 一个目录：`.dualmind/skills/<skill-name>/SKILL.md`
+ * - 每个 skill 一个目录：`.devseeker/skills/<skill-name>/SKILL.md`
  * - SKILL.md 带 frontmatter（name / description / arguments 提示）
  * - 正文是给 LLM 的任务指令模板
  * - 调用方式：LLM 调用 `skill(name, args?)` 工具 → 工具把 SKILL.md 正文 + args 作为结果返回

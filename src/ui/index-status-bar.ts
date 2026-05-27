@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -13,7 +13,7 @@
  *      🟡 indexing   正在建索引/首次扫描中
  *      🔴 empty      索引未建立或扫到 0 files
  *      ⚪ no-workspace  未打开工作区（隐藏）
- *  - 点击跳到 `dualMind.reindexCodebase` 命令
+ *  - 点击跳到 `devSeeker.reindexCodebase` 命令
  *
  * 设计：
  *  - 单例 + 纯函数 setState()：panel.ts 与 auto-indexer.ts 都能调用
@@ -35,8 +35,8 @@ let item: vscode.StatusBarItem | undefined;
 export function initIndexStatusBar(context: vscode.ExtensionContext): void {
   if (item) return;
   item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
-  item.command = 'dualMind.reindexCodebase';
-  item.name = 'DualMind 代码库索引';
+  item.command = 'devSeeker.reindexCodebase';
+  item.name = 'DevSeeker 代码库索引';
   context.subscriptions.push(item);
   // 默认 no-workspace（等首次 pushIndexStatus / auto-indexer 更新）
   setIndexStatusBar('no-workspace');
@@ -51,7 +51,7 @@ export function setIndexStatusBar(state: IndexState, info: IndexStateInfo = {}):
       const n = info.fileCount ?? 0;
       item.text = `$(database) 索引 ${n}`;
       item.tooltip = new vscode.MarkdownString(
-        `**DualMind 代码库索引：已就绪** 🟢\n\n已索引 **${n}** 个文件。\n\n点击重建索引。`,
+        `**DevSeeker 代码库索引：已就绪** 🟢\n\n已索引 **${n}** 个文件。\n\n点击重建索引。`,
       );
       // 用 statusBarItem.color 无障碍属性保持默认（VSCode 主题友好）
       item.backgroundColor = undefined;
@@ -61,7 +61,7 @@ export function setIndexStatusBar(state: IndexState, info: IndexStateInfo = {}):
     case 'indexing': {
       item.text = `$(sync~spin) 索引中…`;
       item.tooltip = new vscode.MarkdownString(
-        `**DualMind 代码库索引：正在建立** 🟡\n\n${info.message ?? '扫描并向量化中…'}`,
+        `**DevSeeker 代码库索引：正在建立** 🟡\n\n${info.message ?? '扫描并向量化中…'}`,
       );
       item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
       item.show();
@@ -70,7 +70,7 @@ export function setIndexStatusBar(state: IndexState, info: IndexStateInfo = {}):
     case 'empty': {
       item.text = `$(warning) 索引未建`;
       item.tooltip = new vscode.MarkdownString(
-        `**DualMind 代码库索引：未建立 / 空** 🔴\n\n` +
+        `**DevSeeker 代码库索引：未建立 / 空** 🔴\n\n` +
           (info.message ?? '点击运行 Reindex Codebase 重新扫描。'),
       );
       item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
@@ -80,7 +80,7 @@ export function setIndexStatusBar(state: IndexState, info: IndexStateInfo = {}):
     case 'error': {
       item.text = `$(error) 索引异常`;
       item.tooltip = new vscode.MarkdownString(
-        `**DualMind 代码库索引：异常** 🔴\n\n${info.message ?? '请查看输出面板日志。'}`,
+        `**DevSeeker 代码库索引：异常** 🔴\n\n${info.message ?? '请查看输出面板日志。'}`,
       );
       item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
       item.show();

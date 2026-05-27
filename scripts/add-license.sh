@@ -2,7 +2,7 @@
 # 为 src/ tests/ 下所有 .ts 文件加 MIT 版权头部（跳过已有 Copyright 的文件）
 ROOT="$(dirname "$0")/.."
 HEADER='/**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */'

@@ -24,12 +24,12 @@ assignees: ''
 
 - OS: [e.g. Ubuntu 24.04 / Windows 11 / macOS 15]
 - VSCode 版本: [e.g. 1.98.0]
-- DualMind 版本: [e.g. 0.1.0]
+- DevSeeker 版本: [e.g. 0.1.0]
 - Provider 类型: [e.g. DeepSeek / OpenAI / Anthropic]
 
 ## 日志
 
-<!-- 通过 `DualMind: Show Logs` 获取日志内容（脱敏后粘贴） -->
+<!-- 通过 `DevSeeker: Show Logs` 获取日志内容（脱敏后粘贴） -->
 
 ## 截图
 

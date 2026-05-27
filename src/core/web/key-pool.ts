@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -16,8 +16,8 @@
  * - 支持手动重新激活失效 Key
  *
  * 配置方式：
- * - dualMind.webResearch.tavily.apiKeys（逗号分隔的多 key 字符串）
- * - dualMind.webResearch.bocha.apiKeys
+ * - devSeeker.webResearch.tavily.apiKeys（逗号分隔的多 key 字符串）
+ * - devSeeker.webResearch.bocha.apiKeys
  * - 优先使用 apiKeys（多 key），回退到 apiKey（单 key）
  */
 

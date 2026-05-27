@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -111,7 +111,7 @@ export class McpClient {
     const params: McpInitializeParams = {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: {} },
-      clientInfo: this.opts.clientInfo ?? { name: 'dualmind', version: '0.1.0' },
+      clientInfo: this.opts.clientInfo ?? { name: 'devseeker', version: '0.1.0' },
     };
     const result = await this.request<McpInitializeResult>(MCP_METHOD.INITIALIZE, params);
     this.serverInfo = result;

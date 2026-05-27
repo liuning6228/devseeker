@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -281,7 +281,7 @@ class FileDecorator implements vscode.Disposable {
           range: new vscode.Range(pos, pos),
           hoverMessage: new vscode.MarkdownString(
             `**Hunk ${i + 1}/${this.hunks.length}** · +${stats.added} -${stats.removed}\n\n` +
-            `[Accept (Ctrl+Enter)](command:dualMind.inlineDiff.accept) · [Reject (Ctrl+Backspace)](command:dualMind.inlineDiff.reject)`
+            `[Accept (Ctrl+Enter)](command:devSeeker.inlineDiff.accept) · [Reject (Ctrl+Backspace)](command:devSeeker.inlineDiff.reject)`
           ),
           renderOptions: {
             after: {
@@ -366,19 +366,19 @@ export class InlineDiffController implements vscode.Disposable {
   constructor(private readonly context: vscode.ExtensionContext) {
     // 注册命令
     this.disposables.push(
-      vscode.commands.registerCommand('dualMind.inlineDiff.accept', () => this.acceptActive()),
-      vscode.commands.registerCommand('dualMind.inlineDiff.reject', () => this.rejectActive()),
-      vscode.commands.registerCommand('dualMind.inlineDiff.acceptAll', () => this.acceptAll()),
-      vscode.commands.registerCommand('dualMind.inlineDiff.rejectAll', () => this.rejectAll()),
-      vscode.commands.registerCommand('dualMind.inlineDiff.nextHunk', () => this.navigateNext()),
-      vscode.commands.registerCommand('dualMind.inlineDiff.prevHunk', () => this.navigatePrev()),
+      vscode.commands.registerCommand('devSeeker.inlineDiff.accept', () => this.acceptActive()),
+      vscode.commands.registerCommand('devSeeker.inlineDiff.reject', () => this.rejectActive()),
+      vscode.commands.registerCommand('devSeeker.inlineDiff.acceptAll', () => this.acceptAll()),
+      vscode.commands.registerCommand('devSeeker.inlineDiff.rejectAll', () => this.rejectAll()),
+      vscode.commands.registerCommand('devSeeker.inlineDiff.nextHunk', () => this.navigateNext()),
+      vscode.commands.registerCommand('devSeeker.inlineDiff.prevHunk', () => this.navigatePrev()),
     );
 
     // 监听编辑器切换 → 更新 inlineDiffActive 上下文
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         vscode.commands.executeCommand(
-          'setContext', 'dualMind.inlineDiffActive',
+          'setContext', 'devSeeker.inlineDiffActive',
           editor ? this.decorators.has(editor.document.uri.fsPath) : false,
         );
       }),
@@ -453,14 +453,14 @@ export class InlineDiffController implements vscode.Disposable {
     // 显示状态栏提示
     const status = decorator.getStatus();
     vscode.window.setStatusBarMessage(
-      `DualMind Diff: ${relPath} — Hunk ${status.activeIdx + 1}/${status.total}  (${status.pending} pending)  Ctrl+Enter Accept · Ctrl+Backspace Reject`,
+      `DevSeeker Diff: ${relPath} — Hunk ${status.activeIdx + 1}/${status.total}  (${status.pending} pending)  Ctrl+Enter Accept · Ctrl+Backspace Reject`,
       5000,
     );
 
     log.info({ relPath, hunkCount: status.total }, 'inline diff decorations applied');
 
     // 设置 inlineDiffActive 上下文 → 激活快捷键
-    vscode.commands.executeCommand('setContext', 'dualMind.inlineDiffActive', true);
+    vscode.commands.executeCommand('setContext', 'devSeeker.inlineDiffActive', true);
   }
 
   private getActiveDecorator(): FileDecorator | undefined {

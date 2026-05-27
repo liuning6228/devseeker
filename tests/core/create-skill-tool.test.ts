@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -158,7 +158,7 @@ describe('W14.3 · CreateSkillTool.execute', () => {
     expect(r.content).toContain('created');
 
     // 文件真实存在
-    const file = path.join(ws, '.dualmind', 'skills', 'review-pr', 'SKILL.md');
+    const file = path.join(ws, '.devseeker', 'skills', 'review-pr', 'SKILL.md');
     const content = await fs.readFile(file, 'utf-8');
     expect(content).toContain('description: Inspect diff for style issues');
     // yamlEscape 把含 '<>' 的值加引号
@@ -198,7 +198,7 @@ describe('W14.3 · CreateSkillTool.execute', () => {
     expect(r2.ok).toBe(true);
     const display = (r2 as { display?: Record<string, unknown> }).display ?? {};
     expect(display['action']).toBe('overwritten');
-    const file = path.join(ws, '.dualmind', 'skills', 'commit', 'SKILL.md');
+    const file = path.join(ws, '.devseeker', 'skills', 'commit', 'SKILL.md');
     const content = await fs.readFile(file, 'utf-8');
     expect(content).toContain('description: v2');
     expect(content).toContain('new');

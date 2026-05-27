@@ -119,7 +119,7 @@ export function Composer({
 
   const handleKeyDown = useCallback(
     (ev: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+      if (ev.key === 'Enter' && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey) {
         ev.preventDefault();
         submit();
       }
@@ -388,7 +388,7 @@ export function Composer({
                 className="composer__send-btn"
                 onClick={submit}
                 disabled={!canSend}
-                title={canSend ? '发送（Ctrl+Enter）' : '输入消息后发送'}
+                title={canSend ? '发送（Enter）' : '输入消息后发送'}
                 aria-label="发送"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

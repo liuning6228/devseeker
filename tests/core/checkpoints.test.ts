@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -66,7 +66,7 @@ describe('CheckpointStore.create', () => {
     expect(cp.label).toBe('v1');
     expect(cp.messageCount).toBe(2);
 
-    const file = path.join(tmpRoot, '.dualmind/checkpoints/s1', `${cp.id}.json`);
+    const file = path.join(tmpRoot, '.devseeker/checkpoints/s1', `${cp.id}.json`);
     expect(existsSync(file)).toBe(true);
 
     const list = await store.list('s1');
@@ -94,7 +94,7 @@ describe('CheckpointStore.create', () => {
     expect(cp.fileSnapshots[2].contentHash).toBe(hashDiff);
 
     // 文件池应只有 2 个唯一内容
-    const poolDir = path.join(tmpRoot, '.dualmind/checkpoints/files');
+    const poolDir = path.join(tmpRoot, '.devseeker/checkpoints/files');
     const poolFiles = await fs.readdir(poolDir);
     expect(poolFiles.sort()).toEqual([hashDiff, hashSame].sort());
   });
@@ -121,7 +121,7 @@ describe('CheckpointStore.create', () => {
     expect(cp.fileSnapshots[0].skipped).toBe(true);
     expect(cp.fileSnapshots[0].contentHash).toBe('');
 
-    const poolDir = path.join(tmpRoot, '.dualmind/checkpoints/files');
+    const poolDir = path.join(tmpRoot, '.devseeker/checkpoints/files');
     const exists = existsSync(poolDir) ? (await fs.readdir(poolDir)).length : 0;
     expect(exists).toBe(0);
   });
@@ -249,7 +249,7 @@ describe('CheckpointStore.prune', () => {
 
     const list = await store.list('s1');
     expect(list.map((m) => m.id)).toEqual([b.id, c.id]);
-    const oldFile = path.join(tmpRoot, '.dualmind/checkpoints/s1', `${a.id}.json`);
+    const oldFile = path.join(tmpRoot, '.devseeker/checkpoints/s1', `${a.id}.json`);
     expect(existsSync(oldFile)).toBe(false);
   });
 });
@@ -258,7 +258,7 @@ describe('CheckpointStore.sessionId sanitization', () => {
   it('non-filesystem-safe sessionId is sanitized to _', async () => {
     const store = makeStore();
     const cp = await store.create({ sessionId: 's/1:bad?', messages: sampleMessages });
-    const dir = path.join(tmpRoot, '.dualmind/checkpoints/s_1_bad_');
+    const dir = path.join(tmpRoot, '.devseeker/checkpoints/s_1_bad_');
     expect(existsSync(dir)).toBe(true);
     const list = await store.list('s/1:bad?');
     expect(list[0].id).toBe(cp.id);
@@ -406,13 +406,13 @@ describe('CheckpointStore.gcOlderThan (W10.4)', () => {
     const ageMs = 10 * 24 * 60 * 60 * 1000;
     const oldFile = path.join(
       tmpRoot,
-      '.dualmind/checkpoints/s1',
+      '.devseeker/checkpoints/s1',
       `${oldCp.id}.json`,
     );
     const raw = JSON.parse(await fs.readFile(oldFile, 'utf-8'));
     raw.createdAt = Date.now() - ageMs;
     await fs.writeFile(oldFile, JSON.stringify(raw), 'utf-8');
-    const idxFile = path.join(tmpRoot, '.dualmind/checkpoints/s1/index.json');
+    const idxFile = path.join(tmpRoot, '.devseeker/checkpoints/s1/index.json');
     const idx = JSON.parse(await fs.readFile(idxFile, 'utf-8'));
     for (const m of idx.entries) {
       if (m.id === oldCp.id) m.createdAt = raw.createdAt;
@@ -447,7 +447,7 @@ describe('CheckpointStore.gcOrphanPoolFiles (W10.4)', () => {
       files: [{ relPath: 'a.ts', content: 'keep-me' }],
     });
     // 手动在 files/ 池中放一个孤儿
-    const poolDir = path.join(tmpRoot, '.dualmind/checkpoints/files');
+    const poolDir = path.join(tmpRoot, '.devseeker/checkpoints/files');
     const orphanHash = createHash('sha256').update('orphan').digest('hex');
     await fs.writeFile(path.join(poolDir, orphanHash), 'orphan', 'utf-8');
 
@@ -473,7 +473,7 @@ describe('CheckpointStore.delete', () => {
     const list = await store.list('s1');
     expect(list.map((m) => m.id)).toEqual([b.id]);
 
-    const aFile = path.join(tmpRoot, '.dualmind/checkpoints/s1', `${a.id}.json`);
+    const aFile = path.join(tmpRoot, '.devseeker/checkpoints/s1', `${a.id}.json`);
     expect(existsSync(aFile)).toBe(false);
   });
 

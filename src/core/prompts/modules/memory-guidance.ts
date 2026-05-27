@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -22,7 +22,7 @@ export const MEMORY_GUIDANCE_BLOCK = [
   '',
   '- To **read** real-time entries written in this session: call `memory_search`.',
   '- To **write** (add/replace/remove): call `memory`.',
-  '- Memory is stored as markdown files under `.dualmind/memories/`.',
+  '- Memory is stored as markdown files under `.devseeker/memories/.',
   '- Call `memory_search` before writing to avoid duplicates.',
   '',
 ].join('\n');

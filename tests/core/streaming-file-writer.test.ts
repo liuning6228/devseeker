@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -101,7 +101,7 @@ describe('StreamingFileWriter breakpoint info', () => {
       await writer.onStreamBroken();
 
       // Check that breakpoint file was created
-      const tmpDir = path.join(dir, '.dualmind', 'tmp');
+      const tmpDir = path.join(dir, '.devseeker', 'tmp');
       const dirExists = await fs.access(tmpDir).then(() => true).catch(() => false);
       if (!dirExists) {
         // If no breakpoint was created, it means no content was cached (no active writers)
@@ -134,7 +134,7 @@ describe('StreamingFileWriter breakpoint info', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       // StreamingFileWriter 写入的是 tmp 文件，不是目标文件
-      const tmpFile = path.join(dir, '.dualmind', 'tmp', 'stream-tc-1.partial');
+      const tmpFile = path.join(dir, '.devseeker', 'tmp', 'stream-tc-1.partial');
       const tmpContent = await fs.readFile(tmpFile, 'utf-8');
       expect(tmpContent).toContain('hello world');
 

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -40,7 +40,7 @@ import { AgentError, ErrorCodes } from '../errors/index.js';
 
 export interface Bm25CodebaseIndexOptions {
   workspaceRoot: string;
-  /** BM25 快照落盘路径。建议与向量库区分：`.dualmind/bm25-index.json`。 */
+  /** BM25 快照落盘路径。建议与向量库区分：`.devseeker/bm25-index.json`。 */
   storePath: string;
   scanner?: ScannerOptions;
   chunker?: ChunkOptions;
@@ -227,7 +227,7 @@ export class Bm25CodebaseIndex implements CodebaseIndexLike {
     if (this.bm25.size() === 0) {
       throw new AgentError({
         code: ErrorCodes.INDEX_NOT_READY,
-        message: '代码库尚未建立索引，请先运行 DualMind: Reindex Codebase',
+        message: '代码库尚未建立索引，请先运行 DevSeeker: Reindex Codebase',
       });
     }
     const trimmed = query.trim();
@@ -312,9 +312,9 @@ export class Bm25CodebaseIndex implements CodebaseIndexLike {
 }
 
 /**
- * BM25 索引默认落盘路径：`.dualmind/bm25-index.json`（与 `codebase-index.json` 并列）。
+ * BM25 索引默认落盘路径：`.devseeker/bm25-index.json`（与 `codebase-index.json` 并列）。
  * 与向量库分家，避免 provider 切换时互相覆盖。
  */
 export function defaultBm25IndexStorePath(workspaceRoot: string): string {
-  return joinPath(workspaceRoot, '.dualmind', 'bm25-index.json');
+  return joinPath(workspaceRoot, '.devseeker', 'bm25-index.json');
 }

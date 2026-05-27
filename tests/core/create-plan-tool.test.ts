@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -209,7 +209,7 @@ describe('CreatePlanTool', () => {
   it('write uses plansDirRel override', async () => {
     const tool = new CreatePlanTool({
       getWorkspaceRoot: () => wsDir,
-      plansDirRel: '.dualmind/plans',
+      plansDirRel: '.devseeker/plans',
     });
     const r = await tool.execute(
       { mode: 'write', name: 'X', overview: 'y', plan: '# X' },
@@ -217,7 +217,7 @@ describe('CreatePlanTool', () => {
     );
     expect(r.ok).toBe(true);
     const planFilePath = (r.display as { planFilePath: string }).planFilePath;
-    expect(planFilePath).toContain(join('.dualmind', 'plans'));
+    expect(planFilePath).toContain(join('.devseeker', 'plans'));
     // 确认文件真的落在该目录
     const stat = await fs.stat(planFilePath);
     expect(stat.isFile()).toBe(true);

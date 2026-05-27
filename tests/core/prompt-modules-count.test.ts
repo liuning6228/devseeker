@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -54,7 +54,7 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
 
   it('每个模块含可识别特征串（V2 更新）', () => {
     // V2 三段式 identity
-    expect(AGENT_IDENTITY_MODULE).toContain('DualMind');
+    expect(AGENT_IDENTITY_MODULE).toContain('DevSeeker');
     expect(AGENT_IDENTITY_MODULE).toContain('thinking collaborator');
     expect(AGENT_IDENTITY_MODULE).toContain('expert software engineer');
     // V2 新增 thinking-framework
@@ -109,7 +109,7 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
       name: 'commit',
       description: 'create git commit',
       source: 'workspace',
-      filePath: '/ws/.dualmind/skills/commit/SKILL.md',
+      filePath: '/ws/.devseeker/skills/commit/SKILL.md',
       argumentsHint: '-m <msg>',
       body: '# Commit Skill',
     } as unknown as Skill;
@@ -158,7 +158,7 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
     });
 
     // 1. agent-identity (V2 三段式)
-    expect(full).toContain('DualMind');
+    expect(full).toContain('DevSeeker');
     expect(full).toContain('thinking collaborator');
     // 2. thinking-framework (V2 新增)
     expect(full).toContain('Thinking Before Acting');

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -42,7 +42,7 @@ const DEFAULT_IGNORE_DIRS = new Set<string>([
   'venv',
   'target',
   '.vscode-test',
-  '.dualmind', // 自身工作产物
+  '.devseeker', // 自身工作产物
   '.idea',
   '.DS_Store',
 ]);

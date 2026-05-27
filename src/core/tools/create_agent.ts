@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,7 +7,7 @@
 /**
  * W14.4 · create_agent 工具
  *
- * 职责：让 Agent/用户通过对话在 `.dualmind/agents/<slug>/AGENT.md` 快速沉淀自定义子代理。
+ * 职责：让 Agent/用户通过对话在 `.devseeker/agents/<slug>/AGENT.md` 快速沉淀自定义子代理。
  *
  * 参数：
  *   - name: 人类可读的 agent 标识（会被 slugify 成目录名）
@@ -45,7 +45,7 @@ const parameters = {
     name: {
       type: 'string',
       description:
-        '子代理名（人类可读）。将被 slugify 为目录名 `<slug>`，文件落于 `.dualmind/agents/<slug>/AGENT.md`。示例："security-reviewer" / "api-doc-writer"。禁止与内置 Browser/Research/Guide/Verify 同名。',
+        '子代理名（人类可读）。将被 slugify 为目录名 `<slug>`，文件落于 `.devseeker/agents/<slug>/AGENT.md`。示例："security-reviewer" / "api-doc-writer"。禁止与内置 Browser/Research/Guide/Verify 同名。',
     },
     description: {
       type: 'string',
@@ -89,7 +89,7 @@ export interface CreateAgentDeps {
 export class CreateAgentTool implements ITool<CreateAgentArgs, ToolResult> {
   readonly name = 'create_agent';
   readonly description =
-    '创建一个项目级 subagent：在 `.dualmind/agents/<slug>/AGENT.md` 落盘。下一次主 Agent 调用 `Agent` 工具时传 `subagent_type=<slug>` 即可派生该子代理。适合把"反复出现、职责独立、可工具白名单隔离"的子任务沉淀为自定义角色（如 "security-reviewer" / "api-doc-writer"）。';
+    '创建一个项目级 subagent：在 `.devseeker/agents/<slug>/AGENT.md` 落盘。下一次主 Agent 调用 `Agent` 工具时传 `subagent_type=<slug>` 即可派生该子代理。适合把"反复出现、职责独立、可工具白名单隔离"的子任务沉淀为自定义角色（如 "security-reviewer" / "api-doc-writer"）。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'workspace_write';
 
@@ -124,7 +124,7 @@ export class CreateAgentTool implements ITool<CreateAgentArgs, ToolResult> {
       );
     }
 
-    const agentsRoot = path.join(ws, '.dualmind', 'agents');
+    const agentsRoot = path.join(ws, '.devseeker', 'agents');
     const agentDir = path.join(agentsRoot, slug);
     const agentFile = path.join(agentDir, 'AGENT.md');
 

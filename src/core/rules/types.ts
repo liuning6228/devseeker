@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -17,9 +17,9 @@ export type RuleKind = 'always_on' | 'glob' | 'model_decision';
 
 /**
  * 规则来源（DESIGN §M13.3）。
- * - `global`：`~/.dualmind/rules/`（跨项目默认规则）
- * - `workspace`：`<workspaceRoot>/.dualmind/rules/`（项目级）
- * - `nested`：子目录（如 monorepo 的 package）自带的 `.dualmind/rules/`（MVP 保留字段，暂未扫描）
+ * - `global`：`~/.devseeker/rules/`（跨项目默认规则）
+ * - `workspace`：`<workspaceRoot>/.devseeker/rules/`（项目级）
+ * - `nested`：子目录（如 monorepo 的 package）自带的 `.devseeker/rules/`（MVP 保留字段，暂未扫描）
  *
  * 同名规则按 `nested > workspace > global` 就近覆盖。
  */

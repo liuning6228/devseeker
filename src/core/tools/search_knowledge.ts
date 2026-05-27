@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,7 +7,7 @@
 /**
  * W14.2 · search_knowledge 工具
  *
- * 职责：在用户私有知识库（`.dualmind/knowledge/**\/*.md`）内做自然语言检索
+ * 职责：在用户私有知识库（`.devseeker/knowledge/**\/*.md`）内做自然语言检索
  *   - 与 `search_codebase` 分库，独立 BM25 索引
  *   - 只读：ToolSafetyLevel = 'read_only'
  *   - 懒加载：panel 通过闭包 getIndex() 返回当前 KnowledgeReader
@@ -62,7 +62,7 @@ export interface SearchKnowledgeDeps {
 export class SearchKnowledgeTool implements ITool<SearchKnowledgeArgs, ToolResult> {
   readonly name = 'search_knowledge';
   readonly description =
-    '在用户私有知识库（.dualmind/knowledge/**/*.md）中做自然语言检索，返回 top-K 相关文档片段。适合查询团队规范、架构说明、onboarding 等业务知识。与 search_codebase 分库，仅命中用户明确维护的 markdown 文档。';
+    '在用户私有知识库（.devseeker/knowledge/**/*.md）中做自然语言检索，返回 top-K 相关文档片段。适合查询团队规范、架构说明、onboarding 等业务知识。与 search_codebase 分库，仅命中用户明确维护的 markdown 文档。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'read_only';
 
@@ -152,7 +152,7 @@ function softKbMissing(query: string, detail?: string): ToolResult {
     `Results: 0 matches (knowledge base not initialized)`,
     '',
     detail ??
-      '知识库目录不存在。请创建 `.dualmind/knowledge/` 并放入 `.md` 文档（团队规范 / 架构说明 / onboarding 等），再运行 `DualMind: Reindex Knowledge` 建索引。',
+      '知识库目录不存在。请创建 `.devseeker/knowledge/` 并放入 `.md` 文档（团队规范 / 架构说明 / onboarding 等），再运行 `DevSeeker: Reindex Knowledge` 建索引。',
     '',
     '如需查询代码库，请改用 `search_codebase` 工具。',
   ];
@@ -174,7 +174,7 @@ function softKbNotReady(query: string): ToolResult {
     `Query: "${query}"`,
     `Results: 0 matches (knowledge base empty / not indexed)`,
     '',
-    '知识库尚未建立索引或无可索引的 markdown 文件。请先运行命令 `DualMind: Reindex Knowledge`，或确认 `.dualmind/knowledge/` 内确有 `.md` 文档。',
+    '知识库尚未建立索引或无可索引的 markdown 文件。请先运行命令 `DevSeeker: Reindex Knowledge`，或确认 `.devseeker/knowledge/` 内确有 `.md` 文档。',
   ];
   return {
     ok: true,

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -9,7 +9,7 @@
  *
  * 目的：
  * - 开箱即用：用户无需自己写 SKILL.md，就能用 `/commit` / `/review` / `/fix-bug` / `/research`
- * - 覆盖策略：用户在 `.dualmind/skills/<name>/SKILL.md` 定义同名 skill → 用户版覆盖内置版
+ * - 覆盖策略：用户在 `.devseeker/skills/<name>/SKILL.md` 定义同名 skill → 用户版覆盖内置版
  * - 不读盘：内容硬编码在此，避免打包 md 文件到 .vsix 的复杂性
  *
  * Skill[] 结构：直接满足 SkillLoader.load() 返回的 Skill 接口。
@@ -97,7 +97,7 @@ const REVIEW_BODY = `
 3. **性能**：N+1 查询、意外的 O(n²)、不必要的同步 I/O、内存泄漏
 4. **可维护性**：命名、职责单一、重复代码、魔法数、难以测试的结构
 5. **测试**：是否有对应测试，边界是否覆盖
-6. **风格一致性**：是否遵循项目既有约定（从 \`.dualmind/rules/\` 和相邻文件学习）
+6. **风格一致性**：是否遵循项目既有约定（从 \`.devseeker/rules/\` 和相邻文件学习）
 
 ## 产出
 

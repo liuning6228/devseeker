@@ -114,8 +114,8 @@ export function QuestionCard({ payload, onSubmit, onCancel }: QuestionCardProps)
       onClick={handleOverlayClick}
       onKeyDown={handleKeyDown}
     >
-      <div className="ask-modal" role="dialog" aria-modal="true" aria-label="DualMind 需要你的输入">
-        <div className="ask-modal__title">DualMind 需要你的输入</div>
+      <div className="ask-modal" role="dialog" aria-modal="true" aria-label="DevSeeker 需要你的输入">
+        <div className="ask-modal__title">DevSeeker 需要你的输入</div>
         <div className="ask-modal__hint">
           请回答以下 {total} 个问题以帮助我做决策。你可以选择一个方案，或在下方输入自定义内容。
         </div>

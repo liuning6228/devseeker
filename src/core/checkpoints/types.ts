@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -11,8 +11,8 @@
  *
  * 模型：
  * - Checkpoint 是某时刻对话历史 + 已追踪文件内容的快照。
- * - 每个工作区有一个全局文件池（.dualmind/checkpoints/files/<sha256>），跨 session 去重。
- * - 每个 session 独立目录保存其 checkpoint 列表（.dualmind/checkpoints/<sessionId>/）。
+ * - 每个工作区有一个全局文件池（.devseeker/checkpoints/files/<sha256>），跨 session 去重。
+ * - 每个 session 独立目录保存其 checkpoint 列表（.devseeker/checkpoints/<sessionId>/）。
  * - MVP：文件内容以 UTF-8 文本处理；大于 DEFAULT_MAX_FILE_BYTES 的文件跳过（仅记 skipped 标志）。
  */
 

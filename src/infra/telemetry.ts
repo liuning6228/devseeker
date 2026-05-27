@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -8,7 +8,7 @@
  * Telemetry —— 可选的匿名使用统计上报
  *
  * 设计原则：
- * - **Opt-in**：默认完全关闭，用户通过 `dualMind.telemetry.enabled` 显式开启
+ * - **Opt-in**：默认完全关闭，用户通过 `devSeeker.telemetry.enabled` 显式开启
  * - **仅匿名**：不收集个人身份信息、文件内容、API Key
  * - **仅事件**：不收集连续追踪数据（如光标位置、频率）
  * - **可审计**：发送的内容可在 log 中查看（debug 级别）
@@ -134,4 +134,4 @@ export function telemetryEvent(
 
 // ─────────── VS Code 配置 key ───────────
 /** 用户设置中遥测开关的配置路径 */
-export const TELEMETRY_CONFIG_KEY = 'dualMind.telemetry.enabled';
+export const TELEMETRY_CONFIG_KEY = 'devSeeker.telemetry.enabled';

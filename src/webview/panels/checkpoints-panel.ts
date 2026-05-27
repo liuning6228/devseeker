@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -298,7 +298,7 @@ export function buildCheckpointsPanelHtml(
   const timeline = renderTimeline(input);
   const diffBlock = diff ? renderDiff(diff) : renderDiffPlaceholder();
   const body = `
-<h1>DualMind · Checkpoint Timeline <span class="muted" style="font-weight:normal;font-size:11px;">${escapeHtml(input.generatedAt)}</span></h1>
+<h1>DevSeeker · Checkpoint Timeline <span class="muted" style="font-weight:normal;font-size:11px;">${escapeHtml(input.generatedAt)}</span></h1>
 ${header}
 <div class="cp-layout">
   <div class="cp-left">${timeline}</div>
@@ -396,7 +396,7 @@ li.cp-item button { padding: 1px 6px; font-size: 10.5px; }
 .diff-file .sizes { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; color: var(--muted); }
 `;
   return renderBaseHtml({
-    title: 'DualMind · Checkpoint Timeline',
+    title: 'DevSeeker · Checkpoint Timeline',
     nonce,
     cspSource,
     body,
@@ -511,8 +511,8 @@ export async function openCheckpointsPanel(
   source: CheckpointsPanelDataSource,
 ): Promise<vscode.WebviewPanel> {
   const panel = vscode.window.createWebviewPanel(
-    'dualMind.checkpointsPanel',
-    'DualMind · Checkpoint Timeline',
+    'devSeeker.checkpointsPanel',
+    'DevSeeker · Checkpoint Timeline',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,

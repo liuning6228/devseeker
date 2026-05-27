@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -106,10 +106,10 @@ function truncateArgsRawForHistory(argsRaw: string, toolName: string): string {
  *
  * rc.4 调整为 150：
  * - rc.3 的 25 在真实长任务（跨 44+ 文件重构、批量接口改写）中已被观测到 hard-stop
- *   （见 .dualmind/g2-evidence/T4/reply.md：Batch 2/5 截断），与业界参考值
+ *   （见 .devseeker/g2-evidence/T4/reply.md：Batch 2/5 截断），与业界参考值
  *   （Claude Code ~200 / Cursor ~100）存在 4–8× 差距。
  * - 150 为平衡值：留足完成中型重构，又不至于在真正失控时浪费过多 token。
- * - 用户可经 VS Code Settings · dualMind.maxTurns 覆盖（范围 25–500）。
+ * - 用户可经 VS Code Settings · devSeeker.maxTurns 覆盖（范围 25–500）。
  */
 const DEFAULT_MAX_TURNS = 150;
 
@@ -136,9 +136,9 @@ export interface TaskLoopConfig {
   approvalGate?: ToolApprovalGate;
   /** 可选：审批审计日志 sink */
   auditSink?: ApprovalAuditSink;
-  /** 可选：审批策略覆写（从 .dualmind/approval-policy.yaml 加载） */
+  /** 可选：审批策略覆写（从 .devseeker/approval-policy.yaml 加载） */
   approvalOverrides?: import('../tools/approval-policy-loader.js').ToolOverride[];
-  /** 可选：审批策略默认值覆写（从 .dualmind/approval-policy.yaml defaults 加载） */
+  /** 可选：审批策略默认值覆写（从 .devseeker/approval-policy.yaml defaults 加载） */
   approvalPolicyTable?: Partial<import('../tools/approval-policy.js').ApprovalPolicyTable>;
   /**
    * 可选：工具白名单过滤器（W6b1 Mode 调度）

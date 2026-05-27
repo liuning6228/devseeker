@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -130,10 +130,10 @@ describe('UsageJsonlStore', () => {
     expect(s.getFilePath()).toBe(tmpFile);
   });
 
-  it('default filePath resolves under home dir .dualmind', () => {
+  it('default filePath resolves under home dir .devseeker', () => {
     const s = new UsageJsonlStore();
     const fp = s.getFilePath();
-    expect(fp).toContain('.dualmind');
+    expect(fp).toContain('.devseeker');
     expect(fp).toContain('usage.jsonl');
   });
 });

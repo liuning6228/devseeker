@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -31,7 +31,7 @@ export interface MemorySeed {
 }
 
 /**
- * 10 条内置种子记忆（dualmind 工程侧通用域知识）。
+ * 10 条内置种子记忆（devseeker 工程侧通用域知识）。
  *
  * 分类分布（覆盖 4 大类）：
  *  - project_*        × 4  技术栈 / 构建 / SCM / 运行环境

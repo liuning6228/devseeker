@@ -49,7 +49,7 @@ function postToHost(msg: WebviewInboundMessage): void {
 }
 
 /** 非首次启动标志（localStorage） */
-const FIRST_RUN_KEY = 'dualmind.first_run_done';
+const FIRST_RUN_KEY = 'devSeeker.first_run_done';
 
 export function App(): JSX.Element {
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -722,7 +722,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             type="button"
             className="index-bar__action"
             onClick={() => postToHost({ type: 'reindex' })}
-            title="等价于命令面板 DualMind: Reindex Codebase"
+            title="等价于命令面板 DevSeeker: Reindex Codebase"
           >
             立即建索引
           </button>

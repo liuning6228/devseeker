@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -304,7 +304,7 @@ describe('checkpoints-panel · buildCheckpointsPanelHtml', () => {
       'N1',
       'vscode-resource:/cspSrc',
     );
-    expect(html).toContain('DualMind · Checkpoint Timeline');
+    expect(html).toContain('DevSeeker · Checkpoint Timeline');
     expect(html).toContain('no checkpoints');
     expect(html).toContain('id="btn-compare" disabled');
     // CSP default-src 'none'

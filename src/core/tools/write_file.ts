@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -240,7 +240,7 @@ export class WriteFileTool implements ITool<WriteFileArgs, ToolResult> {
 
     // 6. 内容退化保护已移除（v2 架构：StreamingFileWriter 只写临时文件，不再污染真实文件）
     //    原保护逻辑因 SSE 断裂导致真实文件被部分内容污染而存在，
-    //    现在 StreamingFileWriter v2 只写 .dualmind/tmp/ 临时文件，
+    //    现在 StreamingFileWriter v2 只写 .devseeker/tmp/ 临时文件，
     //    真实文件仅在 write_file 工具正式执行时才被写入，不存在退化风险。
 
     // 7. 创建父目录（mkdirp，确保路径中的每一级目录都存在）

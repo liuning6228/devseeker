@@ -1,18 +1,18 @@
 {
-  "name": "dualmind",
-  "displayName": "DualMind",
+  "name": "devseeker",
+  "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
   "version": "0.1.0",
-  "publisher": "dualmind",
+  "publisher": "devseeker",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/liuning6228/dualmind"
+    "url": "https://github.com/liuning6228/devseeker"
   },
-  "homepage": "https://github.com/liuning6228/dualmind",
+  "homepage": "https://github.com/liuning6228/devseeker",
   "bugs": {
-    "url": "https://github.com/liuning6228/dualmind/issues"
+    "url": "https://github.com/liuning6228/devseeker/issues"
   },
   "engines": {
     "vscode": "^1.85.0",
@@ -42,7 +42,7 @@
     "color": "#1e1e2e",
     "theme": "dark"
   },
-  "qna": "https://github.com/dualmind/dualmind/discussions",
+  "qna": "https://github.com/liuning6228/devseeker/discussions",
   "markdown": "github",
   "main": "./out/extension.js",
   "activationEvents": [
@@ -51,173 +51,173 @@
   "contributes": {
     "commands": [
       {
-        "command": "dualMind.openPanel",
+        "command": "devSeeker.openPanel",
         "title": "Open Panel",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.showLogs",
+        "command": "devSeeker.showLogs",
         "title": "Show Logs",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.reindex",
+        "command": "devSeeker.reindex",
         "title": "Reindex Codebase",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.revertCheckpoint",
+        "command": "devSeeker.revertCheckpoint",
         "title": "Revert to Checkpoint…",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.showCheckpointTimeline",
+        "command": "devSeeker.showCheckpointTimeline",
         "title": "Show Checkpoint Timeline",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.inlineEdit",
+        "command": "devSeeker.inlineEdit",
         "title": "Inline Edit (将选区送入输入框)",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.reactivateSearchKeys",
+        "command": "devSeeker.reactivateSearchKeys",
         "title": "重新激活失效的搜索 API Key",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.perf.exportReport",
+        "command": "devSeeker.perf.exportReport",
         "title": "Export Performance Report",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.session.export",
+        "command": "devSeeker.session.export",
         "title": "Export Session (md/json)",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.askSelection",
+        "command": "devSeeker.askSelection",
         "title": "Ask About Selection",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.showContext",
+        "command": "devSeeker.showContext",
         "title": "Show Context (L0/L1/L2/L3)",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.showCost",
+        "command": "devSeeker.showCost",
         "title": "Show Cost Panel",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.showRules",
+        "command": "devSeeker.showRules",
         "title": "Show Rules Panel",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.showHooks",
+        "command": "devSeeker.showHooks",
         "title": "Show Hooks Panel",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.showGit",
+        "command": "devSeeker.showGit",
         "title": "Show Git Panel",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.showPreview",
+        "command": "devSeeker.showPreview",
         "title": "Show Preview Panel",
-        "category": "DualMind"
+        "category": "DevSeeker"
       },
       {
-        "command": "dualMind.inlineDiff.accept",
+        "command": "devSeeker.inlineDiff.accept",
         "title": "Accept Hunk",
-        "category": "DualMind Diff"
+        "category": "DevSeeker Diff"
       },
       {
-        "command": "dualMind.inlineDiff.reject",
+        "command": "devSeeker.inlineDiff.reject",
         "title": "Reject Hunk",
-        "category": "DualMind Diff"
+        "category": "DevSeeker Diff"
       },
       {
-        "command": "dualMind.inlineDiff.acceptAll",
+        "command": "devSeeker.inlineDiff.acceptAll",
         "title": "Accept All Hunks",
-        "category": "DualMind Diff"
+        "category": "DevSeeker Diff"
       },
       {
-        "command": "dualMind.inlineDiff.rejectAll",
+        "command": "devSeeker.inlineDiff.rejectAll",
         "title": "Reject All Hunks",
-        "category": "DualMind Diff"
+        "category": "DevSeeker Diff"
       },
       {
-        "command": "dualMind.inlineDiff.nextHunk",
+        "command": "devSeeker.inlineDiff.nextHunk",
         "title": "Next Hunk",
-        "category": "DualMind Diff"
+        "category": "DevSeeker Diff"
       },
       {
-        "command": "dualMind.inlineDiff.prevHunk",
+        "command": "devSeeker.inlineDiff.prevHunk",
         "title": "Previous Hunk",
-        "category": "DualMind Diff"
+        "category": "DevSeeker Diff"
       }
     ],
     "keybindings": [
       {
-        "command": "dualMind.inlineEdit",
+        "command": "devSeeker.inlineEdit",
         "key": "ctrl+shift+i",
         "mac": "cmd+shift+i",
         "when": "editorTextFocus"
       },
       {
-        "command": "dualMind.askSelection",
+        "command": "devSeeker.askSelection",
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
         "when": "editorTextFocus && editorHasSelection"
       },
       {
-        "command": "dualMind.inlineDiff.accept",
+        "command": "devSeeker.inlineDiff.accept",
         "key": "ctrl+enter",
         "mac": "cmd+enter",
-        "when": "editorTextFocus && dualMind.inlineDiffActive"
+        "when": "editorTextFocus && devSeeker.inlineDiffActive"
       },
       {
-        "command": "dualMind.inlineDiff.reject",
+        "command": "devSeeker.inlineDiff.reject",
         "key": "ctrl+backspace",
         "mac": "cmd+backspace",
-        "when": "editorTextFocus && dualMind.inlineDiffActive"
+        "when": "editorTextFocus && devSeeker.inlineDiffActive"
       },
       {
-        "command": "dualMind.inlineDiff.nextHunk",
+        "command": "devSeeker.inlineDiff.nextHunk",
         "key": "alt+down",
         "mac": "alt+down",
-        "when": "editorTextFocus && dualMind.inlineDiffActive"
+        "when": "editorTextFocus && devSeeker.inlineDiffActive"
       },
       {
-        "command": "dualMind.inlineDiff.prevHunk",
+        "command": "devSeeker.inlineDiff.prevHunk",
         "key": "alt+up",
         "mac": "alt+up",
-        "when": "editorTextFocus && dualMind.inlineDiffActive"
+        "when": "editorTextFocus && devSeeker.inlineDiffActive"
       }
     ],
 
     "menus": {
       "editor/context": [
         {
-          "command": "dualMind.askSelection",
+          "command": "devSeeker.askSelection",
           "when": "editorHasSelection",
-          "group": "dualMind@1"
+          "group": "devSeeker@1"
         },
         {
-          "command": "dualMind.inlineEdit",
+          "command": "devSeeker.inlineEdit",
           "when": "editorTextFocus",
-          "group": "dualMind@2"
+          "group": "devSeeker@2"
         }
       ]
     },
     "configuration": {
-      "title": "DualMind",
+      "title": "DevSeeker",
       "properties": {
-        "dualMind.models.llm.level1.provider": {
+        "devSeeker.models.llm.level1.provider": {
           "type": "string",
           "enum": [
             "deepseek",
@@ -230,18 +230,18 @@
           "default": "deepseek",
           "description": "LLM 主力模型（Level 1）的 Provider 类型"
         },
-        "dualMind.models.llm.level1.model": {
+        "devSeeker.models.llm.level1.model": {
           "type": "string",
           "default": "deepseek-chat",
           "description": "LLM Level 1 模型名称"
         },
-        "dualMind.models.llm.level1.apiKey": {
+        "devSeeker.models.llm.level1.apiKey": {
           "type": "string",
           "default": "",
           "description": "LLM Level 1 API Key",
           "scope": "application"
         },
-        "dualMind.models.llm.level1.apiKeys": {
+        "devSeeker.models.llm.level1.apiKeys": {
           "type": "array",
           "items": {
             "type": "string"
@@ -250,23 +250,23 @@
           "description": "LLM Level 1 备用 API Key 列表（429 时同级轮换，全部耗尽才降级）",
           "scope": "application"
         },
-        "dualMind.models.llm.level1.baseUrl": {
+        "devSeeker.models.llm.level1.baseUrl": {
           "type": "string",
           "default": "",
           "description": "LLM Level 1 Base URL（留空则使用 Provider 默认值）"
         },
-        "dualMind.models.llm.level1.reasoningModel": {
+        "devSeeker.models.llm.level1.reasoningModel": {
           "type": "string",
           "default": "",
           "description": "LLM Level 1 推理模型（如 deepseek-reasoner，留空则无）"
         },
-        "dualMind.models.llm.level1.contextWindow": {
+        "devSeeker.models.llm.level1.contextWindow": {
           "type": "integer",
           "default": 0,
           "minimum": 0,
           "description": "LLM Level 1 上下文窗口大小（token 数）。0 = 使用 Provider 默认值（DeepSeek 1M / OpenAI 128K / Anthropic 200K）。设置后覆盖 Provider 硬编码值，适用于自定义模型。"
         },
-        "dualMind.models.llm.level2.provider": {
+        "devSeeker.models.llm.level2.provider": {
           "type": "string",
           "enum": [
             "deepseek",
@@ -279,18 +279,18 @@
           "default": "",
           "description": "LLM 备选模型（Level 2）的 Provider 类型（留空=不配置）"
         },
-        "dualMind.models.llm.level2.model": {
+        "devSeeker.models.llm.level2.model": {
           "type": "string",
           "default": "",
           "description": "LLM Level 2 模型名称"
         },
-        "dualMind.models.llm.level2.apiKey": {
+        "devSeeker.models.llm.level2.apiKey": {
           "type": "string",
           "default": "",
           "description": "LLM Level 2 API Key",
           "scope": "application"
         },
-        "dualMind.models.llm.level2.apiKeys": {
+        "devSeeker.models.llm.level2.apiKeys": {
           "type": "array",
           "items": {
             "type": "string"
@@ -299,23 +299,23 @@
           "description": "LLM Level 2 备用 API Key 列表（429 时同级轮换）",
           "scope": "application"
         },
-        "dualMind.models.llm.level2.baseUrl": {
+        "devSeeker.models.llm.level2.baseUrl": {
           "type": "string",
           "default": "",
           "description": "LLM Level 2 Base URL（留空则使用 Provider 默认值）"
         },
-        "dualMind.models.llm.level2.reasoningModel": {
+        "devSeeker.models.llm.level2.reasoningModel": {
           "type": "string",
           "default": "",
           "description": "LLM Level 2 推理模型"
         },
-        "dualMind.models.llm.level2.contextWindow": {
+        "devSeeker.models.llm.level2.contextWindow": {
           "type": "integer",
           "default": 0,
           "minimum": 0,
           "description": "LLM Level 2 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
         },
-        "dualMind.models.llm.level3.provider": {
+        "devSeeker.models.llm.level3.provider": {
           "type": "string",
           "enum": [
             "deepseek",
@@ -328,18 +328,18 @@
           "default": "",
           "description": "LLM 兜底模型（Level 3）的 Provider 类型（留空=不配置，推荐 Ollama）"
         },
-        "dualMind.models.llm.level3.model": {
+        "devSeeker.models.llm.level3.model": {
           "type": "string",
           "default": "",
           "description": "LLM Level 3 模型名称"
         },
-        "dualMind.models.llm.level3.apiKey": {
+        "devSeeker.models.llm.level3.apiKey": {
           "type": "string",
           "default": "",
           "description": "LLM Level 3 API Key（Ollama 留空）",
           "scope": "application"
         },
-        "dualMind.models.llm.level3.apiKeys": {
+        "devSeeker.models.llm.level3.apiKeys": {
           "type": "array",
           "items": {
             "type": "string"
@@ -348,23 +348,23 @@
           "description": "LLM Level 3 备用 API Key 列表（429 时同级轮换）",
           "scope": "application"
         },
-        "dualMind.models.llm.level3.baseUrl": {
+        "devSeeker.models.llm.level3.baseUrl": {
           "type": "string",
           "default": "",
           "description": "LLM Level 3 Base URL（Ollama 默认 http://localhost:11434/v1）"
         },
-        "dualMind.models.llm.level3.reasoningModel": {
+        "devSeeker.models.llm.level3.reasoningModel": {
           "type": "string",
           "default": "",
           "description": "LLM Level 3 推理模型"
         },
-        "dualMind.models.llm.level3.contextWindow": {
+        "devSeeker.models.llm.level3.contextWindow": {
           "type": "integer",
           "default": 0,
           "minimum": 0,
           "description": "LLM Level 3 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
         },
-        "dualMind.models.vllm.level1.provider": {
+        "devSeeker.models.vllm.level1.provider": {
           "type": "string",
           "enum": [
             "deepseek",
@@ -377,18 +377,18 @@
           "default": "qwen",
           "description": "VLLM 主力视觉模型（Level 1）的 Provider 类型"
         },
-        "dualMind.models.vllm.level1.model": {
+        "devSeeker.models.vllm.level1.model": {
           "type": "string",
           "default": "qwen-vl-max-latest",
           "description": "VLLM Level 1 模型名称"
         },
-        "dualMind.models.vllm.level1.apiKey": {
+        "devSeeker.models.vllm.level1.apiKey": {
           "type": "string",
           "default": "",
           "description": "VLLM Level 1 API Key",
           "scope": "application"
         },
-        "dualMind.models.vllm.level1.apiKeys": {
+        "devSeeker.models.vllm.level1.apiKeys": {
           "type": "array",
           "items": {
             "type": "string"
@@ -397,18 +397,18 @@
           "description": "VLLM Level 1 备用 API Key 列表（429 时同级轮换）",
           "scope": "application"
         },
-        "dualMind.models.vllm.level1.baseUrl": {
+        "devSeeker.models.vllm.level1.baseUrl": {
           "type": "string",
           "default": "",
           "description": "VLLM Level 1 Base URL（留空则使用 Provider 默认值）"
         },
-        "dualMind.models.vllm.level1.contextWindow": {
+        "devSeeker.models.vllm.level1.contextWindow": {
           "type": "integer",
           "default": 0,
           "minimum": 0,
           "description": "VLLM Level 1 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
         },
-        "dualMind.models.vllm.level2.provider": {
+        "devSeeker.models.vllm.level2.provider": {
           "type": "string",
           "enum": [
             "deepseek",
@@ -421,18 +421,18 @@
           "default": "",
           "description": "VLLM 备选视觉模型（Level 2）的 Provider 类型"
         },
-        "dualMind.models.vllm.level2.model": {
+        "devSeeker.models.vllm.level2.model": {
           "type": "string",
           "default": "",
           "description": "VLLM Level 2 模型名称"
         },
-        "dualMind.models.vllm.level2.apiKey": {
+        "devSeeker.models.vllm.level2.apiKey": {
           "type": "string",
           "default": "",
           "description": "VLLM Level 2 API Key",
           "scope": "application"
         },
-        "dualMind.models.vllm.level2.apiKeys": {
+        "devSeeker.models.vllm.level2.apiKeys": {
           "type": "array",
           "items": {
             "type": "string"
@@ -441,18 +441,18 @@
           "description": "VLLM Level 2 备用 API Key 列表（429 时同级轮换）",
           "scope": "application"
         },
-        "dualMind.models.vllm.level2.baseUrl": {
+        "devSeeker.models.vllm.level2.baseUrl": {
           "type": "string",
           "default": "",
           "description": "VLLM Level 2 Base URL"
         },
-        "dualMind.models.vllm.level2.contextWindow": {
+        "devSeeker.models.vllm.level2.contextWindow": {
           "type": "integer",
           "default": 0,
           "minimum": 0,
           "description": "VLLM Level 2 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
         },
-        "dualMind.models.vllm.level3.provider": {
+        "devSeeker.models.vllm.level3.provider": {
           "type": "string",
           "enum": [
             "deepseek",
@@ -465,18 +465,18 @@
           "default": "",
           "description": "VLLM 兜底视觉模型（Level 3）的 Provider 类型"
         },
-        "dualMind.models.vllm.level3.model": {
+        "devSeeker.models.vllm.level3.model": {
           "type": "string",
           "default": "",
           "description": "VLLM Level 3 模型名称"
         },
-        "dualMind.models.vllm.level3.apiKey": {
+        "devSeeker.models.vllm.level3.apiKey": {
           "type": "string",
           "default": "",
           "description": "VLLM Level 3 API Key（Ollama 留空）",
           "scope": "application"
         },
-        "dualMind.models.vllm.level3.apiKeys": {
+        "devSeeker.models.vllm.level3.apiKeys": {
           "type": "array",
           "items": {
             "type": "string"
@@ -485,25 +485,25 @@
           "description": "VLLM Level 3 备用 API Key 列表（429 时同级轮换）",
           "scope": "application"
         },
-        "dualMind.models.vllm.level3.baseUrl": {
+        "devSeeker.models.vllm.level3.baseUrl": {
           "type": "string",
           "default": "",
           "description": "VLLM Level 3 Base URL"
         },
-        "dualMind.models.vllm.level3.contextWindow": {
+        "devSeeker.models.vllm.level3.contextWindow": {
           "type": "integer",
           "default": 0,
           "minimum": 0,
           "description": "VLLM Level 3 上下文窗口大小（token 数）。0 = 使用 Provider 默认值。"
         },
-        "dualMind.maxTurns": {
+        "devSeeker.maxTurns": {
           "type": "integer",
           "default": 150,
           "minimum": 25,
           "maximum": 500,
           "description": "Agent 单次任务的最大循环轮次（防死循环上限）。长重构/跨多文件编辑场景建议 150–300；简单问答场景 25–50 即可。rc.4 从 25 提升默认值至 150。"
         },
-        "dualMind.logLevel": {
+        "devSeeker.logLevel": {
           "type": "string",
           "enum": [
             "trace",
@@ -515,7 +515,7 @@
           "default": "info",
           "description": "日志级别"
         },
-        "dualMind.codebaseIndex.embedProvider": {
+        "devSeeker.codebaseIndex.embedProvider": {
           "type": "string",
           "enum": [
             "local-bert",
@@ -525,32 +525,32 @@
           "default": "local-bert",
           "description": "Embedding 引擎：local-bert（默认，离线，Xenova/multilingual-e5-small，384 维）/ dashscope（需 API Key，text-embedding-v3，1024 维）/ bm25（零模型 lexical 保底，无需下载模型，冷启动 <1s，适合低配置机器 / CI / 隐私场景）。切换后会重建索引（向量库与 BM25 快照互不干扰）。"
         },
-        "dualMind.codebaseIndex.embedModel": {
+        "devSeeker.codebaseIndex.embedModel": {
           "type": "string",
           "default": "text-embedding-v3",
           "description": "DashScope provider 专用：代码库索引使用的 Embedding 模型名（共用 DashScope key）。local-bert provider 忽略该项。"
         },
-        "dualMind.codebaseIndex.embedDimension": {
+        "devSeeker.codebaseIndex.embedDimension": {
           "type": "integer",
           "default": 1024,
           "minimum": 1,
           "description": "Embedding 向量维度（text-embedding-v3 为 1024）"
         },
-        "dualMind.codebaseIndex.embedBatchSize": {
+        "devSeeker.codebaseIndex.embedBatchSize": {
           "type": "integer",
           "default": 10,
           "minimum": 1,
           "maximum": 25,
           "description": "代码库索引单次调用 embedding 接口的批大小（DashScope text-embedding-v3 服务端 2026-Q1 起上限 10；若频繁遇到超时可降到 5 绕过 DashScope 慢路径）"
         },
-        "dualMind.codebaseIndex.embedTimeoutMs": {
+        "devSeeker.codebaseIndex.embedTimeoutMs": {
           "type": "integer",
           "default": 60000,
           "minimum": 5000,
           "maximum": 300000,
           "description": "单次 embedding HTTP 请求超时时间（毫秒）。默认 60s；网络慢 / DashScope 冷启动频繁超时可调至 90000-120000"
         },
-        "dualMind.webResearch.defaultProvider": {
+        "devSeeker.webResearch.defaultProvider": {
           "type": "string",
           "enum": [
             "auto",
@@ -560,41 +560,41 @@
           "default": "auto",
           "description": "联网搜索默认 Provider（auto=按查询语言选择：中文走博查，英文走 Tavily）"
         },
-        "dualMind.webResearch.tavily.apiKeys": {
+        "devSeeker.webResearch.tavily.apiKeys": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "description": "Tavily API Key 列表（支持多个 Key 随机选择 + 自动 failover）\n\n[重新激活失效 Key](command:dualMind.reactivateSearchKeys)",
+          "description": "Tavily API Key 列表（支持多个 Key 随机选择 + 自动 failover）\n\n[重新激活失效 Key](command:devSeeker.reactivateSearchKeys)",
           "scope": "application"
         },
-        "dualMind.webResearch.bocha.apiKeys": {
+        "devSeeker.webResearch.bocha.apiKeys": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "description": "博查 API Key 列表（支持多个 Key 随机选择 + 自动 failover）\n\n[重新激活失效 Key](command:dualMind.reactivateSearchKeys)",
+          "description": "博查 API Key 列表（支持多个 Key 随机选择 + 自动 failover）\n\n[重新激活失效 Key](command:devSeeker.reactivateSearchKeys)",
           "scope": "application"
         },
-        "dualMind.webResearch.bing.apiKey": {
+        "devSeeker.webResearch.bing.apiKey": {
           "type": "string",
           "default": "",
           "description": "Microsoft Bing Web Search API Key（备选 provider，W8.11）",
           "scope": "application"
         },
-        "dualMind.webResearch.duckduckgo.enabled": {
+        "devSeeker.webResearch.duckduckgo.enabled": {
           "type": "boolean",
           "default": true,
           "description": "启用 DuckDuckGo HTML 抓取兆底 provider（无需 API Key，W8.11）"
         },
-        "dualMind.webResearch.useJinaReader": {
+        "devSeeker.webResearch.useJinaReader": {
           "type": "boolean",
           "default": true,
           "description": "fetch_content readable 模式是否走 Jina Reader 代理（https://r.jina.ai/<url>）"
         },
-        "dualMind.webResearch.blocklist": {
+        "devSeeker.webResearch.blocklist": {
           "type": "array",
           "items": {
             "type": "string"
@@ -602,22 +602,22 @@
           "default": [],
           "description": "URL 域名黑名单（如 '*.internal.example.com'）"
         },
-        "dualMind.webResearch.fetch.cacheTtlSec": {
+        "devSeeker.webResearch.fetch.cacheTtlSec": {
           "type": "number",
           "default": 3600,
           "minimum": 0,
           "description": "fetch_content LRU 缓存 TTL（秒）；0 表示不过期（W8.10）"
         },
-        "dualMind.webResearch.fetch.qps": {
+        "devSeeker.webResearch.fetch.qps": {
           "type": "number",
           "default": 5,
           "minimum": 1,
           "description": "fetch_content QPS 限流（令牌桶每秒补充令牌数）（W8.10）"
         },
-        "dualMind.telemetry.enabled": {
+        "devSeeker.telemetry.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "允许收集匿名使用统计以帮助改进 DualMind。默认关闭。不会收集代码、API Key 或个人身份信息。",
+          "description": "允许收集匿名使用统计以帮助改进 DevSeeker。默认关闭。不会收集代码、API Key 或个人身份信息。",
           "scope": "application"
         }
       }

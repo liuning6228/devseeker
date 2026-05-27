@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -8,13 +8,13 @@
  * EditorChangeBar —— 编辑器底部状态栏：文件变更导航 + 同意/拒绝
  *
  * 功能：
- * - 显示 "DualMind: N files changed" 状态栏项
+ * - 显示 "DevSeeker: N files changed" 状态栏项
  * - 上一个/下一个 文件导航按钮
  * - 同意(Accept All) / 拒绝(Reject All) 按钮
  * - 点击导航时自动打开对应文件编辑器并滚动到第一个待处理 hunk
  *
  * 按钮布局（从左到右）：
- *   0. 标签  "DualMind: N files changed"
+ *   0. 标签  "DevSeeker: N files changed"
  *   1. 上一个（多文件时显示）
  *   2. 下一个（多文件时显示）
  *   3. 同意
@@ -42,53 +42,53 @@ export class EditorChangeBar implements vscode.Disposable {
   private visible = false;
 
   constructor(private readonly inlineDiffController: InlineDiffController) {
-    // 0. 主标签 "DualMind: N files changed"
+    // 0. 主标签 "DevSeeker: N files changed"
     const labelItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);
-    labelItem.name = 'DualMind Changes';
-    labelItem.text = '$(files) DualMind: 0 files changed';
-    labelItem.tooltip = 'DualMind 文件变更概览';
+    labelItem.name = 'DevSeeker Changes';
+    labelItem.text = '$(files) DevSeeker: 0 files changed';
+    labelItem.tooltip = 'DevSeeker 文件变更概览';
     this.items.push(labelItem);
 
     // 1. 上一个文件
     const prevItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 29);
-    prevItem.name = 'DualMind Prev File';
+    prevItem.name = 'DevSeeker Prev File';
     prevItem.text = '$(arrow-left) 上一个';
     prevItem.tooltip = '查看上一个修改的文件';
-    prevItem.command = 'dualMind.changeBar.prevFile';
+    prevItem.command = 'devSeeker.changeBar.prevFile';
     this.items.push(prevItem);
 
     // 2. 下一个文件
     const nextItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 28);
-    nextItem.name = 'DualMind Next File';
+    nextItem.name = 'DevSeeker Next File';
     nextItem.text = '$(arrow-right) 下一个';
     nextItem.tooltip = '查看下一个修改的文件';
-    nextItem.command = 'dualMind.changeBar.nextFile';
+    nextItem.command = 'devSeeker.changeBar.nextFile';
     this.items.push(nextItem);
 
     // 3. 同意
     const acceptItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 27);
-    acceptItem.name = 'DualMind Accept All';
+    acceptItem.name = 'DevSeeker Accept All';
     acceptItem.text = '$(check) 同意';
     acceptItem.tooltip = '接受所有文件变更';
-    acceptItem.command = 'dualMind.changeBar.acceptAll';
+    acceptItem.command = 'devSeeker.changeBar.acceptAll';
     this.items.push(acceptItem);
 
     // 4. 拒绝
     const rejectItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 26);
-    rejectItem.name = 'DualMind Reject All';
+    rejectItem.name = 'DevSeeker Reject All';
     rejectItem.text = '$(close) 拒绝';
     rejectItem.tooltip = '拒绝所有文件变更（回滚到原始内容）';
-    rejectItem.command = 'dualMind.changeBar.rejectAll';
+    rejectItem.command = 'devSeeker.changeBar.rejectAll';
     this.items.push(rejectItem);
   }
 
   /** 注册命令（在 extension.ts 中调用） */
   registerCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
-      vscode.commands.registerCommand('dualMind.changeBar.prevFile', () => this.navigateToPrevFile()),
-      vscode.commands.registerCommand('dualMind.changeBar.nextFile', () => this.navigateToNextFile()),
-      vscode.commands.registerCommand('dualMind.changeBar.acceptAll', () => this.acceptAll()),
-      vscode.commands.registerCommand('dualMind.changeBar.rejectAll', () => this.rejectAll()),
+      vscode.commands.registerCommand('devSeeker.changeBar.prevFile', () => this.navigateToPrevFile()),
+      vscode.commands.registerCommand('devSeeker.changeBar.nextFile', () => this.navigateToNextFile()),
+      vscode.commands.registerCommand('devSeeker.changeBar.acceptAll', () => this.acceptAll()),
+      vscode.commands.registerCommand('devSeeker.changeBar.rejectAll', () => this.rejectAll()),
     );
   }
 
@@ -127,7 +127,7 @@ export class EditorChangeBar implements vscode.Disposable {
     }
 
     // 更新主标签
-    this.items[0]!.text = `$(files) DualMind: ${count} file${count > 1 ? 's' : ''} changed`;
+    this.items[0]!.text = `$(files) DevSeeker: ${count} file${count > 1 ? 's' : ''} changed`;
     if (this.currentFileIdx >= 0 && this.currentFileIdx < count) {
       const cur = this.changedFiles[this.currentFileIdx]!;
       this.items[0]!.tooltip = `当前: ${cur.relPath} (+${cur.added} -${cur.removed})`;
@@ -180,14 +180,14 @@ export class EditorChangeBar implements vscode.Disposable {
   private async acceptAll(): Promise<void> {
     await this.inlineDiffController.acceptAllFiles();
     this.clear();
-    vscode.window.showInformationMessage('DualMind: 所有文件变更已接受');
+    vscode.window.showInformationMessage('DevSeeker: 所有文件变更已接受');
   }
 
   /** 拒绝所有变更：回滚所有文件到原始内容，移除装饰 */
   private async rejectAll(): Promise<void> {
     await this.inlineDiffController.rejectAllFiles();
     this.clear();
-    vscode.window.showInformationMessage('DualMind: 所有文件变更已拒绝（已恢复原始内容）');
+    vscode.window.showInformationMessage('DevSeeker: 所有文件变更已拒绝（已恢复原始内容）');
   }
 
   /** 清除所有状态 */

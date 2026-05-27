@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -12,7 +12,7 @@
  * - 通过 meta 表 `legacy.migrated.v1` 标记防止重复迁移
  *
  * 迁移源（任一缺失即跳过对应子迁移）：
- * - legacyMemento：原 SessionStore 的 workspaceState（key=`dualMind.sessions.v1` / `dualMind.totalCost.v1`）
+ * - legacyMemento：原 SessionStore 的 workspaceState（key=`devSeeker.sessions.v1` / `devSeeker.totalCost.v1`）
  * - legacyJsonlPath：原 UsageJsonlStore 的 JSONL 文件路径
  *
  * 语义（彻底迁移策略 · 用户选项）：
@@ -40,8 +40,8 @@ import { getLogger } from '../../infra/logger.js';
 const log = getLogger('sqlite.migrator');
 
 const MIGRATED_META_KEY = 'legacy.migrated.v1';
-const LEGACY_KEY_SESSIONS = 'dualMind.sessions.v1';
-const LEGACY_KEY_TOTAL_COST = 'dualMind.totalCost.v1';
+const LEGACY_KEY_SESSIONS = 'devSeeker.sessions.v1';
+const LEGACY_KEY_TOTAL_COST = 'devSeeker.totalCost.v1';
 
 export interface MigrationStats {
   /** 是否真正执行了迁移（false 表示已标记 / 被跳过） */

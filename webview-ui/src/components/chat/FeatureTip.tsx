@@ -11,7 +11,7 @@ interface FeatureTipProps {
   className?: string;
 }
 
-const DISMISSED_TIPS_KEY = 'dualmind.dismissed_tips';
+const DISMISSED_TIPS_KEY = 'devSeeker.dismissed_tips';
 
 /**
  * FeatureTip — 首次使用提示气泡

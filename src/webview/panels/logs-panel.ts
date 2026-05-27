@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,7 +7,7 @@
 /**
  * C9 · 日志面板 UI（B-P1-14 · DESIGN §M11.1 · logs panel）
  *
- * 读取 `.dualmind/logs/runtime.log` + `.dualmind/logs/error.log`（pino NDJSON），
+ * 读取 `.devseeker/logs/runtime.log` + `.devseeker/logs/error.log`（pino NDJSON），
  * 展示最近 N 条日志，支持按 level / module / 关键字过滤 + 实时 tail（fs.watch debounce）。
  *
  * 纯函数层：
@@ -203,10 +203,10 @@ export async function collectLogPanelInput(
   const maxBytes = opts.maxBytes ?? 256 * 1024;
   const maxEntries = opts.maxEntries ?? 500;
   const runtimePath = opts.workspaceRoot
-    ? path.join(opts.workspaceRoot, '.dualmind', 'logs', 'runtime.log')
+    ? path.join(opts.workspaceRoot, '.devseeker', 'logs', 'runtime.log')
     : undefined;
   const errorPath = opts.workspaceRoot
-    ? path.join(opts.workspaceRoot, '.dualmind', 'logs', 'error.log')
+    ? path.join(opts.workspaceRoot, '.devseeker', 'logs', 'error.log')
     : undefined;
 
   const existsFn =
@@ -300,7 +300,7 @@ export function buildLogsPanelHtml(
   const filterBar = renderFilterBar();
   const table = renderTable(input.entries);
   const body = `
-<h1>DualMind · Logs <span class="muted" style="font-weight:normal;font-size:11px;">${escapeHtml(input.generatedAt)}</span></h1>
+<h1>DevSeeker · Logs <span class="muted" style="font-weight:normal;font-size:11px;">${escapeHtml(input.generatedAt)}</span></h1>
 ${header}
 ${filterBar}
 ${table}
@@ -374,7 +374,7 @@ table.logs td.extra { color: var(--muted); font-size: 10.5px; white-space: pre-w
 .log-source-error { border-left: 3px solid var(--err); }
 `;
   return renderBaseHtml({
-    title: 'DualMind · Logs',
+    title: 'DevSeeker · Logs',
     nonce,
     cspSource,
     body,
@@ -451,8 +451,8 @@ export async function openLogsPanel(
 ): Promise<vscode.WebviewPanel> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const panel = vscode.window.createWebviewPanel(
-    'dualMind.logsPanel',
-    'DualMind · Logs',
+    'devSeeker.logsPanel',
+    'DevSeeker · Logs',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,
@@ -480,7 +480,7 @@ export async function openLogsPanel(
 
   const watchers: fsSync.FSWatcher[] = [];
   if (workspaceRoot) {
-    const logsDir = path.join(workspaceRoot, '.dualmind', 'logs');
+    const logsDir = path.join(workspaceRoot, '.devseeker', 'logs');
     try {
       await fs.mkdir(logsDir, { recursive: true });
       const w = fsSync.watch(logsDir, { persistent: false }, (_evt, fn) => {

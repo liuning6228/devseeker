@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -66,7 +66,7 @@ export class SearchWebTool implements ITool<SearchWebArgs, ToolResult> {
       return {
         ok: false,
         content:
-          'Error: 未配置任何可用的搜索引擎。请在 VSCode 设置 dualMind.webResearch.tavily.apiKeys 或 dualMind.webResearch.bocha.apiKeys。',
+          'Error: 未配置任何可用的搜索引擎。请在 VSCode 设置 devSeeker.webResearch.tavily.apiKeys 或 devSeeker.webResearch.bocha.apiKeys。',
         errorCode: ErrorCodes.WEB_SEARCH_PROVIDER_DOWN,
       };
     }

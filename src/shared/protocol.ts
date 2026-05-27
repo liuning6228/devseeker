@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -119,7 +119,7 @@ export type WebviewInboundMessage =
       /** 标识，回执时带回 */
       nonce: string;
     }
-  /** W7c2 · 黄条"立即建索引"按钮 → 触发 dualMind.reindex 命令 */
+  /** W7c2 · 黄条"立即建索引"按钮 → 触发 devSeeker.reindex 命令 */
   | { type: 'reindex' }
   /** W9.14 · Markdown file:/// 链接点击 → host 打开文件并可选跳行 */
   | {

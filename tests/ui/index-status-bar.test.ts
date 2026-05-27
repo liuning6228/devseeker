@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -129,10 +129,10 @@ describe('index-status-bar (B-1.0.1-D)', () => {
     expect(item.shown).toBe(false);
   });
 
-  it('command is wired to dualMind.reindexCodebase', () => {
+  it('command is wired to devSeeker.reindexCodebase', () => {
     const item = installSpyStatusBar();
     initIndexStatusBar(makeFakeContext());
-    expect(item.command).toBe('dualMind.reindexCodebase');
+    expect(item.command).toBe('devSeeker.reindexCodebase');
   });
 
   it('init is idempotent (second init does not create a new item)', () => {

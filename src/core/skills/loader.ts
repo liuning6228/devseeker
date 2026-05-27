@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -8,9 +8,9 @@
  * SkillLoader（W4 批次 4）
  *
  * 职责：
- * - 扫描 `<workspaceRoot>/.dualmind/skills/` 下的 SKILL.md
- *   - 推荐：`.dualmind/skills/<skill-name>/SKILL.md`
- *   - 兼容：`.dualmind/skills/<any>.md`（仅一级，name 取文件名）
+ * - 扫描 `<workspaceRoot>/.devseeker/skills/` 下的 SKILL.md
+ *   - 推荐：`.devseeker/skills/<skill-name>/SKILL.md`
+ *   - 兼容：`.devseeker/skills/<any>.md`（仅一级，name 取文件名）
  * - 按 name 去重（同名后加载覆盖）
  * - 排序：name 升序
  * - 解析失败降级写 errors，不抛
@@ -28,11 +28,11 @@ export interface SkillLoadResult {
 
 export interface SkillLoaderOptions {
   workspaceRoot: string | undefined;
-  /** 自定义 skills 根目录（测试用）。默认 `<workspaceRoot>/.dualmind/skills` */
+  /** 自定义 skills 根目录（测试用）。默认 `<workspaceRoot>/.devseeker/skills` */
   skillsDir?: string;
   /**
    * 内置种子 skills（W8.7）。
-   * 加载顺序：builtin 先入化 → workspace `.dualmind/skills/` 后覆盖同名。
+   * 加载顺序：builtin 先入化 → workspace `.devseeker/skills/` 后覆盖同名。
    * 留空数组 / undefined 表示不注入 builtin（向后兼容 W4 行为）。
    */
   builtinSkills?: readonly Skill[];
@@ -48,7 +48,7 @@ export class SkillLoader {
   get skillsDir(): string | undefined {
     if (this.opts.skillsDir) return this.opts.skillsDir;
     if (!this.opts.workspaceRoot) return undefined;
-    return path.join(this.opts.workspaceRoot, '.dualmind', 'skills');
+    return path.join(this.opts.workspaceRoot, '.devseeker', 'skills');
   }
 
   async load(force = false): Promise<SkillLoadResult> {
@@ -148,7 +148,7 @@ async function collectSkillFiles(dir: string): Promise<string[]> {
         /* ignore unreadable subdir */
       }
     } else if (e.isFile() && /\.mdx?$/i.test(e.name)) {
-      // 兼容扁平布局：.dualmind/skills/<name>.md
+      // 兼容扁平布局：.devseeker/skills/<name>.md
       out.push(full);
     }
   }

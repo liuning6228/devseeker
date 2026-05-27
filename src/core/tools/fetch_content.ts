@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -191,7 +191,7 @@ export class FetchContentTool implements ITool<FetchContentArgs, ToolResult> {
         method: 'GET',
         signal: mergedSignal,
         headers: {
-          'User-Agent': 'DualMind/0.1 (+https://github.com/local/dualmind)',
+          'User-Agent': 'DevSeeker/0.1 (+https://github.com/liuning6228/devseeker)',
           Accept: mode === 'raw' ? '*/*' : 'text/html,text/markdown,application/json;q=0.9,*/*;q=0.5',
         },
       });

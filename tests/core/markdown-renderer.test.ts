@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -34,8 +34,8 @@ function nodeKinds(nodes: MdNode[]): string[] {
 
 describe('parseFileLink', () => {
   it('parses file:/// without anchor', () => {
-    const r = parseFileLink('file:///C:/w/.dualmind/src/foo.ts');
-    expect(r?.path).toBe('C:/w/.dualmind/src/foo.ts');
+    const r = parseFileLink('file:///C:/w/.devseeker/src/foo.ts');
+    expect(r?.path).toBe('C:/w/.devseeker/src/foo.ts');
     expect(r?.lineStart).toBeUndefined();
   });
   it('parses #L10 single-line anchor', () => {
@@ -174,16 +174,16 @@ describe('isSafeHref', () => {
 });
 
 describe('guardIdentity', () => {
-  it('replaces "I am GPT-4" with DualMind', () => {
+  it('replaces "I am GPT-4" with DevSeeker', () => {
     const r = guardIdentity("I am GPT-4 ready to help");
     expect(r.triggered).toBe(true);
-    expect(r.text).toMatch(/DualMind/);
+    expect(r.text).toMatch(/DevSeeker/);
     expect(r.text).not.toMatch(/GPT/);
   });
   it('replaces Chinese 我是 DeepSeek', () => {
     const r = guardIdentity('你好，我是DeepSeek');
     expect(r.triggered).toBe(true);
-    expect(r.text).toMatch(/DualMind/);
+    expect(r.text).toMatch(/DevSeeker/);
   });
   it('leaves clean text unchanged', () => {
     const r = guardIdentity('hello world');

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -49,7 +49,7 @@ async function mkfile(rel: string, content: string): Promise<void> {
 
 beforeEach(async () => {
   tmpRoot = await fs.mkdtemp(join(os.tmpdir(), 'cbi-inc-'));
-  storePath = join(tmpRoot, '.dualmind', 'index.json');
+  storePath = join(tmpRoot, '.devseeker', 'index.json');
   try {
     db = await openSqliteDatabase({ dbPath: join(tmpRoot, 'test.sqlite') });
   } catch {

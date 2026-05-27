@@ -98,7 +98,7 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
   if (messages.length === 0) {
     return (
       <div className="message-list message-empty" role="log" aria-live="polite">
-        输入消息与 DualMind 开始对话。例如：
+        输入消息与 DevSeeker 开始对话。例如：
         <br />
         <code>请读一下 package.json 并告诉我使用了哪些依赖</code>
       </div>

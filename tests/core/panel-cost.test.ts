@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -111,7 +111,7 @@ function makeInput(overrides: Partial<CostPanelInput> = {}): CostPanelInput {
     dailySeries: [],
     recentRecords: [],
     totalRecords: 0,
-    usageFilePath: '/home/u/.dualmind/usage.jsonl',
+    usageFilePath: '/home/u/.devseeker/usage.jsonl',
     cacheHitRate: undefined,
     warnings: [],
     generatedAt: '2026-05-02T10:00:00.000Z',

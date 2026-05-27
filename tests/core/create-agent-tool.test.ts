@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -181,7 +181,7 @@ describe('W14.4 · CreateAgentTool.execute', () => {
     expect(r.content).toContain('created');
 
     // 文件真实存在
-    const file = path.join(ws, '.dualmind', 'agents', 'security-reviewer', 'AGENT.md');
+    const file = path.join(ws, '.devseeker', 'agents', 'security-reviewer', 'AGENT.md');
     const content = await fs.readFile(file, 'utf-8');
     expect(content).toContain('description: Inspect code for security issues');
     expect(content).toContain('tools: "read_file, search_codebase"');
@@ -221,7 +221,7 @@ describe('W14.4 · CreateAgentTool.execute', () => {
     expect(r2.ok).toBe(true);
     const display = (r2 as { display?: Record<string, unknown> }).display ?? {};
     expect(display['action']).toBe('overwritten');
-    const file = path.join(ws, '.dualmind', 'agents', 'reviewer', 'AGENT.md');
+    const file = path.join(ws, '.devseeker', 'agents', 'reviewer', 'AGENT.md');
     const content = await fs.readFile(file, 'utf-8');
     expect(content).toContain('description: v2');
     expect(content).toContain('new');

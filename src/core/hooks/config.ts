@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -7,12 +7,13 @@
 /**
  * Hooks 配置加载 + 校验（W5 批次 1）
  *
- * 来源：`<workspaceRoot>/.dualmind/hooks.json`（JSONC 注释已剥离）
+ * 来源：`<workspaceRoot>/.devseeker/hooks.json`（JSONC 注释已剥离）
  * 不存在 → 空配置；解析失败 → 返回 error 不抛，由调用方决定降级策略。
  */
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { WORKSPACE_DIR_NAME } from '../constants.js';
 import type { HookConfig, HookSpec, HookEvent } from './types.js';
 
 const VALID_EVENTS: ReadonlyArray<HookEvent> = [
@@ -32,7 +33,7 @@ export interface LoadHookConfigResult {
 /** 加载 hooks 配置。workspaceRoot 为 undefined 时返回空配置 */
 export async function loadHookConfig(workspaceRoot: string | undefined): Promise<LoadHookConfigResult> {
   if (!workspaceRoot) return { config: { hooks: [] } };
-  const filePath = path.join(workspaceRoot, '.dualmind', 'hooks.json');
+  const filePath = path.join(workspaceRoot, WORKSPACE_DIR_NAME, 'hooks.json');
   let raw: string;
   try {
     raw = await fs.readFile(filePath, 'utf8');

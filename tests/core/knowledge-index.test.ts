@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -51,14 +51,14 @@ async function mkdirTmp(prefix: string): Promise<string> {
 }
 
 describe('W14.1 · store-path 约定', () => {
-  it('defaultKnowledgeRoot 指向 .dualmind/knowledge', () => {
+  it('defaultKnowledgeRoot 指向 .devseeker/knowledge', () => {
     const p = defaultKnowledgeRoot('/ws');
-    expect(p).toMatch(/[\\\/]\.dualmind[\\\/]knowledge$/);
+    expect(p).toMatch(/[\\\/]\.devseeker[\\\/]knowledge$/);
   });
 
-  it('defaultKnowledgeIndexPath 指向 .dualmind/knowledge-index.json', () => {
+  it('defaultKnowledgeIndexPath 指向 .devseeker/knowledge-index.json', () => {
     const p = defaultKnowledgeIndexPath('/ws');
-    expect(p).toMatch(/[\\\/]\.dualmind[\\\/]knowledge-index\.json$/);
+    expect(p).toMatch(/[\\\/]\.devseeker[\\\/]knowledge-index\.json$/);
   });
 });
 
@@ -170,7 +170,7 @@ describe('W14.2 · SearchKnowledgeTool', () => {
       getIndex: async () => {
         const e: { code: string; message: string } = {
           code: ErrorCodes.KNOWLEDGE_BASE_EMPTY,
-          message: '知识库目录不存在：/fake/.dualmind/knowledge',
+          message: '知识库目录不存在：/fake/.devseeker/knowledge',
         };
         throw e;
       },

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -139,7 +139,7 @@ describe('SessionStore', () => {
   });
 });
 // eslint-disable-next-line @typescript-eslint/naming-convention
-const KEY_SESSIONS_PUBLIC = 'dualMind.sessions.v1';
+const KEY_SESSIONS_PUBLIC = 'devSeeker.sessions.v1';
 
 describe('extractTitleFromMessages', () => {
   it('returns fallback when no user message', () => {

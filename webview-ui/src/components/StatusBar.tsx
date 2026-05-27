@@ -48,7 +48,7 @@ export function StatusBar({
       >
         ●
       </span>
-      <span className="statusbar__brand">DualMind</span>
+      <span className="statusbar__brand">DevSeeker</span>
       {badges && <span className="statusbar__badges">{badges}</span>}
 
       {/* 导航按钮：首页 / 历史 */}

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -263,7 +263,7 @@ export function buildGitPanelHtml(
   cspSource: string,
 ): string {
   return renderBaseHtml({
-    title: 'DualMind · Git',
+    title: 'DevSeeker · Git',
     nonce,
     cspSource,
     style: STYLE,
@@ -285,7 +285,7 @@ function renderBody(input: GitPanelInput): string {
     : '<span class="muted">(no repo)</span>';
 
   return `
-<h1>DualMind · Git <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(ts)}</span>
+<h1>DevSeeker · Git <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(ts)}</span>
   <span style="float:right;">
     <button data-action="refresh">Reload</button>
   </span>
@@ -418,8 +418,8 @@ function renderLogSection(entries: readonly GitLogEntry[]): string {
 export async function openGitPanel(context: vscode.ExtensionContext): Promise<vscode.WebviewPanel> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const panel = vscode.window.createWebviewPanel(
-    'dualMind.gitPanel',
-    'DualMind · Git',
+    'devSeeker.gitPanel',
+    'DevSeeker · Git',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,

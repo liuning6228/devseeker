@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -9,8 +9,8 @@
  *
  * - Browser  : 仅 search_web / fetch_content / read_url
  * - Research : + search_codebase / read_file / list_dir（综合调研：本地代码 × 网络资料）
- * - Guide    : fetch_content（官方文档白名单）/ read_file（.dualmind/ + docs/ + AGENTS.md）
- *              不含 search_codebase → 回答 "怎么配 DualMind"，不搜项目业务代码
+ * - Guide    : fetch_content（官方文档白名单）/ read_file（.devseeker/ + docs/ + AGENTS.md）
+ *              不含 search_codebase → 回答 "怎么配 DevSeeker"，不搜项目业务代码
  * - Verify   : bash + get_terminal_output + read_file + list_dir + get_problems + search_codebase
  *              跑测试/构建/类型检查，只读不写；失败时定位 first failure + 接下步建议
  */
@@ -19,7 +19,7 @@ import type { SubagentDefinition, SubagentRegistry, SubagentType, ToolsetName, P
 import { TOOLSETS } from './types.js';
 
 const BROWSER_PROMPT = [
-  'You are the **Browser** subagent of DualMind.',
+  'You are the **Browser** subagent of DevSeeker.',
   '',
   'Scope: browse the web on behalf of the main agent. Combine `search_web` + `fetch_content` + `read_url` to locate and extract the information required by the task.',
   '',
@@ -32,7 +32,7 @@ const BROWSER_PROMPT = [
 ].join('\n');
 
 const RESEARCH_PROMPT = [
-  'You are the **Research** subagent of DualMind.',
+  'You are the **Research** subagent of DevSeeker.',
   '',
   'Scope: deep research combining local codebase and web resources. You can inspect local code with `search_codebase` / `read_file` / `list_dir` and cross-reference with `search_web` / `fetch_content` / `read_url`.',
   '',
@@ -45,12 +45,12 @@ const RESEARCH_PROMPT = [
 ].join('\n');
 
 const GUIDE_PROMPT = [
-  'You are the **Guide** subagent of DualMind — a product-guide agent.',
+  'You are the **Guide** subagent of DevSeeker — a product-guide agent.',
   '',
-  'Scope: answer "how do I configure / use DualMind" questions. You do NOT write code, run tests, or search project business code. That is the main agent / Research subagent work.',
+  'Scope: answer "how do I configure / use DevSeeker" questions. You do NOT write code, run tests, or search project business code. That is the main agent / Research subagent work.',
   '',
   'Data sources:',
-  '- Local config: `.dualmind/config.json`, `.dualmind/rules/`, `.dualmind/skills/`, `.dualmind/mcp.json`, `AGENTS.md`, `docs/`.',
+  '- Local config: `.devseeker/config.json`, `.devseeker/rules/`, `.devseeker/skills/`, `.devseeker/mcp.json`, `AGENTS.md`, `docs/`.',
   '- Official docs fetched via `fetch_content` (URL whitelist enforced at tool layer).',
   '',
   'Rules:',
@@ -61,7 +61,7 @@ const GUIDE_PROMPT = [
 ].join('\n');
 
 const VERIFY_PROMPT = [
-  'You are the **Verify** subagent of DualMind — a test/verification specialist.',
+  'You are the **Verify** subagent of DevSeeker — a test/verification specialist.',
   '',
   'Scope: run the project\'s tests / type-check / build / linter on behalf of the main agent, and report pass/fail with evidence. You are READ-ONLY toward source code — you never modify files.',
   '',
@@ -85,7 +85,7 @@ const VERIFY_PROMPT = [
 ].join('\n');
 
 const VISION_PROMPT = [
-  'You are the **Vision** subagent of DualMind — an image understanding specialist.',
+  'You are the **Vision** subagent of DevSeeker — an image understanding specialist.',
   '',
   'Scope: analyze the image(s) provided by the user and return a detailed, accurate text description.',
   'You do NOT have access to any tools — you only use your built-in vision capability to describe images.',
@@ -142,7 +142,7 @@ export const GUIDE_DEFINITION: SubagentDefinition = {
   allowedTools: GUIDE_TOOLS,
   systemPrompt: GUIDE_PROMPT,
   maxTurns: 12,
-  description: 'Product guide: how to configure / use DualMind.',
+  description: 'Product guide: how to configure / use DevSeeker.',
   isBuiltin: true,
 };
 
@@ -225,7 +225,7 @@ export function createSubagentRegistry(customs: readonly SubagentDefinition[]): 
 
 /** Guide 允许读取的路径前缀白名单（相对 workspaceRoot）。 */
 export const GUIDE_READ_PATH_PREFIXES: readonly string[] = [
-  '.dualmind/',
+  '.devseeker/',
   'docs/',
   'AGENTS.md',
 ];

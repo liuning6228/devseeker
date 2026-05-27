@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -83,7 +83,7 @@ describe('MemoryStore', () => {
     expect(rec.keywords).toEqual(['name', 'user', 'person', 'alias']);
 
     const file = await fs.readFile(
-      join(tmpRoot, '.dualmind', 'memories.jsonl'),
+      join(tmpRoot, '.devseeker', 'memories.jsonl'),
       'utf-8',
     );
     expect(file).toContain('"title":"用户名"');
@@ -100,7 +100,7 @@ describe('MemoryStore', () => {
       scope: 'global',
     });
     const file = await fs.readFile(
-      join(globalRoot, '.dualmind', 'memories.jsonl'),
+      join(globalRoot, '.devseeker', 'memories.jsonl'),
       'utf-8',
     );
     expect(file).toContain('"scope":"global"');
@@ -149,7 +149,7 @@ describe('MemoryStore', () => {
     await store.remove(r.id);
     expect(await store.getById(r.id)).toBeUndefined();
     const file = await fs.readFile(
-      join(tmpRoot, '.dualmind', 'memories.jsonl'),
+      join(tmpRoot, '.devseeker', 'memories.jsonl'),
       'utf-8',
     );
     expect(file).not.toContain(r.id);

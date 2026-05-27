@@ -5,7 +5,7 @@ about: 贡献者许可协议与签署流程
 
 ## Contributor License Agreement (CLA)
 
-感谢您想为 DualMind 做贡献！
+感谢您想为 DevSeeker 做贡献！
 
 在提交首个 Pull Request 之前，请通过以下任一方式确认您同意我们的贡献条款：
 
@@ -33,7 +33,7 @@ Signed-off-by: Your Name <your@email.com>
 
 ## 为什么需要这些？
 
-DualMind 是一个开源项目，我们希望确保：
+DevSeeker 是一个开源项目，我们希望确保：
 
 1. 所有贡献者都明确同意其代码的使用许可
 2. 项目免于版权纠纷

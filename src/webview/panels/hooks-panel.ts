@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -15,7 +15,7 @@
  * 动作：
  *   - Reload（强制重读 hooks.json）
  *   - Open hooks.json（若不存在则创建模板）
- *   - Reveal .dualmind folder
+ *   - Reveal .devseeker folder
  *   - per-row Open（定位到配置行；简单 openTextDocument 即可）
  *
  * 不修改配置（视图-only，编辑留给用户直接改 JSON）。
@@ -72,7 +72,7 @@ export async function collectHooksPanelInput(opts: {
 }): Promise<HooksPanelInput> {
   const { workspaceRoot } = opts;
   const configPath = workspaceRoot
-    ? path.join(workspaceRoot, '.dualmind', 'hooks.json')
+    ? path.join(workspaceRoot, '.devseeker', 'hooks.json')
     : undefined;
 
   let configExists = false;
@@ -191,7 +191,7 @@ export function buildHooksPanelHtml(
   cspSource: string,
 ): string {
   return renderBaseHtml({
-    title: 'DualMind · Hooks',
+    title: 'DevSeeker · Hooks',
     nonce,
     cspSource,
     style: STYLE,
@@ -211,11 +211,11 @@ function renderBody(input: HooksPanelInput): string {
   const banner = input.parseError
     ? `<div class="err-banner">❌ hooks.json 解析失败：${escapeHtml(input.parseError)}</div>`
     : !input.configExists && input.workspaceRoot
-      ? `<div class="warn-banner">⚠️ 未找到 <code>.dualmind/hooks.json</code>。点击 <button class="linklike" data-action="createConfig">Create template</button> 生成默认模板。</div>`
+      ? `<div class="warn-banner">⚠️ 未找到 <code>.devseeker/hooks.json</code>。点击 <button class="linklike" data-action="createConfig">Create template</button> 生成默认模板。</div>`
       : '';
 
   return `
-<h1>DualMind · Hooks <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(ts)}</span>
+<h1>DevSeeker · Hooks <span class="muted" style="font-weight:normal;margin-left:8px;">${escapeHtml(ts)}</span>
   <span style="float:right;">
     <button data-action="refresh">Reload</button>
   </span>
@@ -250,7 +250,7 @@ function renderHooks(hooks: readonly HooksPanelHook[]): string {
   if (hooks.length === 0) {
     return `<section><h2>Hooks (0)</h2>
       <div class="empty-note">
-        No hooks configured. Add entries to <code>.dualmind/hooks.json</code>
+        No hooks configured. Add entries to <code>.devseeker/hooks.json</code>
         (schema: <code>{ hooks: [{ event, command, match?, deny?, timeoutMs?, cwd?, name? }] }</code>).
       </div>
     </section>`;
@@ -289,7 +289,7 @@ function renderHooks(hooks: readonly HooksPanelHook[]): string {
 // ─────────── 命令 ───────────
 
 const HOOKS_JSON_TEMPLATE = `{
-  // .dualmind/hooks.json
+  // .devseeker/hooks.json
   // 完整字段：event | command | match? | deny? | timeoutMs? | cwd? | name?
   "hooks": [
     // 示例：拒绝对 package-lock.json 的写入
@@ -310,8 +310,8 @@ export async function openHooksPanel(
 ): Promise<vscode.WebviewPanel> {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const panel = vscode.window.createWebviewPanel(
-    'dualMind.hooksPanel',
-    'DualMind · Hooks',
+    'devSeeker.hooksPanel',
+    'DevSeeker · Hooks',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,
@@ -340,7 +340,7 @@ export async function openHooksPanel(
         void vscode.window.showWarningMessage('未打开工作区，无法创建 hooks.json');
         return;
       }
-      const p = path.join(workspaceRoot, '.dualmind', 'hooks.json');
+      const p = path.join(workspaceRoot, '.devseeker', 'hooks.json');
       await openOrCreate(p);
       await rerender();
     }

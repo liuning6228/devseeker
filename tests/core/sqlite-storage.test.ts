@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -165,9 +165,9 @@ describe('sqlite-db · meta helpers', () => {
     db.close();
   });
 
-  it('defaultSqlitePath composes <root>/.dualmind/data/dualmind.sqlite', () => {
+  it('defaultSqlitePath composes <root>/.devseeker/data/devseeker.sqlite', () => {
     const p = defaultSqlitePath('/ws/root');
-    expect(p.replace(/\\/g, '/')).toBe('/ws/root/.dualmind/data/dualmind.sqlite');
+    expect(p.replace(/\\/g, '/')).toBe('/ws/root/.devseeker/data/devseeker.sqlite');
   });
 });
 
@@ -285,7 +285,7 @@ describe('SqliteUsageStore', () => {
 
   beforeEach(async () => {
     db = await openMemoryDb();
-    store = new SqliteUsageStore({ db, dbPath: '/fake/path/dualmind.sqlite' });
+    store = new SqliteUsageStore({ db, dbPath: '/fake/path/devseeker.sqlite' });
   });
 
   afterEach(() => {
@@ -334,7 +334,7 @@ describe('SqliteUsageStore', () => {
   });
 
   it('getFilePath returns the configured dbPath', () => {
-    expect(store.getFilePath()).toBe('/fake/path/dualmind.sqlite');
+    expect(store.getFilePath()).toBe('/fake/path/devseeker.sqlite');
   });
 });
 
@@ -356,10 +356,10 @@ describe('runLegacyMigrationIfNeeded', () => {
 
   it('imports memento sessions + totalCost on first run', async () => {
     const memento = new FakeMemento();
-    memento.setDirect('dualMind.sessions.v1', [
+    memento.setDirect('devSeeker.sessions.v1', [
       mkSession({ id: 'legacy-1', title: 'from memento' }),
     ]);
-    memento.setDirect('dualMind.totalCost.v1', [
+    memento.setDirect('devSeeker.totalCost.v1', [
       { provider: 'openai', CNY: 1, USD: 0, calls: 1 },
     ]);
     const stats = await runLegacyMigrationIfNeeded({ db, legacyMemento: memento });
@@ -373,11 +373,11 @@ describe('runLegacyMigrationIfNeeded', () => {
 
   it('skips on second run (MIGRATED_META_KEY set)', async () => {
     const memento = new FakeMemento();
-    memento.setDirect('dualMind.sessions.v1', [mkSession({ id: 'once' })]);
+    memento.setDirect('devSeeker.sessions.v1', [mkSession({ id: 'once' })]);
     const a = await runLegacyMigrationIfNeeded({ db, legacyMemento: memento });
     expect(a.sessionsImported).toBe(1);
     // Second call: skipped
-    memento.setDirect('dualMind.sessions.v1', [mkSession({ id: 'twice' })]);
+    memento.setDirect('devSeeker.sessions.v1', [mkSession({ id: 'twice' })]);
     const b = await runLegacyMigrationIfNeeded({ db, legacyMemento: memento });
     expect(b.performed).toBe(false);
     expect(b.sessionsImported).toBe(0);
@@ -388,9 +388,9 @@ describe('runLegacyMigrationIfNeeded', () => {
 
   it('force=true re-runs even after marker set', async () => {
     const memento = new FakeMemento();
-    memento.setDirect('dualMind.sessions.v1', [mkSession({ id: 'a' })]);
+    memento.setDirect('devSeeker.sessions.v1', [mkSession({ id: 'a' })]);
     await runLegacyMigrationIfNeeded({ db, legacyMemento: memento });
-    memento.setDirect('dualMind.sessions.v1', [mkSession({ id: 'b' })]);
+    memento.setDirect('devSeeker.sessions.v1', [mkSession({ id: 'b' })]);
     const stats = await runLegacyMigrationIfNeeded({
       db,
       legacyMemento: memento,

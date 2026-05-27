@@ -22,7 +22,7 @@ export function ApprovalCard({ payload, onRespond }: ApprovalCardProps): JSX.Ele
   return (
     <div className="approval-card" role="dialog" aria-label="工具审批请求">
       <div className="approval-card__title">
-        {isBash ? '💻 DualMind 请求执行命令' : 'DualMind 请求执行工具'}
+        {isBash ? '💻 DevSeeker 请求执行命令' : 'DevSeeker 请求执行工具'}
       </div>
       <div className="approval-card__info">
         <div className="approval-card__row">

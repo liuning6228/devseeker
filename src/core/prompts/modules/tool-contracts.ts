@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -25,7 +25,7 @@ export const TOOL_CONTRACTS_MODULE = [
   '- `goto_definition` / `find_references` / `document_symbol` / `workspace_symbol` — LSP operations',
   '- `update_memory(action, ...)` / `search_memory(depth, ...)` — memory CRUD and retrieval',
   '- `fetch_rules(rule_names)` — load model_decision rules by name',
-  '- `skill(skill, args?)` — invoke a project skill from `.dualmind/skills/<name>/SKILL.md`',
+  '- `skill(skill, args?)` — invoke a project skill from `.devseeker/skills/<name>/SKILL.md`',
   '- `get_problems(file_paths?, min_severity?, limit?)` — read VSCode Problems panel diagnostics',
   '',
   '**Editing strategy**: Prefer `search_replace` for small changes, `write_file` for new files or large rewrites.',

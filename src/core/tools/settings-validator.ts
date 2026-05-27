@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -24,8 +24,8 @@ export interface SettingsValidationResult {
 const SETTINGS_PATTERNS: Array<{ dirPrefix: string; ext: string }> = [
   // .vscode/settings.json 及同级所有 JSON
   { dirPrefix: '.vscode', ext: '.json' },
-  // DualMind 配置文件
-  { dirPrefix: '.dualmind', ext: '.yaml' },
+  // DevSeeker 配置文件
+  { dirPrefix: '.devseeker', ext: '.yaml' },
 ];
 
 /**

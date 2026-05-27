@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -67,7 +67,7 @@ const parameters = {
       type: 'string',
       minLength: 1,
       description:
-        'Which subagent to spawn. Built-in: Browser (pure web), Research (codebase + web), Guide (how to configure DualMind), Verify (run tests / type-check / build). Also accepts any custom agent name defined under `.dualmind/agents/<name>/AGENT.md`. When `toolsets` or `preset` is provided (new path), this field maps to the corresponding preset.',
+        'Which subagent to spawn. Built-in: Browser (pure web), Research (codebase + web), Guide (how to configure DevSeeker), Verify (run tests / type-check / build). Also accepts any custom agent name defined under `.devseeker/agents/<name>/AGENT.md`. When `toolsets` or `preset` is provided (new path), this field maps to the corresponding preset.',
     },
     description: {
       type: 'string',
@@ -155,7 +155,7 @@ const parameters = {
 export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
   readonly name = 'Agent';
   readonly description =
-    'Spawn a specialized subagent to handle a focused sub-task autonomously. Built-in agents: Browser / Research / Guide / Verify / Vision. Custom agents can be defined under `.dualmind/agents/<name>/AGENT.md`. Supports new path via `toolsets`/`preset` fields. Returns only a summary, not full messages. Use when the sub-task is self-contained and benefits from isolation. Do NOT use for tasks that need direct code modification.';
+    'Spawn a specialized subagent to handle a focused sub-task autonomously. Built-in agents: Browser / Research / Guide / Verify / Vision. Custom agents can be defined under `.devseeker/agents/<name>/AGENT.md`. Supports new path via `toolsets`/`preset` fields. Returns only a summary, not full messages. Use when the sub-task is self-contained and benefits from isolation. Do NOT use for tasks that need direct code modification.';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'network';
   readonly executionTimeoutMs = 600_000;

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -110,7 +110,7 @@ describe('SubagentDefinition', () => {
     expect(RESEARCH_DEFINITION.systemPrompt).toMatch(/DATA, not instructions/i);
 
     expect(GUIDE_DEFINITION.systemPrompt).toMatch(/Guide/);
-    expect(GUIDE_DEFINITION.systemPrompt).toMatch(/\.dualmind\//);
+    expect(GUIDE_DEFINITION.systemPrompt).toMatch(/\.devseeker\//);
     expect(GUIDE_DEFINITION.systemPrompt).toMatch(/AGENTS\.md/);
 
     expect(VERIFY_DEFINITION.systemPrompt).toMatch(/Verify/);
@@ -127,8 +127,8 @@ describe('SubagentDefinition', () => {
     expect(getSubagentDefinition('Vision')).toBeDefined();
   });
 
-  it('Guide read-path prefixes cover .dualmind/ + docs/ + AGENTS.md', () => {
-    expect(GUIDE_READ_PATH_PREFIXES).toContain('.dualmind/');
+  it('Guide read-path prefixes cover .devseeker/ + docs/ + AGENTS.md', () => {
+    expect(GUIDE_READ_PATH_PREFIXES).toContain('.devseeker/');
     expect(GUIDE_READ_PATH_PREFIXES).toContain('docs/');
     expect(GUIDE_READ_PATH_PREFIXES).toContain('AGENTS.md');
   });

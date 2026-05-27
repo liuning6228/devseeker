@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -403,7 +403,7 @@ export function resolveApiKeys(config: ModelLevelConfig): string[] {
 
 // ─────────── 旧配置迁移 ───────────
 
-/** 旧版扁平配置（package.json 中的 dualMind.deepseek.* / openai.* 等） */
+/** 旧版扁平配置（package.json 中的 devSeeker.deepseek.* / openai.* 等） */
 export interface LegacyFlatConfig {
   deepseek?: { apiKey?: string; baseUrl?: string; model?: string };
   openai?: { apiKey?: string; baseUrl?: string; model?: string };

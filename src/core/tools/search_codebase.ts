@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -165,7 +165,7 @@ export class SearchCodebaseTool implements ITool<SearchCodebaseArgs, ToolResult>
  *
  * 关键点：
  *  - `ok: true`（工具卡不再标红）
- *  - content 按 prompt-friendly 格式给出 fallback 建议（DualMind 工具单：list_dir / read_file / lsp workspace_symbol / bash rg）
+ *  - content 按 prompt-friendly 格式给出 fallback 建议（DevSeeker 工具单：list_dir / read_file / lsp workspace_symbol / bash rg）
  *  - display.indexState 标记 'not_ready'，供 UI 改蓝色 info 样式、供 Agent 推理判断
  *
  * W13.1-B · 升级：接受 `shellKind` 参数，按平台注入可复制的 bash 命令模板
@@ -192,7 +192,7 @@ function softIndexNotReady(
     '',
     ...fallbackLines,
     '',
-    '后台索引将在打开工作区后自动尝试建立；如需立刻重建可运行命令 `DualMind: Reindex Codebase`。',
+    '后台索引将在打开工作区后自动尝试建立；如需立刻重建可运行命令 `DevSeeker: Reindex Codebase`。',
   ];
 
   return {

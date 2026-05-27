@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -229,7 +229,7 @@ export function openPreviewPanel(
   }
 
   const panel = vscode.window.createWebviewPanel(
-    'dualMind.previewPanel',
+    'devSeeker.previewPanel',
     `Preview · ${opts.name ?? deriveName(opts.url)}`,
     vscode.ViewColumn.Beside,
     {

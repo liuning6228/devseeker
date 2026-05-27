@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -191,7 +191,7 @@ export class ProviderRegistry {
 
   /**
    * 从 VSCode 配置初始化 Provider。
-   * 优先读新版 dualMind.models.* 配置；
+   * 优先读新版 devSeeker.models.* 配置；
    * 若不存在则回退读旧版扁平配置并自动迁移。
    */
   initFromConfig(config: vscode.WorkspaceConfiguration): void {
@@ -277,7 +277,7 @@ export class ProviderRegistry {
     }
 
     // 回退旧版配置 + 自动迁移
-    log.info('Falling back to legacy flat config (dualMind.deepseek.* / openai.* / qwenVl.* / anthropic.*), will auto-migrate to new 3-level format');
+    log.info('Falling back to legacy flat config (devSeeker.deepseek.* / openai.* / qwenVl.* / anthropic.*), will auto-migrate to new 3-level format');
     const legacy: LegacyFlatConfig = {
       deepseek: {
         apiKey: config.get<string>('deepseek.apiKey'),

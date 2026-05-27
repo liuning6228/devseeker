@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -8,9 +8,9 @@
  * AgentLoader（W14.4）
  *
  * 职责：
- * - 扫描 `<workspaceRoot>/.dualmind/agents/` 下的 AGENT.md
- *   - 推荐：`.dualmind/agents/<agent-name>/AGENT.md`
- *   - 兼容：`.dualmind/agents/<any>.md`（仅一级，name 取文件名）
+ * - 扫描 `<workspaceRoot>/.devseeker/agents/` 下的 AGENT.md
+ *   - 推荐：`.devseeker/agents/<agent-name>/AGENT.md`
+ *   - 兼容：`.devseeker/agents/<any>.md`（仅一级，name 取文件名）
  * - 按 name 去重（同名后加载覆盖）
  * - 排序：name 升序
  * - 解析失败降级写 errors，不抛
@@ -24,6 +24,7 @@ import { parseAgentFile } from './parser.js';
 import type { ParsedCustomAgent } from './types.js';
 import type { SubagentDefinition } from '../subagent/types.js';
 import { ALL_BUILTIN_SUBAGENT_TYPES } from '../subagent/types.js';
+import { WORKSPACE_DIR_NAME } from '../constants.js';
 
 /**
  * 自定义 agent 缺省允许的工具白名单（只读 + 查询，不含 bash / write）。
@@ -48,7 +49,7 @@ export interface AgentLoadResult {
 
 export interface AgentLoaderOptions {
   workspaceRoot: string | undefined;
-  /** 自定义 agents 根目录（测试用）。默认 `<workspaceRoot>/.dualmind/agents` */
+  /** 自定义 agents 根目录（测试用）。默认 `<workspaceRoot>/.devseeker/agents` */
   agentsDir?: string;
   /** 允许用户显式覆盖默认工具白名单（一般不需要） */
   defaultTools?: readonly string[];
@@ -64,7 +65,7 @@ export class AgentLoader {
   get agentsDir(): string | undefined {
     if (this.opts.agentsDir) return this.opts.agentsDir;
     if (!this.opts.workspaceRoot) return undefined;
-    return path.join(this.opts.workspaceRoot, '.dualmind', 'agents');
+    return path.join(this.opts.workspaceRoot, WORKSPACE_DIR_NAME, 'agents');
   }
 
   async load(force = false): Promise<AgentLoadResult> {

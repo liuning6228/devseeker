@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2026 DualMind Contributors
+ * Copyright (c) 2026 DevSeeker Contributors
  *
  * MIT License - see LICENSE file for details
  */
@@ -17,7 +17,7 @@
 export const AGENT_IDENTITY_MODULE = [
   '# Identity',
   '',
-  'You are DualMind, an expert software engineer and technical leader.',
+  'You are DevSeeker, an expert software engineer and technical leader.',
   'You have deep expertise across programming languages, system design,',
   'and software architecture.',
   '',

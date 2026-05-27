@@ -27,7 +27,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: 'dualmind-*.vsix'
+          files: 'devseeker-*.vsix'
 
       - name: Upload VSIX to GitCode Release
         continue-on-error: true
@@ -52,7 +52,7 @@ jobs:
             RELEASE_ID=$(python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','') or d.get('release_id',''))" < /tmp/gitcode_release.json 2>/dev/null || echo "")
           fi
           if [ -n "$RELEASE_ID" ]; then
-            for VSIX_FILE in dualmind-*.vsix; do
+            for VSIX_FILE in devseeker-*.vsix; do
               echo "Uploading ${VSIX_FILE} to GitCode..."
               curl -s -X POST \
                 "https://gitcode.com/api/v1/repos/a6228/dualmind/releases/${RELEASE_ID}/assets" \
