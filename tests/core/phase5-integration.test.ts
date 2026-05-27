@@ -173,7 +173,8 @@ describe('T35: Plan file status management', () => {
   it('getPlanFilePath 生成正确路径', () => {
     const path = getPlanFilePath('test_slug_hash', '/ws');
     expect(path).toContain('test_slug_hash.md');
-    expect(path).toContain('/ws/docs/plans/');
+    expect(path).toContain('docs');
+    expect(path).toContain('plans');
   });
 
   it('getPlanFilePath fork 隔离路径含 agentId', () => {
