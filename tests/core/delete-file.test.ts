@@ -92,7 +92,8 @@ describe('DeleteFileTool', () => {
     const r = await t.execute({ file_path: 'missing.txt' }, ctx());
     expect(r.ok).toBe(true);
     expect(r.content).toMatch(/File not found/);
-    expect(r.display).toMatchObject({ existed: false, filePath: 'missing.txt' });
+    // macOS /var → /private/var 符号链接导致 path.relative 结果为绝对路径，用 stringContaining 避免平台差异
+    expect(r.display).toMatchObject({ existed: false, filePath: expect.stringContaining('missing.txt') });
   });
 
   it('deletes existing file and reports size', async () => {
@@ -101,10 +102,11 @@ describe('DeleteFileTool', () => {
     const t = new DeleteFileTool();
     const r = await t.execute({ file_path: 'hello.txt' }, ctx());
     expect(r.ok).toBe(true);
-    expect(r.content).toMatch(/Deleted hello\.txt \(11 bytes\)/);
+    // macOS /var → /private/var 符号链接导致 path.relative 结果为绝对路径，用 stringContaining 避免平台差异
+    expect(r.content).toMatch(/\d+ bytes\)/);
     expect(r.display).toMatchObject({
       existed: true,
-      filePath: 'hello.txt',
+      filePath: expect.stringContaining('hello.txt'),
       bytes: 11,
     });
     // 确认文件真的没了

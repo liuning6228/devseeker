@@ -28,7 +28,7 @@
  */
 
 import { promises as fs } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve as resolvePath } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';
 import { detectLineNumberPrefix } from './result-formatter.js';
 import { ErrorCodes } from '../errors/index.js';
@@ -334,10 +334,29 @@ async function atomicWriteFile(filePath: string, data: string): Promise<void> {
   }
 }
 
+/**
+ * 安全地获取路径的 realpath。若路径不存在，则向上层逐级查找已存在的父目录做 realpath，
+ * 确保返回的路径前缀与 workspaceRoot 的 realpath 前缀一致（解决 macOS /var → /private/var 符号链接差异）。
+ */
 async function safeRealpath(p: string): Promise<string> {
   try {
     return await fs.realpath(p);
   } catch {
+    // 路径不存在，向上逐级尝试
+    let dir = p;
+    let tail: string[] = [];
+    for (;;) {
+      const parent = dirname(dir);
+      if (parent === dir) break; // 到达根
+      tail.unshift(basename(dir));
+      dir = parent;
+      try {
+        const dirReal = await fs.realpath(dir);
+        return resolvePath(dirReal, ...tail);
+      } catch {
+        continue;
+      }
+    }
     return resolvePath(p);
   }
 }
