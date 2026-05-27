@@ -71,7 +71,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   // Windows: 进程文件锁延迟释放 → 重试删除
-  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  // Windows shell 进程退出后句柄可能未立即释放，EBUSY 容错
+  try {
+    await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 });
+  } catch (err) {
+    if ((err as any)?.code !== "EBUSY") throw err;
+  }
 });
 
 beforeEach(() => {
