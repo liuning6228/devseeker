@@ -59,7 +59,14 @@ beforeEach(async () => {
 
 afterEach(async () => {
   db.close();
-  await fs.rm(tmpRoot, { recursive: true, force: true });
+  // Windows: 先手动清理索引 SQLite 文件（native 连接释放慢 → EBUSY）
+  const indexDbDir = join(tmpRoot, '.devseeker', 'data');
+  try {
+    for (const name of ['devseeker-index.sqlite', 'devseeker-index.sqlite-wal', 'devseeker-index.sqlite-shm']) {
+      try { await fs.unlink(join(indexDbDir, name)); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 });
 
 async function buildIndex(): Promise<{ index: CodebaseIndex; embedder: FakeEmbedder }> {

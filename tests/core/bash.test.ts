@@ -70,7 +70,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await fs.rm(tmpRoot, { recursive: true, force: true });
+  // Windows: 进程文件锁延迟释放 → 重试删除
+  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
 });
 
 beforeEach(() => {
