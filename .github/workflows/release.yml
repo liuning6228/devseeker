@@ -25,6 +25,15 @@ jobs:
       - name: Build extension + webview
         run: npm run build
 
+      - name: Prune cross-platform onnxruntime binaries (keep only linux x64)
+        run: |
+          for dir in darwin win32; do
+            rm -rf node_modules/onnxruntime-node/bin/napi-v6/$dir
+            rm -rf node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/$dir
+          done
+          rm -rf node_modules/onnxruntime-node/bin/napi-v6/linux/arm64
+          rm -rf node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/linux/arm64
+
       - name: Package VSIX (Linux + Windows)
         run: node scripts/vsce-package.mjs
 
