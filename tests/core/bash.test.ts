@@ -70,12 +70,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Windows: 进程文件锁延迟释放 → 重试删除
-  // Windows shell 进程退出后句柄可能未立即释放，EBUSY 容错
+  // Windows shell 进程退出后文件句柄可能未立即释放，尝试删除但不阻塞
   try {
-    await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 });
-  } catch (err) {
-    if ((err as any)?.code !== "EBUSY") throw err;
+    await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 500 });
+  } catch {
+    // EBUSY 不影响测试结果（后续 runner 清理会回收）
   }
 });
 
