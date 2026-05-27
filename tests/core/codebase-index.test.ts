@@ -47,6 +47,8 @@ class FakeEmbedder implements Embedder {
 let tmpRoot: string;
 let storePath: string;
 let db: SqliteDatabaseLike;
+/** 本测试用例中创建的所有 CodebaseIndex 实例，afterEach 时 dispose 释放 SQLite 连接 */
+const idxArr: CodebaseIndex[] = [];
 
 async function mkfile(rel: string, content: string): Promise<void> {
   const abs = join(tmpRoot, rel);
@@ -57,6 +59,7 @@ async function mkfile(rel: string, content: string): Promise<void> {
 beforeEach(async () => {
   tmpRoot = await fs.mkdtemp(join(os.tmpdir(), 'cbi-'));
   storePath = join(tmpRoot, '.devseeker', 'index.json');
+  idxArr.length = 0;
   try {
     db = await openSqliteDatabase({ dbPath: join(tmpRoot, 'test.sqlite') });
   } catch {
@@ -65,15 +68,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // 必须先 dispose 内部 SQLite 连接，否则 Windows 上文件锁不释放 → EBUSY
+  for (const idx of idxArr) idx.dispose();
+  idxArr.length = 0;
   db.close();
-  // Windows: 先手动清理索引 SQLite 文件（native 连接释放慢 → EBUSY）
-  const indexDbDir = join(tmpRoot, '.devseeker', 'data');
-  try {
-    for (const name of ['devseeker-index.sqlite', 'devseeker-index.sqlite-wal', 'devseeker-index.sqlite-shm']) {
-      try { await fs.unlink(join(indexDbDir, name)); } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
-  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
 });
 
 describe('CodebaseIndex', () => {
@@ -84,6 +83,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx);
     expect(idx.size()).toBe(0);
   });
 
@@ -98,6 +98,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx);
     const stats = await idx.reindex();
 
     expect(stats.filesScanned).toBe(2);
@@ -116,6 +117,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx);
     await idx.reindex();
 
     const hits = await idx.search('aaaa', 5);
@@ -131,6 +133,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx);
     await expect(idx.search('anything')).rejects.toMatchObject({
       code: ErrorCodes.INDEX_NOT_READY,
     });
@@ -145,6 +148,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx1);
     await idx1.reindex();
     const sizeAfter = idx1.size();
     expect(sizeAfter).toBeGreaterThan(0);
@@ -157,6 +161,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx2);
     expect(idx2.size()).toBe(sizeAfter);
     expect(emb2.calls).toBe(0); // 未触发重建
   });
@@ -169,6 +174,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx1);
     await idx1.reindex();
 
     // 换 modelId：直接构造另一个符合 Embedder 接口的对象
@@ -185,6 +191,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx2);
     expect(idx2.size()).toBe(0);
   });
 
@@ -200,6 +207,7 @@ describe('CodebaseIndex', () => {
         phases.push(p.phase);
       },
     });
+    idxArr.push(idx);
     await idx.reindex();
 
     expect(phases).toContain('scanning');
@@ -220,6 +228,7 @@ describe('CodebaseIndex', () => {
       storePath,
       signal: ctl.signal,
     });
+    idxArr.push(idx);
     await expect(idx.reindex()).rejects.toMatchObject({
       code: ErrorCodes.TASK_LOOP_ABORTED,
     });
@@ -234,6 +243,7 @@ describe('CodebaseIndex', () => {
       db,
       storePath,
     });
+    idxArr.push(idx);
     await idx.reindex();
     const files = idx.listIndexedFiles();
     expect(files.sort()).toEqual(['a.ts', 'b.ts']);

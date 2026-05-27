@@ -40,6 +40,7 @@ class FakeEmbedder implements Embedder {
 let tmpRoot: string;
 let storePath: string;
 let db: SqliteDatabaseLike;
+const idxArr: CodebaseIndex[] = [];
 
 async function mkfile(rel: string, content: string): Promise<void> {
   const abs = join(tmpRoot, rel);
@@ -58,15 +59,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // 必须先 dispose 内部 SQLite 连接，否则 Windows 文件锁不释放 → EBUSY
+  for (const idx of idxArr) idx.dispose();
+  idxArr.length = 0;
   db.close();
-  // Windows: 先手动清理索引 SQLite 文件（native 连接释放慢 → EBUSY）
-  const indexDbDir = join(tmpRoot, '.devseeker', 'data');
-  try {
-    for (const name of ['devseeker-index.sqlite', 'devseeker-index.sqlite-wal', 'devseeker-index.sqlite-shm']) {
-      try { await fs.unlink(join(indexDbDir, name)); } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
-  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
 });
 
 async function buildIndex(): Promise<{ index: CodebaseIndex; embedder: FakeEmbedder }> {
@@ -77,6 +74,7 @@ async function buildIndex(): Promise<{ index: CodebaseIndex; embedder: FakeEmbed
     db,
     storePath,
   });
+  idxArr.push(index);
   return { index, embedder };
 }
 

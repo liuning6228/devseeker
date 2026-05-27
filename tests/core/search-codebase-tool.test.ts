@@ -40,6 +40,8 @@ class FakeEmbedder implements Embedder {
 let tmpRoot: string;
 let storePath: string;
 let db: SqliteDatabaseLike;
+/** 收集索引实例，afterEach 时 dispose 释放 SQLite 文件锁 */
+const idxArr: CodebaseIndex[] = [];
 
 async function mkfile(rel: string, content: string): Promise<void> {
   const abs = join(tmpRoot, rel);
@@ -67,15 +69,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // 必须先 dispose 内部 SQLite 连接，否则 Windows 文件锁不释放 → EBUSY
+  for (const idx of idxArr) idx.dispose();
+  idxArr.length = 0;
   db.close();
-  // Windows: 先手动清理索引 SQLite 文件（native 连接释放慢 → EBUSY）
-  const indexDbDir = join(tmpRoot, '.devseeker', 'data');
-  try {
-    for (const name of ['devseeker-index.sqlite', 'devseeker-index.sqlite-wal', 'devseeker-index.sqlite-shm']) {
-      try { await fs.unlink(join(indexDbDir, name)); } catch { /* ignore */ }
-    }
-  } catch { /* ignore */ }
-  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+  await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
 });
 
 describe('SearchCodebaseTool', () => {
@@ -119,6 +117,7 @@ describe('SearchCodebaseTool', () => {
       db,
       storePath,
     });
+    idxArr.push(index);
     // 不调 reindex → store.size() = 0 → index.search() 抛 INDEX_NOT_READY
     const tool = new SearchCodebaseTool({ getIndex: () => index });
     const r = await tool.execute({ query: 'anything' }, ctx());
@@ -138,6 +137,7 @@ describe('SearchCodebaseTool', () => {
       storePath,
     });
     await index.reindex();
+    idxArr.push(index);
     // 强制 store 为空以触发 0 matches 分支：用另一个已就绪但返回 [] 的路径
     // 实际上 FakeEmbedder 永远会返回相似度，改为测试正常命中
     const tool = new SearchCodebaseTool({ getIndex: () => index });
@@ -156,6 +156,7 @@ describe('SearchCodebaseTool', () => {
       storePath,
     });
     await index.reindex();
+    idxArr.push(index);
 
     const tool = new SearchCodebaseTool({ getIndex: () => index });
     const r = await tool.execute({ query: 'aaaa' }, ctx());
@@ -179,6 +180,7 @@ describe('SearchCodebaseTool', () => {
       storePath,
     });
     await index.reindex();
+    idxArr.push(index);
 
     const tool = new SearchCodebaseTool({ getIndex: () => index });
     const r = await tool.execute({ query: 'aaa', top_k: 2 }, ctx());
@@ -196,6 +198,7 @@ describe('SearchCodebaseTool', () => {
       storePath,
     });
     await index.reindex();
+    idxArr.push(index);
     const tool = new SearchCodebaseTool({ getIndex: () => index });
     const r = await tool.execute({ query: 'aaa', top_k: 9999 }, ctx());
     expect(r.ok).toBe(true);
@@ -210,6 +213,7 @@ describe('SearchCodebaseTool', () => {
       storePath,
     });
     await index.reindex();
+    idxArr.push(index);
 
     const ctl = new AbortController();
     ctl.abort();
