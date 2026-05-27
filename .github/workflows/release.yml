@@ -18,6 +18,8 @@ jobs:
           node-version: 22
 
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_DOWNLOAD_DISABLED: 1
 
       - name: Download offline BERT model
         run: npm run download-model
