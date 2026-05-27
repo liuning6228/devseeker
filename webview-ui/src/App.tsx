@@ -31,14 +31,14 @@ import { PlanSwitchBanner } from './components/PlanSwitchBanner';
 import { reducer, initialState } from './state/reducer';
 import { streamController } from './stream/StreamController';
 import { useExtensionState, type View } from './context/ExtensionStateContext.js';
-import { PlatformProvider, usePlatform } from './context/PlatformContext.js';
+import { PlatformProvider } from './context/PlatformContext.js';
 // Navbar 已合并到 StatusBar，不再使用
 import { WelcomeView } from './components/welcome/WelcomeView.js';
 import { OnboardingView } from './components/onboarding/OnboardingView.js';
 import { SettingsView } from './components/settings/SettingsView.js';
 import { HistoryView } from './components/history/HistoryView.js';
 import { McpConfigurationView } from './components/mcp/configuration/McpConfigurationView.js';
-import { WorktreesView } from './components/worktrees/WorktreesView.js';
+// import { WorktreesView } from './components/worktrees/WorktreesView.js';
 import { RulesView } from './components/rules/RulesView.js';
 import './styles/model-config.css';
 
@@ -101,11 +101,7 @@ function AppWithNav(): JSX.Element {
     setLocalView(view);
   };
 
-  const handleTaskSelect = (prompt: string) => {
-    postToHost({ type: 'send_user_input', text: prompt });
-    handleNavigate('chat');
-  };
-
+  // handleTaskSelect 不再使用
   const handleSessionSelect = (sessionId: string) => {
     postToHost({ type: 'load_session', sessionId });
     handleNavigate('chat');
@@ -142,7 +138,7 @@ function AppWithNav(): JSX.Element {
               sessions={state.sessionList.map((s) => ({
                 id: s.id,
                 title: s.title,
-                createdAt: s.createdAt,
+                createdAt: (s as any).createdAt ?? s.updatedAt,
                 updatedAt: s.updatedAt,
                 messageCount: s.messageCount,
               }))}

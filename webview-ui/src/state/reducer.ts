@@ -418,6 +418,9 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
             ? { code: ev.errorCode, message: ev.errorMessage }
             : undefined,
       };
+
+    default:
+      return state;
   }
 }
 
