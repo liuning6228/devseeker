@@ -2,23 +2,21 @@
 /**
  * vsce-package.mjs —— 安全打包 VSIX
  *
- * 两个打包前调整：
- * 1. 移走 onnxruntime-web 的浏览器专用 WASM 变体（jsep/asyncify/jspi，~61MB）
- * 2. Patch transformers.node.mjs：将 `import * as ONNX_NODE from "onnxruntime-node"`
- *    保留（使用原生 onnxruntime-node 后端，支持 Node.js 环境）
- * 3. Patch @huggingface/transformers 的 package.json，确保 Node 入口仍指向 node 版本
- *    （node 版本有 node:fs/node:path，能正确读取本地模型文件）
+ * 打包前调整：
+ * 1. 移走 onnxruntime-web 的浏览器专用 WASM 变体（jsep/asyncify/jspi）
+ * 2. 移走 @huggingface/transformers 嵌套 onnxruntime-node 的非目标平台二进制
+ * 3. Patch transformers.node.mjs：移除 sharp 引用
  *
  * 打包后恢复所有修改。
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, renameSync, existsSync, rmSync, statSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { mkdirSync, renameSync, existsSync, rmSync, statSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
-const ROOT = dirname(dirname(__filename)); // scripts/ → project root
+const ROOT = dirname(dirname(__filename));
 const STAGING = join(ROOT, 'tmp', 'vsce-staging');
 
 const HF_PKG_PATH = join(ROOT, 'node_modules', '@huggingface', 'transformers', 'package.json');
@@ -30,21 +28,71 @@ function getVersion() {
   return pkg.version;
 }
 
-// ─── WASM 文件 stash/unstash ───
+// ─── 确定目标平台的 onnxruntime 子目录 ───
 
-const FILES_TO_STASH = [
-  'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm',
-  'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs',
-  'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm',
-  'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.mjs',
-  'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jspi.wasm',
-  'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jspi.mjs',
-];
+/** 把 vsce target 名映射到 onnxruntime-node/bin/napi-v6/ 下的目录名 */
+function onnxruntimedirForTarget(target) {
+  // vsce targets: linux-x64, win32-x64, darwin-x64, darwin-arm64, linux-arm64, etc.
+  const map = {
+    'linux-x64':   ['linux/x64'],
+    'linux-arm64': ['linux/arm64'],
+    'win32-x64':   ['win32/x64'],
+    'win32-arm64': ['win32/arm64'],
+    'darwin-x64':  ['darwin/x64'],
+    'darwin-arm64': ['darwin/arm64'],
+  };
+  return map[target] || null;
+}
 
-function stashFiles() {
+/** 返回某平台上 onnxruntime-node 可以移除的平台目录列表 */
+function platformDirsToRemove(target) {
+  const keep = onnxruntimedirForTarget(target);
+  if (!keep) return []; // fallback: keep all
+
+  const allPlatforms = [
+    'darwin/arm64', 'darwin/x64',
+    'linux/arm64',  'linux/x64',
+    'win32/arm64',  'win32/x64',
+  ];
+  return allPlatforms.filter(d => !keep.includes(d));
+}
+
+// ─── 文件 stash/unstash ───
+
+function collectFilesToStash(target) {
+  const files = [];
+
+  // 1. onnxruntime-web 的浏览器变体（通用）
+  files.push(
+    'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm',
+    'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs',
+    'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm',
+    'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.mjs',
+    'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jspi.wasm',
+    'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jspi.mjs',
+  );
+
+  // 2. @huggingface/transformers 嵌套的 onnxruntime-node 非目标平台二进制
+  const nestedOnnxBase = join(ROOT, 'node_modules', '@huggingface', 'transformers', 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
+  const dirsToRemove = platformDirsToRemove(target);
+  for (const dir of dirsToRemove) {
+    const platformDir = join(nestedOnnxBase, dir);
+    if (existsSync(platformDir)) {
+      for (const f of readdirSync(platformDir)) {
+        files.push(`node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/${dir}/${f}`);
+      }
+    }
+  }
+
+  return files;
+}
+
+function stashFiles(target) {
   if (existsSync(STAGING)) rmSync(STAGING, { recursive: true, force: true });
   mkdirSync(STAGING, { recursive: true });
-  for (const rel of FILES_TO_STASH) {
+
+  const files = collectFilesToStash(target);
+  for (const rel of files) {
     const src = join(ROOT, rel);
     if (existsSync(src)) {
       renameSync(src, join(STAGING, rel.replace(/\//g, '__')));
@@ -54,32 +102,31 @@ function stashFiles() {
 }
 
 function restoreFiles() {
-  for (const rel of FILES_TO_STASH) {
-    const staged = join(STAGING, rel.replace(/\//g, '__'));
-    const dest = join(ROOT, rel);
-    if (existsSync(staged)) {
-      renameSync(staged, dest);
-      console.log(`  [restore] ${rel}`);
-    }
+  if (!existsSync(STAGING)) return;
+
+  // 恢复所有已 stash 的文件（遍历 staging 目录）
+  for (const entry of readdirSync(STAGING)) {
+    const origRel = entry.replace(/__/g, '/');
+    const dest = join(ROOT, origRel);
+    mkdirSync(dirname(dest), { recursive: true });
+    renameSync(join(STAGING, entry), dest);
+    console.log(`  [restore] ${origRel}`);
   }
-  if (existsSync(STAGING)) rmSync(STAGING, { recursive: true, force: true });
+  rmSync(STAGING, { recursive: true, force: true });
 }
 
-// ─── Patch transformers.node.mjs: 替换 onnxruntime-node import ───
+// ─── Patch transformers.node.mjs: 移除 sharp ───
 
 let originalNodeMjs = '';
 let originalNodeCjs = '';
 
 function patchTransformersNodeEntry() {
-  // Patch ESM entry (transformers.node.mjs)
   if (existsSync(HF_NODE_MJS)) {
     originalNodeMjs = readFileSync(HF_NODE_MJS, 'utf8');
     let patched = originalNodeMjs;
-    // 保留 onnxruntime-node 原生 import（Node.js 环境下正常工作）
-    // 仅移除 sharp（图片处理原生模块，@huggingface/transformers 可选依赖）
     patched = patched.replace(
       'import sharp from "sharp";',
-      '// [patched] sharp removed: native image processing module not available cross-platform\nvar sharp = {};'
+      '// [patched] sharp removed\nvar sharp = {};'
     );
     if (patched !== originalNodeMjs) {
       writeFileSync(HF_NODE_MJS, patched);
@@ -87,7 +134,6 @@ function patchTransformersNodeEntry() {
     }
   }
 
-  // Patch CJS entry (transformers.node.cjs)
   if (existsSync(HF_NODE_CJS)) {
     originalNodeCjs = readFileSync(HF_NODE_CJS, 'utf8');
     let patched = originalNodeCjs;
@@ -114,12 +160,6 @@ function restoreTransformersNodeEntry() {
 
 console.log('[vsce-package] Pre-pack adjustments...');
 
-console.log('[vsce-package] Staging unnecessary WASM files...');
-stashFiles();
-
-console.log('[vsce-package] Patching @huggingface/transformers node entry...');
-patchTransformersNodeEntry();
-
 const TARGETS = [
   { name: 'linux-x64',   arg: 'linux-x64'   },
   { name: 'win32-x64',   arg: 'win32-x64'   },
@@ -134,8 +174,18 @@ try {
     const vsixPath = join(ROOT, vsixName);
     if (existsSync(vsixPath)) rmSync(vsixPath);
 
-    console.log(`[vsce-package] Packaging for ${target.name}...`);
-    // -o 指定精确文件名，避免 vsce 自动加 target 前缀导致冲突
+    console.log(`\n[vsce-package] Packaging for ${target.name}...`);
+
+    // 对每个目标平台单独 stash（不同平台的二进制不同）
+    console.log('[vsce-package] Staging platform-specific binaries...');
+    stashFiles(target.arg);
+
+    // Patch 只需做一次，对两个目标一样
+    if (generated.length === 0) {
+      console.log('[vsce-package] Patching @huggingface/transformers node entry...');
+      patchTransformersNodeEntry();
+    }
+
     const result = spawnSync('npx', ['vsce', 'package', '--target', target.arg, '-o', vsixPath], {
       cwd: ROOT,
       stdio: 'inherit',
@@ -155,9 +205,16 @@ try {
       console.error(`[vsce-package] ${target.name}: expected ${vsixPath} not found`);
       process.exit(1);
     }
+
+    // 打包完后 restore，再打包下一个目标
+    console.log('[vsce-package] Restoring binaries...');
+    restoreFiles();
   }
+} catch (err) {
+  console.error('[vsce-package] Unexpected error:', err);
+  process.exit(1);
 } finally {
-  console.log('[vsce-package] Restoring pre-pack adjustments...');
+  // 确保所有都恢复
   restoreTransformersNodeEntry();
   restoreFiles();
 }
@@ -167,4 +224,4 @@ if (generated.length === 0) {
   process.exit(1);
 }
 
-console.log(`[vsce-package] Done! Generated: ${generated.join(', ')}`);
+console.log(`\n[vsce-package] Done! Generated: ${generated.join(', ')}`);

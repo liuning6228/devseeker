@@ -5,6 +5,10 @@ out/**/*.map
 node_modules/**
 # 保留 @huggingface/transformers（含动态 WASM + ONNX 模型资源 + 嵌套 onnxruntime-node）
 !node_modules/@huggingface/**
+# 排除 @huggingface 内部的 onnxruntime-node 非 linux-x64 平台二进制
+node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/darwin/**
+node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/win32/**
+node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/linux/arm64/**
 # 保留 web-tree-sitter（WASM）
 !node_modules/web-tree-sitter/**
 # 保留 tree-sitter-wasms（WASM）
@@ -12,10 +16,10 @@ node_modules/**
 # 保留 @vscode/codicons（字体图标）
 !node_modules/@vscode/codicons/dist/codicon.css
 !node_modules/@vscode/codicons/dist/codicon.ttf
-# 排除 onnxruntime 非 linux-x64 平台二进制
-**/onnxruntime-node/bin/napi-v6/darwin/**
-**/onnxruntime-node/bin/napi-v6/win32/**
-**/onnxruntime-node/bin/napi-v6/linux/arm64/**
+# 排除 onnxruntime 根依赖的非 linux-x64 平台二进制
+node_modules/onnxruntime-node/bin/napi-v6/darwin/**
+node_modules/onnxruntime-node/bin/napi-v6/win32/**
+node_modules/onnxruntime-node/bin/napi-v6/linux/arm64/**
 # 排除 sharp
 node_modules/sharp/**
 # 排除 pino-pretty
