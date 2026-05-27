@@ -19,6 +19,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Download offline BERT model
+        run: npm run download-model
+
       - name: Build extension + webview
         run: npm run build
 
@@ -41,7 +44,7 @@ jobs:
           TAG_NAME="${GITHUB_REF_NAME}"
           # 用 GitCode Web API 创建 release（GitLab API 被 WAF 拦截）
           curl -s -X POST \
-            "https://gitcode.com/api/v1/repos/a6228/dualmind/releases" \
+            "https://gitcode.com/api/v1/repos/a6228/devseeker/releases" \
             -H "Authorization: token ${GITCODE_TOKEN}" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
@@ -55,7 +58,7 @@ jobs:
             for VSIX_FILE in devseeker-*.vsix; do
               echo "Uploading ${VSIX_FILE} to GitCode..."
               curl -s -X POST \
-                "https://gitcode.com/api/v1/repos/a6228/dualmind/releases/${RELEASE_ID}/assets" \
+                "https://gitcode.com/api/v1/repos/a6228/devseeker/releases/${RELEASE_ID}/assets" \
                 -H "Authorization: token ${GITCODE_TOKEN}" \
                 -F "attachment=@${VSIX_FILE}"
             done
