@@ -7,74 +7,196 @@ on:
 permissions:
   contents: write
 
+env:
+  NODE_VERSION: 22
+
 jobs:
-  release:
+  # ─── Linux x64 + arm64 ───
+  release-linux:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [linux-x64, linux-arm64]
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Cache offline BERT model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/
+          key: models-${{ hashFiles('scripts/download-model.mjs') }}
 
       - run: npm ci
         env:
           ONNXRUNTIME_NODE_DOWNLOAD_DISABLED: 1
 
-      - name: Download offline BERT model
+      - if: steps.cache-model.outputs.cache-hit != 'true'
         run: npm run download-model
 
-      - name: Build extension + webview
-        run: npm run build
+      - run: npm run build
 
-      - name: Prune cross-platform onnxruntime binaries (keep only linux x64)
+      - name: Package ${{ matrix.target }}
+        run: node scripts/vsce-package.mjs ${{ matrix.target }}
+
+      - name: Verify VSIX
         run: |
-          for dir in darwin win32; do
-            rm -rf node_modules/onnxruntime-node/bin/napi-v6/$dir
-            rm -rf node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/$dir
-          done
-          rm -rf node_modules/onnxruntime-node/bin/napi-v6/linux/arm64
-          rm -rf node_modules/@huggingface/transformers/node_modules/onnxruntime-node/bin/napi-v6/linux/arm64
-
-      - name: Package VSIX (Linux + Windows)
-        run: node scripts/vsce-package.mjs
+          VSIX=$(ls devseeker-*${{ matrix.target }}.vsix 2>/dev/null | head -1)
+          SIZE=$(stat --format=%s "$VSIX")
+          SIZE_MB=$((SIZE / 1048576))
+          echo "VSIX: $VSIX  ($SIZE_MB MB)"
+          ONNX_COUNT=$(unzip -l "$VSIX" 2>/dev/null | grep -c '\.onnx$' || true)
+          echo "ONNX models: $ONNX_COUNT"
+          if [ "$ONNX_COUNT" -eq 0 ]; then
+            echo "::error::VSIX missing ONNX models!"
+            exit 1
+          fi
+          if [ "$SIZE_MB" -lt 100 ]; then
+            echo "::warning::VSIX size $SIZE_MB MB seems too small (expected ~168 MB)"
+          fi
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: 'devseeker-*.vsix'
+          files: 'devseeker-*${{ matrix.target }}.vsix'
 
-      - name: Upload VSIX to GitCode Release
-        continue-on-error: true
+  # ─── Windows x64 ───
+  release-win32:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Cache offline BERT model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/
+          key: models-${{ hashFiles('scripts/download-model.mjs') }}
+
+      - run: npm ci
         env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          ONNXRUNTIME_NODE_DOWNLOAD_DISABLED: 1
+
+      - if: steps.cache-model.outputs.cache-hit != 'true'
+        run: npm run download-model
+
+      - run: npm run build
+
+      - name: Package win32-x64
+        run: node scripts/vsce-package.mjs win32-x64
+
+      - name: Verify VSIX
+        shell: bash
         run: |
-          if [ -z "$GITCODE_TOKEN" ]; then
-            echo "GITCODE_TOKEN not set, skipping GitCode upload"
-            exit 0
+          VSIX=$(ls devseeker-*win32-x64.vsix 2>/dev/null | head -1)
+          SIZE=$(stat --format=%s "$VSIX" 2>/dev/null || stat -f%z "$VSIX" 2>/dev/null)
+          SIZE_MB=$((SIZE / 1048576))
+          echo "VSIX: $VSIX  ($SIZE_MB MB)"
+          ONNX_COUNT=$(unzip -l "$VSIX" 2>/dev/null | grep -c '\.onnx$' || true)
+          echo "ONNX models: $ONNX_COUNT"
+          if [ "$ONNX_COUNT" -eq 0 ]; then
+            echo "::error::VSIX missing ONNX models!"
+            exit 1
           fi
-          TAG_NAME="${GITHUB_REF_NAME}"
-          # 用 GitCode Web API 创建 release（GitLab API 被 WAF 拦截）
-          curl -s -X POST \
-            "https://gitcode.com/api/v1/repos/a6228/devseeker/releases" \
-            -H "Authorization: token ${GITCODE_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
-            -d "{\"tag_name\":\"${TAG_NAME}\",\"name\":\"${TAG_NAME}\",\"body\":\"Release ${TAG_NAME}\"}" > /tmp/gitcode_release.json
-          # 尝试解析 response
-          RELEASE_ID=""
-          if command -v python3 &>/dev/null; then
-            RELEASE_ID=$(python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','') or d.get('release_id',''))" < /tmp/gitcode_release.json 2>/dev/null || echo "")
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: 'devseeker-*win32-x64.vsix'
+
+  # ─── macOS x64 + arm64 ───
+  release-darwin-x64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Cache offline BERT model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/
+          key: models-${{ hashFiles('scripts/download-model.mjs') }}
+
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_DOWNLOAD_DISABLED: 1
+
+      - if: steps.cache-model.outputs.cache-hit != 'true'
+        run: npm run download-model
+
+      - run: npm run build
+
+      - name: Package darwin-x64
+        run: node scripts/vsce-package.mjs darwin-x64
+
+      - name: Verify VSIX
+        run: |
+          VSIX=$(ls devseeker-*darwin-x64.vsix 2>/dev/null | head -1)
+          SIZE=$(stat -f%z "$VSIX")
+          SIZE_MB=$((SIZE / 1048576))
+          echo "VSIX: $VSIX  ($SIZE_MB MB)"
+          ONNX_COUNT=$(unzip -l "$VSIX" 2>/dev/null | grep -c '\.onnx$' || true)
+          echo "ONNX models: $ONNX_COUNT"
+          if [ "$ONNX_COUNT" -eq 0 ]; then
+            echo "::error::VSIX missing ONNX models!"
+            exit 1
           fi
-          if [ -n "$RELEASE_ID" ]; then
-            for VSIX_FILE in devseeker-*.vsix; do
-              echo "Uploading ${VSIX_FILE} to GitCode..."
-              curl -s -X POST \
-                "https://gitcode.com/api/v1/repos/a6228/devseeker/releases/${RELEASE_ID}/assets" \
-                -H "Authorization: token ${GITCODE_TOKEN}" \
-                -F "attachment=@${VSIX_FILE}"
-            done
-            echo "Uploaded all VSIX to GitCode release ${RELEASE_ID}"
-          else
-            echo "GitCode release creation may have failed — need manual upload"
-            cat /tmp/gitcode_release.json | head -10
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: 'devseeker-*darwin-x64.vsix'
+
+  release-darwin-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Cache offline BERT model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/
+          key: models-${{ hashFiles('scripts/download-model.mjs') }}
+
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_DOWNLOAD_DISABLED: 1
+
+      - if: steps.cache-model.outputs.cache-hit != 'true'
+        run: npm run download-model
+
+      - run: npm run build
+
+      - name: Package darwin-arm64
+        run: node scripts/vsce-package.mjs darwin-arm64
+
+      - name: Verify VSIX
+        run: |
+          VSIX=$(ls devseeker-*darwin-arm64.vsix 2>/dev/null | head -1)
+          SIZE=$(stat -f%z "$VSIX")
+          SIZE_MB=$((SIZE / 1048576))
+          echo "VSIX: $VSIX  ($SIZE_MB MB)"
+          ONNX_COUNT=$(unzip -l "$VSIX" 2>/dev/null | grep -c '\.onnx$' || true)
+          echo "ONNX models: $ONNX_COUNT"
+          if [ "$ONNX_COUNT" -eq 0 ]; then
+            echo "::error::VSIX missing ONNX models!"
+            exit 1
           fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: 'devseeker-*darwin-arm64.vsix'
