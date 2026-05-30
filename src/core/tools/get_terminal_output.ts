@@ -34,8 +34,8 @@ const parameters = {
     wait_seconds: {
       type: 'integer',
       minimum: 0,
-      maximum: 120,
-      description: '最多等待该 session 结束的秒数；0（默认）立即快照返回',
+      maximum: 600,
+      description: '最多等待该 session 结束的秒数；0（默认）立即快照返回。上传/下载/编译/打包等长时间命令建议设 120-600。',
     },
     kill: {
       type: 'boolean',
@@ -55,7 +55,7 @@ export class GetTerminalOutputTool
 {
   readonly name = 'get_terminal_output';
   readonly description =
-    '读取后台终端（bash is_background=true 返回的 terminal_id）的最新输出与状态。可选 wait_seconds 等待结束，kill=true 读完终止。';
+    '读取后台终端（bash is_background=true 返回的 terminal_id）的最新输出与状态。可选 wait_seconds 等待结束（最长 600s），kill=true 读完终止。适用于编译/打包/上传/下载等长时间任务。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'read_only';
 
@@ -80,7 +80,7 @@ export class GetTerminalOutputTool
 
     const waitSec =
       typeof args.wait_seconds === 'number' && Number.isFinite(args.wait_seconds)
-        ? Math.max(0, Math.min(120, Math.floor(args.wait_seconds)))
+        ? Math.max(0, Math.min(600, Math.floor(args.wait_seconds)))
         : 0;
 
     if (waitSec > 0 && snap.status === 'running') {

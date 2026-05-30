@@ -42,8 +42,8 @@ import {
 
 const log = getLogger('tool.bash');
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 120_000;
+const MAX_TIMEOUT_MS = 300_000;
 const MAX_OUTPUT_BYTES = 32 * 1024; // 32 KB
 
 /** 危险命令正则黑名单 —— 命中即拒绝 */
@@ -156,7 +156,7 @@ export interface BashToolDeps {
 export class BashTool implements ITool<BashArgs, ToolResult> {
   readonly name = 'bash';
   readonly description =
-    '在工作区根执行单行 shell 命令（Windows=PowerShell, 其他=sh）。返回合并的 stdout/stderr 与 exit code。有黑名单拦截（rm -rf、format、shutdown、git reset --hard、sudo 等）。is_background=true 时立即返回 terminal_id，可用 get_terminal_output 读取输出。';
+    '在工作区根执行单行 shell 命令（Windows=PowerShell, 其他=sh）。返回合并的 stdout/stderr 与 exit code。有黑名单拦截（rm -rf、format、shutdown、git reset --hard、sudo 等）。对于上传、下载、编译、打包等长时间执行的命令，请设置 is_background=true 避免超时，再用 get_terminal_output 等轮询获取结果。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'destructive';
   // 由 ToolRunner 的 decideApproval 统一管理审批。
