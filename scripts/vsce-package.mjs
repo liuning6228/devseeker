@@ -86,13 +86,15 @@ function collectFilesToStash(target) {
     'node_modules/onnxruntime-node',
   );
 
-  // 3. @huggingface/transformers 嵌套 onnxruntime-node 的非目标平台二进制
-  collectOnnxDirFiles(
-    files,
-    join(ROOT, 'node_modules', '@huggingface', 'transformers', 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6'),
-    target,
-    'node_modules/@huggingface/transformers/node_modules/onnxruntime-node',
-  );
+  // 3. @huggingface/transformers 的整个嵌套 node_modules
+  //     包含 onnxruntime-node（所有平台二进制 ~200 MB）、onnxruntime-common、
+  //     global-agent 等 extraneous 包。npm list --production 会报这些包为
+  //     extraneous 导致 vsce 打包失败。transformers 运行时靠 hoisted 依赖即可，
+  //     完全不需要自身嵌套的 node_modules。
+  const hfNested = join(ROOT, 'node_modules', '@huggingface', 'transformers', 'node_modules');
+  if (existsSync(hfNested)) {
+    collectAllFiles(hfNested, files, 'node_modules/@huggingface/transformers/node_modules');
+  }
 
   return files;
 }
