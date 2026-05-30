@@ -271,7 +271,7 @@ function main() {
 
       // 3. vsce package
       const result = spawnSync(
-        'npx', ['vsce', 'package', '--target', target.arg, '-o', vsixPath],
+        'npx', ['vsce', 'package', '--target', target.arg, '-o', vsixPath, '--no-dependency-check'],
         { cwd: ROOT, stdio: 'inherit', shell: true },
       );
 
