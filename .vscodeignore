@@ -15,6 +15,10 @@ node_modules/**
 !node_modules/web-tree-sitter/**
 # tree-sitter-wasms（WASM）
 !node_modules/tree-sitter-wasms/**
+# better-sqlite3（原生 SQLite 绑定，必须包含目标平台 .node 二进制）
+!node_modules/better-sqlite3/**
+# sql.js（WASM SQLite，fallback）
+!node_modules/sql.js/**
 # @vscode/codicons（字体图标）
 !node_modules/@vscode/codicons/dist/codicon.css
 !node_modules/@vscode/codicons/dist/codicon.ttf

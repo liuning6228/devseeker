@@ -887,7 +887,7 @@ export class DualMindChatPanel {
         break;
 
       case 'open_settings':
-        vscode.commands.executeCommand('workbench.action.openSettings', 'dualMind');
+        vscode.commands.executeCommand('workbench.action.openSettings', 'devSeeker');
         break;
 
       case 'open_model_config':
