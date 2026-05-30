@@ -7,7 +7,7 @@
 /**
  * MemorySearch —— 四种深度的记忆检索（W4 批次 2）
  *
- * 深度定义（对齐 Qoder search_memory 工具语义）：
+ * 深度定义（对齐   search_memory 工具语义）：
  * - fetch   : 按 exact title 命中精确记忆（max 5 条）
  * - shallow : 按多个 keywords 在 title/keywords/content 做关键词匹配
  * - deep    : 在 shallow 基础上再融合 category 匹配 + 模糊标题

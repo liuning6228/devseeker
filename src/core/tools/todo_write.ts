@@ -5,18 +5,18 @@
  */
 
 /**
- * todo_write 工具（W7e4 · Qoder 对齐补丁）
+ * todo_write 工具（W7e4 ·   对齐补丁）
  *
  * 职责：管理任务待办列表。Agent 写入/更新 todo 项，UI 侧栏实时展示。
  * 数据通过 workspaceState 持久化（VSCode 切换工作区自动隔离）。
  *
  * 参数：
- * - todos: TodoItem[] — 完整替换（非增量 merge），与 Qoder 的 todo_write 语义一致
+ * - todos: TodoItem[] — 完整替换（非增量 merge），与   的 todo_write 语义一致
  *
  * 设计决策：
  * - 全量替换而非增量：Agent 通常维护完整列表，增量 API 需要更复杂的冲突处理
  * - id 由 Agent 生成（简短随机串如 'r9Tg8Kq2'）：避免扩展侧自增 ID 导致双方不一致
- * - status 枚举对齐 Qoder：PENDING / IN_PROGRESS / COMPLETE / CANCELLED
+ * - status 枚举对齐  ：PENDING / IN_PROGRESS / COMPLETE / CANCELLED
  */
 
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';

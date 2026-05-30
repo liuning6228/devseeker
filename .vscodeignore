@@ -6,25 +6,23 @@ out/**/*.map
 # ─── node_modules 默认排除，再按需保留 ───
 node_modules/**
 
-# @huggingface/transformers（含 WASM + ONNX 模型资源 + 嵌套 onnxruntime-node）
+# @huggingface/transformers（含 WASM + ONNX 模型资源）
 !node_modules/@huggingface/**
-# @huggingface 嵌套 onnxruntime-node 的非目标平台由 vsce-package.mjs 动态裁剪，
-# 这里不做硬编码排除，避免跨平台打包时误删
 
 # web-tree-sitter（WASM）
 !node_modules/web-tree-sitter/**
 # tree-sitter-wasms（WASM）
 !node_modules/tree-sitter-wasms/**
-# better-sqlite3（原生 SQLite 绑定，必须包含目标平台 .node 二进制）
+# better-sqlite3（原生 SQLite 绑定）
 !node_modules/better-sqlite3/**
 # sql.js（WASM SQLite，fallback）
 !node_modules/sql.js/**
-# @vscode/codicons（字体图标）
-!node_modules/@vscode/codicons/dist/codicon.css
-!node_modules/@vscode/codicons/dist/codicon.ttf
 
-# 全局排除跨平台二进制（由 vsce-package.mjs 动态保留目标平台）
+# 排除 sharp（图片处理原生模块，可选依赖）
 node_modules/sharp/**
+node_modules/@img/**
+
+# 排除 pino-pretty（仅开发模式使用）
 node_modules/pino-pretty/**
 
 # ─── 离线 BERT 模型（必须包含） ───

@@ -7,7 +7,7 @@
 /**
  * Rules 子系统类型定义（W4 批次 3）
  *
- * 对齐 Qoder rules：
+ * 对齐   rules：
  * - always_on：每次都注入 system prompt
  * - glob：按当前打开文件/变更文件的 glob 匹配触发
  * - model_decision：仅通过 fetch_rules 工具显式按 name 拉取

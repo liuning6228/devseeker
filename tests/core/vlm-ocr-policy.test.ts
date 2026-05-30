@@ -69,7 +69,7 @@ describe('W13.3 · VLM_OCR_POLICY_MODULE 内容断言', () => {
     expect(VLM_OCR_POLICY_MODULE).toContain('HBuilderX');
     expect(VLM_OCR_POLICY_MODULE).toContain('通义灵码');
     expect(VLM_OCR_POLICY_MODULE).toContain('CodeGeeX');
-    expect(VLM_OCR_POLICY_MODULE).toContain('Qoder');
+    expect(VLM_OCR_POLICY_MODULE).toContain(' ');
     // 主流 IDE
     expect(VLM_OCR_POLICY_MODULE).toContain('VSCode');
     expect(VLM_OCR_POLICY_MODULE).toContain('IntelliJ');

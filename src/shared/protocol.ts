@@ -180,7 +180,7 @@ export type WebviewInboundMessage =
   /** 关于 */
   | { type: 'about' };
 
-// ─────────── Todo（W7e4 · Qoder todo_write 对齐） ───────────
+// ─────────── Todo（W7e4 ·   todo_write 对齐） ───────────
 
 /** 单条待办 */
 export interface TodoItem {

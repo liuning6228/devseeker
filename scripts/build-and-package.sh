@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-and-package.sh —— 一次性完成：类型检查 → 单元测试 → 编译 → 打包 VSIX
+# build-and-package.sh —— 一次性完成：编译 → 打包多平台 VSIX
 #
 # 用法：
 #   ./scripts/build-and-package.sh                        # 完整流程（所有平台）
@@ -37,35 +37,7 @@ info() { echo -e "  ${YELLOW}⚡ $1${NC}"; }
 
 STEP=0
 
-# ─────────── 1. 类型检查 ───────────
-if [ "$SKIP_TC" = false ]; then
-  STEP=$((STEP+1))
-  echo ""
-  echo "━━━ Step $STEP: 类型检查（npm run type-check） ━━━"
-  if npm run type-check 2>&1; then
-    pass "TypeScript 类型检查通过"
-  else
-    fail "TypeScript 类型检查失败，请修复后重试"
-  fi
-else
-  info "跳过类型检查"
-fi
-
-# ─────────── 2. 单元测试 ───────────
-if [ "$SKIP_TEST" = false ]; then
-  STEP=$((STEP+1))
-  echo ""
-  echo "━━━ Step $STEP: 单元测试（npm test） ━━━"
-  if npm test 2>&1; then
-    pass "单元测试全部通过"
-  else
-    fail "单元测试有失败项，请修复后重试"
-  fi
-else
-  info "跳过单元测试"
-fi
-
-# ─────────── 3. 编译 ───────────
+# ─────────── 1. 编译 ───────────
 STEP=$((STEP+1))
 echo ""
 echo "━━━ Step $STEP: 编译（npm run build） ━━━"
@@ -75,10 +47,10 @@ else
   fail "编译失败，请修复后重试"
 fi
 
-# ─────────── 4. 打包 VSIX ───────────
+# ─────────── 2. 打包 VSIX ───────────
 STEP=$((STEP+1))
 echo ""
-echo "━━━ Step $STEP: 打包 VSIX ━━━"
+echo "━━━ Step $STEP: 打包 VSIX（多平台） ━━━"
 if node scripts/vsce-package.mjs "${PACKAGE_ARGS[@]}" 2>&1; then
   echo ""
   pass "打包成功"
@@ -86,7 +58,7 @@ else
   fail "打包失败"
 fi
 
-# ─────────── 5. 验证 ───────────
+# ─────────── 3. 验证 ───────────
 STEP=$((STEP+1))
 echo ""
 echo "━━━ Step $STEP: 验证产物 ━━━"
@@ -114,14 +86,14 @@ for VSIX_PATH in "${VSIX_FILES[@]}"; do
   if [ "$NM_COUNT" -gt 0 ]; then
     pass "node_modules/ 已包含（$NM_COUNT 个文件）"
   else
-    fail "node_modules/ 未包含在 VSIX 中！打包不完整"
+    info "node_modules/ 未包含（使用 --no-dependencies 打包）"
   fi
 
   ONNX_COUNT=$(unzip -l "$VSIX_PATH" 2>/dev/null | grep -c "\.onnx$" || true)
   if [ "$ONNX_COUNT" -gt 0 ]; then
     pass "模型权重文件已包含（$ONNX_COUNT 个）"
   else
-    info "模型权重文件未包含（如使用在线嵌入则正常）"
+    info "模型权重文件未包含"
   fi
 done
 

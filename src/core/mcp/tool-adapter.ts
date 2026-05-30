@@ -8,7 +8,7 @@
  * MCP Tool Adapter — 把一个 MCP 工具包装成本地 ITool（W9.6）
  *
  * 职责：
- * - 命名空间化：name = `<serverAlias>.<mcpToolName>`，点号分隔（Qoder 规范）
+ * - 命名空间化：name = `<serverAlias>.<mcpToolName>`，点号分隔（  规范）
  * - description 前缀："[mcp:<server>] <原 description>"
  * - parameters 直接透传 inputSchema（MCP 使用 JSON Schema）
  * - safetyLevel = 'external'（MCP 工具由用户显式配置）

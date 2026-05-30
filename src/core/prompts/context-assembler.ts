@@ -7,7 +7,7 @@
 /**
  * ContextAssembler（DESIGN §M10.4 · B-P1-9）
  *
- * 统一建模 Qoder 暴露给模型的 5 种用户侧附件：
+ * 统一建模   暴露给模型的 5 种用户侧附件：
  *   - `<attached_files>`   → type: 'file'
  *   - `<attached_images>`  → type: 'image'（文本侧仅记元数据，真图像走多模态 content）
  *   - `<selected_codes>`   → type: 'selection'

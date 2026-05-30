@@ -7,7 +7,7 @@
 /**
  * Runtime Reminder Injector（DESIGN §M3.8 / B-P1-8）
  *
- * 目标：对齐 Qoder `<system-reminder>` —— 运行时根据上下文触发的即时提醒。
+ * 目标：对齐   `<system-reminder>` —— 运行时根据上下文触发的即时提醒。
  *
  * 设计原则：
  *  - 纯函数规则：每条 IReminderRule 从 ctx 派生是否触发 + 提醒文本。

@@ -424,7 +424,7 @@ const SAFE_SCHEMES = [
   /^https?:\/\//i,
   /^file:\/\//i,
   /^vscode:\/\//i,
-  /^command:\/\/qoder\./i,
+  /^command:\/\/ \./i,
 ];
 
 export function isSafeHref(href: string): boolean {

@@ -19,7 +19,7 @@ const common = {
   // pino-pretty 只在开发模式使用，生产模式不捆绑
   // @huggingface/transformers：含动态 import + WASM + ONNX .node 二进制，无法 bundle
   // onnxruntime-node/web：含原生 .node 二进制和 WASM
-  external: ['vscode', 'pino-pretty', '@huggingface/transformers', 'onnxruntime-web', 'onnxruntime-node'],
+  external: ['vscode', 'pino-pretty', '@huggingface/transformers', 'onnxruntime-web', 'onnxruntime-node', 'sharp', '@img/*'],
 };
 
 const extensionConfig = {

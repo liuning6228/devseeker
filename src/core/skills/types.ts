@@ -7,7 +7,7 @@
 /**
  * Skills 子系统类型定义（W4 批次 4）
  *
- * 对齐 Qoder Skills：
+ * 对齐   Skills：
  * - 每个 skill 一个目录：`.devseeker/skills/<skill-name>/SKILL.md`
  * - SKILL.md 带 frontmatter（name / description / arguments 提示）
  * - 正文是给 LLM 的任务指令模板

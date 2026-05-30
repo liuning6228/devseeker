@@ -224,7 +224,7 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
     : argsPreview ? argsPreview.slice(0, 60)
     : '';
 
-  // ─── 审批面板模式（Qoder 风格）────────────────────
+  // ─── 审批面板模式（  风格）────────────────────
   // 改进：在审批面板中也复用 CommandOutputRow 展示命令+当前累积的 output，
   // 使用户在审批前就能看到命令以及（如果有的话）初始占位输出。
   if (showApprovalActions) {

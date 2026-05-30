@@ -31,7 +31,7 @@ export const VLM_OCR_POLICY_MODULE = [
   '- 不臆造图中未出现的路径、变量名、版本号；不确定时写 `(无法辨识)`。',
   '',
   '### 术语表（中文 IDE / 报错 / 日志）',
-  '- IDE 面板常见术语：鸿蒙 DevEco Studio、HBuilderX、IntelliJ IDEA、通义灵码、CodeGeeX、Cursor、VSCode、Trae、Qoder；「资源管理器」「问题」「终端」「运行/调试」「Git 更改」「搜索」「扩展」「AI 助手/对话」。',
+  '- IDE 面板常见术语：鸿蒙 DevEco Studio、HBuilderX、IntelliJ IDEA、通义灵码、CodeGeeX、Cursor、VSCode、Trae、 ；「资源管理器」「问题」「终端」「运行/调试」「Git 更改」「搜索」「扩展」「AI 助手/对话」。',
   '- 报错常见关键字：`错误` `异常` `失败` `未定义` `未找到` `权限` `超时` `语法错误` `类型错误` `引用错误` `NullPointerException` `TypeError` `SyntaxError` `ReferenceError` `ModuleNotFoundError` `EACCES` `ENOENT` `ECONNREFUSED`。',
   '- 日志级别：`TRACE` `DEBUG` `INFO` `WARN` `ERROR` `FATAL` / 中文 `跟踪` `调试` `信息` `警告` `错误` `致命`。',
   '- 调用栈提示：`at xxx (file:line:col)` / `File "xxx", line N, in funcname` / 中文「栈跟踪」「调用堆栈」，逐行保留。',

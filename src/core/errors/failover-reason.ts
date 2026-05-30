@@ -7,14 +7,14 @@
 /**
  * FailoverReason —— 错误分类路由
  *
- * 对齐 Qoder 9 种 FailoverReason 分类，用于精准路由降级策略：
+ * 对齐   9 种 FailoverReason 分类，用于精准路由降级策略：
  * - rate_limit / timeout / overloaded → 降级到下一 Level
  * - context_overflow → 同级压缩重试
  * - billing / auth → 不降级（跨级大概率也失败）
  * - stream_broken → 同级重推
  * - format → 不降级（消息格式错误，换模型也没用）
  *
- * 来源：6 项目 8 维度对比分析 + Qoder failover-error.ts 9 种分类
+ * 来源：6 项目 8 维度对比分析 +   failover-error.ts 9 种分类
  */
 
 export type FailoverReason =
@@ -66,7 +66,7 @@ export function classifyErrorCode(code: string): FailoverReason {
   return 'timeout';
 }
 
-/** 11 种 Socket 错误码（对齐 Qoder failover-error.ts） */
+/** 11 种 Socket 错误码（对齐   failover-error.ts） */
 export const SOCKET_ERROR_CODES = new Set([
   'ETIMEDOUT',
   'ESOCKETTIMEDOUT',

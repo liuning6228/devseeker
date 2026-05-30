@@ -119,7 +119,7 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
         name: 'test-rule',
         kind: 'always_on',
         description: 'always-on test rule',
-        filePath: '/ws/.qoder/rules/test.md',
+        filePath: '/ws/. /rules/test.md',
         content: 'Always lint before push.',
       } as unknown as Rule,
     ];

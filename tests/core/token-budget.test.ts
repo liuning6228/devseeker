@@ -41,7 +41,7 @@ function rule(i: number, priority = 10): Rule {
     name: `rule-${i}`,
     kind: 'always_on',
     description: `desc-${i}`,
-    filePath: `/ws/.qoder/rules/${i}.md`,
+    filePath: `/ws/. /rules/${i}.md`,
     content: 'y'.repeat(200),
     priority,
   } as unknown as Rule;

@@ -97,7 +97,7 @@ describe('parseInline', () => {
     expect(link.path).toBe('C:/a/b.ts');
   });
   it('treats http link as plain link', () => {
-    const nodes = parseInline('[Qoder](https://qoder.com)');
+    const nodes = parseInline('[ ](https:// .com)');
     expect(nodes).toHaveLength(1);
     expect(nodes[0].type).toBe('link');
   });
@@ -164,7 +164,7 @@ describe('isSafeHref', () => {
     ['http://a.b', true],
     ['file:///C:/x', true],
     ['vscode://file/foo', true],
-    ['command://qoder.openSettings', true],
+    ['command:// .openSettings', true],
     ['javascript:alert(1)', false],
     ['data:text/html,xx', false],
     ['ftp://host/file', false],
