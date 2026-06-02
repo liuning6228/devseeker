@@ -129,7 +129,14 @@ export function OnboardingView({ onComplete, className }: OnboardingViewProps) {
       </div>
 
       {/* 按钮 */}
-      <div className="flex justify-end w-full mt-8">
+      <div className="flex justify-between items-center w-full mt-8">
+        <button
+          type="button"
+          onClick={() => onComplete('', '')}
+          className="text-sm text-vscode-fg/50 hover:text-vscode-fg/80 transition-colors cursor-pointer"
+        >
+          跳过，先逛逛
+        </button>
         <Button onClick={() => onComplete(apiKey, selectedModel)} disabled={!canComplete}>
           开始使用
         </Button>

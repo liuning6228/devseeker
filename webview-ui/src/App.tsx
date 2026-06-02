@@ -77,10 +77,15 @@ export function App(): JSX.Element {
     setShowOnboarding(false);
   };
 
+  const handleOnboardingSkip = () => {
+    localStorage.setItem(FIRST_RUN_KEY, '1');
+    setShowOnboarding(false);
+  };
+
   if (showOnboarding) {
     return (
       <div className="flex flex-col h-screen">
-        <OnboardingView onComplete={handleOnboardingComplete} />
+        <OnboardingView onComplete={handleOnboardingSkip} />
       </div>
     );
   }
