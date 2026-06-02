@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -648,6 +648,7 @@
     "esbuild": "^0.28.0",
     "eslint": "^8.57.0",
     "pino-pretty": "^11.0.0",
+    "rolldown": "^1.0.3",
     "typescript": "^5.4.0",
     "vitest": "^1.5.0"
   },
