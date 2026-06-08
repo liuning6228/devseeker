@@ -161,3 +161,88 @@ export function ContextMenu({
     </div>
   );
 }
+
+
+// ═══════════════════════════════════════════════
+// Step 15: 右键上下文菜单 Hook + MenuItem 类型
+// ═══════════════════════════════════════════════
+
+export interface MenuItem {
+  id: string;
+  label: string;
+  icon?: string;
+  shortcut?: string;
+  disabled?: boolean;
+  visible?: boolean;
+  divider?: boolean;
+  action: () => void;
+}
+
+interface RightClickMenuProps {
+  items: MenuItem[];
+  position: { x: number; y: number };
+  onClose: () => void;
+}
+
+/**
+ * RightClickMenu — 右键弹出菜单
+ */
+export function RightClickMenu({ items, position, onClose }: RightClickMenuProps) {
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const visibleItems = items.filter(item => item.visible !== false);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.right-click-menu')) onClose();
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [onClose]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedIndex(i => Math.min(i + 1, visibleItems.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setFocusedIndex(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter' && focusedIndex >= 0 && visibleItems[focusedIndex] && !visibleItems[focusedIndex].disabled) {
+      e.preventDefault();
+      visibleItems[focusedIndex].action();
+      onClose();
+    } else if (e.key === 'Escape') { onClose(); }
+  };
+
+  const adjustedY = position.y + visibleItems.length * 28 > window.innerHeight ? position.y - visibleItems.length * 28 : position.y;
+
+  return (
+    <div className="right-click-menu" style={{ left: position.x, top: adjustedY }} onKeyDown={handleKeyDown} role="menu" tabIndex={-1} ref={el => el?.focus()}>
+      {visibleItems.map((item, idx) => (
+        <div key={item.id}>
+          {item.divider && <div className="right-click-menu__divider" />}
+          <button className={`right-click-menu__item ${focusedIndex === idx ? 'focused' : ''} ${item.disabled ? 'disabled' : ''}`}
+            onClick={() => { if (!item.disabled) { item.action(); onClose(); } }}
+            disabled={item.disabled} role="menuitem">
+            {item.icon && <span className="right-click-menu__icon">{item.icon}</span>}
+            <span className="right-click-menu__label">{item.label}</span>
+            {item.shortcut && <span className="right-click-menu__shortcut">{item.shortcut}</span>}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * useContextMenu — 右键菜单 Hook
+ */
+export function useContextMenu(items: MenuItem[]) {
+  const [menuState, setMenuState] = useState<{ visible: boolean; position: { x: number; y: number } }>({ visible: false, position: { x: 0, y: 0 } });
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuState({ visible: true, position: { x: e.clientX, y: e.clientY } });
+  }, []);
+
+  const closeMenu = useCallback(() => setMenuState(prev => ({ ...prev, visible: false })), []);
+
+  return { menuState, handleContextMenu, closeMenu };
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import type { ToolDiffPayload } from '../protocol';
 import { CopyButton } from './common/CopyButton.js';
 import { ErrorRow } from './chat/ErrorRow.js';
@@ -6,6 +6,7 @@ import { DiffEditRow } from './chat/DiffEditRow.js';
 import { CommandOutputRow } from './chat/CommandOutputRow.js';
 import { TaskFeedbackButtons } from './chat/TaskFeedbackButtons.js';
 import { Separator } from './ui/separator.js';
+import { explainCommand } from '../utils/commandExplainer';
 
 /** 文件读写类工具：只显示文件名+状态，不显示内容 */
 const FILE_TOOLS = new Set(['read_file', 'write_file', 'append_file', 'search_replace', 'delete_file', 'create_file']);
@@ -87,6 +88,8 @@ export interface ToolCardProps {
   argsPreview?: string;
   contentPreview?: string;
   errorCode?: string;
+  /** Step 9: 执行耗时 ms */
+  duration?: number;
   diff?: ToolDiffPayload;
   revertState?: { ok: boolean; message?: string };
   onRevert?: (checkpointId: string) => void;
@@ -144,6 +147,18 @@ function getToolIcon(name: string): string {
 /**
  * W-UI3 · 生成 collapsed summary 文本
  */
+/** Step 8: 根据错误内容分类 */
+function classifyError(text: string): 'api' | 'network' | 'tool' | 'timeout' | 'auth' | 'unknown' {
+  if (!text) return 'unknown';
+  const t = text.toLowerCase();
+  if (t.includes('enotfound') || t.includes('econnrefused') || t.includes('econnreset') || t.includes('network') || t.includes('eai_again')) return 'network';
+  if (t.includes('eacces') || t.includes('eperm') || t.includes('permission denied')) return 'auth';
+  if (t.includes('timeout') || t.includes('timed out') || t.includes('etimedout')) return 'timeout';
+  if (t.includes('api') || t.includes('rate limit') || t.includes('quota') || t.includes('401') || t.includes('403') || t.includes('429')) return 'api';
+  if (t.includes('enoent') || t.includes('not found') || t.includes('parse error')) return 'tool';
+  return 'unknown';
+}
+
 function buildSummary(name: string, status: ToolCardProps['status'], argsPreview?: string): string {
   if (status === 'pending' || status === 'running') {
     return '';  // 状态由 header 的 ProcessingIndicator 指示，不依赖文字
@@ -155,7 +170,7 @@ function buildSummary(name: string, status: ToolCardProps['status'], argsPreview
 
 export function ToolCard(props: ToolCardProps): JSX.Element {
   const {
-    name, status, argsPreview, contentPreview, errorCode,
+    name, status, argsPreview, contentPreview, errorCode, duration,
     diff, revertState, onRevert, onRevertHunk, revertedHunks,
     onOpenTerminal, awaitingApproval, riskLevel, onApprovalResponse,
   } = props;
@@ -166,6 +181,8 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
 
   const [open, setOpen] = useState<boolean>(status === 'error');
   const [splitOpen, setSplitOpen] = useState<boolean>(false);
+  // Step 8: 按工具名追踪重试次数
+  const [retryAttempts, setRetryAttempts] = useState<Record<string, number>>({});
   const prevStatusRef = useRef(status);
   const prevApprovalRef = useRef(awaitingApproval);
   // 用于强制 CommandOutputRow 在 output 变化时重渲染的递增 key
@@ -206,6 +223,8 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
   const isCompactTool = isFileTool || isWebTool;
   const bashCommand = extractCommand(argsPreview);
   const canOpenTerminal = Boolean(bashCommand) && !!onOpenTerminal;
+  // Step 3: 命令解释（本地正则匹配）
+  const commandExplanation = useMemo(() => bashCommand ? explainCommand(bashCommand) : null, [bashCommand]);
 
   const showApprovalActions = awaitingApproval && isShellTool && onApprovalResponse;
 
@@ -248,6 +267,17 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
             <pre className="tool-card__approval-command-text">
               <code>{bashCommand}</code>
             </pre>
+            {/* Step 3: 命令解释行（仅 bash 命令有解释） */}
+            {bashCommand && commandExplanation && commandExplanation.category !== 'unknown' && (
+              <div className="tool-card__approval-explanation">
+                <span className="tool-card__approval-explanation-text">{commandExplanation.summary}</span>
+                {commandExplanation.riskFactors.length > 0 && (
+                  <span className="tool-card__approval-explanation-risk" title={commandExplanation.riskFactors.join(' · ')}>
+                    {commandExplanation.riskFactors[0]}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           {/* 审批期间只展示命令，不重复展示 CommandOutputRow（命令已在 command-box 中） */}
           {contentPreview && (
@@ -376,6 +406,7 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
               )}
             </div>
           )}
+          {/* Step 3: "记住选择"按钮 — 当 extension 标记 allowRemember 时显示 */}
         </div>
       </div>
     );
@@ -406,6 +437,12 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
             {status === 'pending' && <ProcessingIndicator />}
             {status === 'running' && <span className="tool-card__dot-pulse" />}
           </span>
+          {/* Step 9: 耗时显示（仅成功/失败时） */}
+          {duration !== undefined && status !== 'pending' && status !== 'running' && (
+            <span className="tool-card__duration" title={`执行耗时 ${(duration / 1000).toFixed(1)}s`}>
+              ⏱️ {(duration / 1000).toFixed(1)}s
+            </span>
+          )}
           {diff && (
             <span className="tool-card__diff-badge" title={`${diff.added}+ / ${diff.removed}-`}>
               +{diff.added}/-{diff.removed}
@@ -451,12 +488,18 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
             />
           )}
 
-          {/* 错误工具 → ErrorRow */}
+          {/* 错误工具 → ErrorRow（Step 8 增强） */}
           {status === 'error' && contentPreview && (
             <ErrorRow
               code={errorCode}
               message={contentPreview}
-              onRetry={canRevert ? () => onRevert?.(checkpointId!) : undefined}
+              category={classifyError(errorCode || contentPreview)}
+              retryCount={retryAttempts[name]}
+              maxRetries={3}
+              onRetry={canRevert ? () => {
+                setRetryAttempts((prev) => ({ ...prev, [name]: (prev[name] || 0) + 1 }));
+                onRevert?.(checkpointId!);
+              } : undefined}
               ctaLabel={canRevert ? '回滚' : undefined}
               ctaAction={canRevert ? () => onRevert?.(checkpointId!) : undefined}
             />

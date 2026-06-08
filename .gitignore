@@ -32,3 +32,6 @@ logo.html
 
 # DevSeeker runtime data
 .devseeker/
+
+# Design docs — internal only, not to be pushed to public remotes
+docs/

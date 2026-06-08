@@ -28,6 +28,8 @@ const LEVEL_META = [
 
 export function SettingsView({ onBack, className }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState('llm');
+  // Step 21: 配置搜索
+  const [searchQuery, setSearchQuery] = useState('');
 
   // LLM 三级配置
   const [llmLevelState, setLlmLevelState] = useState<Record<number, {
@@ -103,6 +105,11 @@ export function SettingsView({ onBack, className }: SettingsViewProps) {
   return (
     <div className={cn('flex flex-col h-full', className)}>
       <ViewHeader title="设置" onBack={onBack} />
+      {/* Step 21: 搜索输入框 */}
+      <div className="px-4 pt-2">
+        <input type="text" className="settings__search-input" placeholder="🔍 搜索设置项..." value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)} />
+      </div>
       <Tab tabs={SETTINGS_TABS} activeTab={activeTab} onTabChange={setActiveTab} />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">

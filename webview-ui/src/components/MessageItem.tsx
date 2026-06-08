@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, memo } from 'react';
 import type { MessagePart, UiMessage } from '../state/reducer';
 import { ToolCard } from './ToolCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -30,6 +30,8 @@ export interface MessageItemProps {
   currentStreamMsgId?: string;
   /** 当前审批请求的风险级别 */
   riskLevel?: 'safe' | 'risky';
+  /** Step 2: 流式消息无内容时显示骨架屏 */
+  skeleton?: boolean;
 }
 
 const ROLE_LABEL: Record<UiMessage['role'], string> = {
@@ -39,7 +41,7 @@ const ROLE_LABEL: Record<UiMessage['role'], string> = {
   system: 'System',
 };
 
-export function MessageItem({ message, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovalToolIds, onApprovalResponse, currentStreamMsgId, riskLevel }: MessageItemProps): JSX.Element {
+function MessageItemImpl({ message, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovalToolIds, onApprovalResponse, currentStreamMsgId, riskLevel, skeleton }: MessageItemProps): JSX.Element {
   const hasAnyVisible = useMemo(() => message.parts.some(isVisible), [message.parts]);
   if (!hasAnyVisible && !message.reasoning) return <></>;
 
@@ -172,3 +174,5 @@ function StreamingAnchor({ streamId }: { streamId?: string }): JSX.Element {
     />
   );
 }
+
+export const MessageItem = memo(MessageItemImpl);

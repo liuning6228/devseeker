@@ -19,6 +19,55 @@
 /** 协议版本号。主版本变更时，旧版 webview 应提示用户升级扩展。 */
 export const PROTOCOL_VERSION = '1.0.0';
 
+/** Step 4: 上下文条目（context_stats.items 中的单个条目） */
+export interface ContextItemEntry {
+  id: string;
+  type: 'file' | 'symbol' | 'memory';
+  name: string;
+  /** 相对路径（file/symbol）或分类（memory） */
+  path: string;
+  /** 预估 token 消耗 */
+  estimatedTokens: number;
+  /** 是否最近引用的 */
+  recent?: boolean;
+}
+
+/** Step 7: @ 上下文选择器搜索结果条目 */
+export interface ContextSearchItem {
+  id: string;
+  name: string;
+  path: string;
+  type: 'file' | 'symbol' | 'memory';
+  /** 符号类型（仅 type=symbol） */
+  kind?: string;
+  /** 文件行号（仅 type=symbol） */
+  line?: number;
+  /** 最近使用时间戳（用于排序） */
+  lastUsed?: number;
+}
+
+/** Step 22: 记忆条目 */
+export interface MemoryEntry {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  keywords: string[];
+  updatedAt: number;
+}
+
+/** Step 12: Skill 命令信息 */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  /** 参数模板（如 /commit -m "message"） */
+  argsTemplate?: string;
+  /** 分类 */
+  category: 'workflow' | 'code' | 'review' | 'test' | 'deploy' | 'other';
+  /** 使用次数（extension 端统计） */
+  usageCount?: number;
+}
+
 // ─────────── TaskEvent（TaskLoop → Webview） ───────────
 
 export type TaskEvent =
@@ -28,7 +77,15 @@ export type TaskEvent =
   | { type: 'reasoning_delta'; taskId: string; text: string }
   | { type: 'tool_start'; taskId: string; toolCallId: string; name: string }
   | { type: 'tool_args_delta'; taskId: string; toolCallId: string; partial: string }
-  | { type: 'tool_exec_start'; taskId: string; toolCallId: string; name: string; args: unknown }
+  | {
+      type: 'tool_exec_start';
+      taskId: string;
+      toolCallId: string;
+      name: string;
+      args: unknown;
+      /** Step 9: Extension 侧开始执行时间戳，用于精确计时 */
+      startTime: number;
+    }
   | {
       type: 'tool_exec_output';
       taskId: string;
@@ -46,6 +103,8 @@ export type TaskEvent =
       ok: boolean;
       contentPreview: string;
       errorCode?: string;
+      /** Step 9: Extension 侧结束执行时间戳，用于精确计时 */
+      endTime: number;
     }
   | {
       type: 'usage';
@@ -71,7 +130,10 @@ export type TaskEvent =
       savingsPercent: number;
       /** inputBudget = contextWindow - outputReserve */
       inputBudget: number;
+      /** Step 4: 上下文中引用的文件/符号/记忆列表（可选） */
+      items?: ContextItemEntry[];
     }
+  /** Phase 5 Phase D · 后台子代理完成事件 */
   /** Phase 5 Phase D · 后台子代理完成事件 */
   | {
       type: 'subagent_completed';
@@ -173,6 +235,22 @@ export type WebviewInboundMessage =
   | { type: 'clear_history' }
   /** 记忆管理 */
   | { type: 'open_memory' }
+  /** Step 13: 批量删除会话 */
+  | { type: 'delete_sessions'; sessionIds: string[] }
+  /** Step 13: 更新会话标签 */
+  | { type: 'update_session_tags'; sessionId: string; tags: string[] }
+  /** Step 7: @ 上下文选择器搜索请求 */
+  | { type: 'context_search'; query: string; category: 'file' | 'symbol' | 'memory' | 'all' }
+  /** Step 12: 获取 Skill 命令列表 */
+  | { type: 'get_skills' }
+  /** Step 12: 执行 Skill 命令 */
+  | { type: 'execute_skill'; name: string; args?: string }
+  /** Step 22: 获取记忆列表 */
+  | { type: 'get_memories'; category?: string; query?: string; limit?: number }
+  /** Step 22: 删除记忆 */
+  | { type: 'delete_memory'; memoryId: string }
+  /** Step 22: 创建记忆 */
+  | { type: 'create_memory'; title: string; content: string; category: string; keywords: string[] }
   /** 导出当前会话 */
   | { type: 'export_session' }
   /** 检查更新 */
@@ -283,6 +361,10 @@ export interface CostSummaryPayload {
     cost: number;
     calls: number;
   }>;
+  /** Step 18: 历史费用趋势数据 */
+  history?: Array<{ date: string; CNY: number }>;
+  /** Step 18: 预算告警文本 */
+  budgetAlertMessage?: string;
 }
 
 /** 会话清单条目（UI 侧边栏） */
@@ -292,6 +374,10 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+  /** Step 13: 用户自定义标签 */
+  tags?: string[];
+  /** Step 13: 会话预览（前 100 字符） */
+  preview?: string;
 }
 
 /** 索引进度（Extension → Webview） */
@@ -313,6 +399,18 @@ export interface IndexStatusPayload {
   workspaceRoot?: string;
   /** W7d3 · 已跑过 reindex 但扫到 0 源码文件 → 黄条改显"此工作区无源码"而非"未索引" */
   scannedButEmpty?: boolean;
+  /** Step 19: 索引大小（字节） */
+  indexSize?: number;
+  /** Step 19: 索引起始时间 */
+  startTime?: number;
+  /** Step 19: 当前索引状态 */
+  status?: 'idle' | 'indexing' | 'completed' | 'error' | 'paused';
+  /** Step 19: 当前正在处理的文件 */
+  currentFile?: string;
+  /** Step 19: 嵌入模型名称 */
+  modelName?: string;
+  /** Step 19: 向量维度 */
+  embeddingDimension?: number;
 }
 
 /** Mode 状态（Extension → Webview） */
@@ -327,6 +425,13 @@ export interface ModeStatusPayload {
    * undefined/false 时不展示。
    */
   planReady?: boolean;
+  /** Step 6: 模式切换详情（仅自动切换时附带，用于 webview banner 展示） */
+  switchDetail?: {
+    from: 'agent' | 'plan' | 'debug' | 'ask';
+    to: 'agent' | 'plan' | 'debug' | 'ask';
+    reason: string;
+    suggestion?: string;
+  };
 }
 
 // ─────────── W7b4b · ask_user_question ───────────
@@ -461,4 +566,12 @@ export type WebviewOutboundMessage =
         userPrompt?: string;
         timestamp: number;
       }>;
-    };
+    }
+  /** Step 7: @ 上下文选择器搜索结果 */
+  | { type: 'context_search_result'; query: string; items: ContextSearchItem[] }
+  /** Step 12: Skill 命令列表 */
+  | { type: 'skill_list'; skills: SkillInfo[] }
+  /** Step 22: 记忆列表结果 */
+  | { type: 'memory_result'; items: MemoryEntry[] }
+  /** Step 22: 记忆已删除 */
+  | { type: 'memory_deleted'; memoryId: string };

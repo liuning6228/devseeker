@@ -38,3 +38,33 @@ export function trapFocus(container: HTMLElement, event: KeyboardEvent): void {
     first.focus();
   }
 }
+
+/**
+ * Step 10: 创建屏幕阅读器实时区域，播报动态内容
+ */
+export function ariaLiveRegion(content: string, polite: boolean = true): void {
+  const region = document.createElement('div');
+  region.setAttribute('role', 'status');
+  region.setAttribute('aria-live', polite ? 'polite' : 'assertive');
+  region.setAttribute('aria-atomic', 'true');
+  region.className = 'sr-only';
+  region.textContent = content;
+  document.body.appendChild(region);
+  setTimeout(() => {
+    if (region.parentNode) document.body.removeChild(region);
+  }, 1000);
+}
+
+/**
+ * Step 10: 向屏幕阅读器播报消息
+ */
+export function announceToScreenReader(message: string): void {
+  ariaLiveRegion(message, true);
+}
+
+/**
+ * Step 10: 生成唯一 ID（用于 aria-labelledby / aria-describedby）
+ */
+export function generateAriaId(prefix: string): string {
+  return `${prefix}-${Math.random().toString(36).substring(2, 9)}`;
+}

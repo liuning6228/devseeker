@@ -1,5 +1,5 @@
-import { useEffect, useRef, useCallback } from 'react';
-import type { UiMessage } from '../state/reducer';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import type { UiMessage, TextPart } from '../state/reducer';
 import { MessageItem, type OpenFileRequest } from './MessageItem';
 import { streamController } from '../stream/StreamController';
 
@@ -34,11 +34,23 @@ export interface MessageListProps {
  * - React re-render（messages 变化）时也主动尝试滚动到底
  * - StreamController DOM 追加后回调 scrollToBottom
  * - 用户主动上滚 > 200px 时暂停自动跟随，新消息插入时打破该状态
+ *
+ * Step 2 增强：
+ * - 阅读进度条（ReadingProgress）
+ * - 流式消息无内容时显示骨架屏
+ * - 修正数据模型引用 m.isStreaming → m.parts.some(...)
  */
 export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovalToolIds, onApprovalResponse, currentStreamMsgId, riskLevel }: MessageListProps): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
   const messagesLenRef = useRef(messages.length);
+  // Step 2: 阅读进度
+  const [scrollProgress, setScrollProgress] = useState(0);
+
+  // Step 2: 检测流式状态（修正数据模型引用）
+  const isMsgStreaming = useCallback((m: UiMessage): boolean => {
+    return m.parts.some((p): p is TextPart => p.kind === 'text' && !!p.isStreaming);
+  }, []);
 
   // ── 检测用户是否主动上滚 ──
   const handleScroll = useCallback(() => {
@@ -46,6 +58,11 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     userScrolledUpRef.current = distFromBottom > 200;
+    // Step 2: 阅读进度
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    if (maxScroll > 0) {
+      setScrollProgress(Math.round((el.scrollTop / maxScroll) * 100));
+    }
   }, []);
 
   // ── 滚动到最底部（仅在用户未上滚时） ──
@@ -113,21 +130,33 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
       ref={listRef}
       onScroll={handleScroll}
     >
-      {messages.map((m) => (
-        <MessageItem
-          key={m.id}
-          message={m}
-          onRevert={onRevert}
-          onOpenFile={onOpenFile}
-          onOpenTerminal={onOpenTerminal}
-          onRevertHunk={onRevertHunk}
-          revertedHunks={revertedHunks}
-          pendingApprovalToolIds={pendingApprovalToolIds}
-          onApprovalResponse={onApprovalResponse}
-          currentStreamMsgId={currentStreamMsgId}
-          riskLevel={riskLevel}
-        />
-      ))}
+      {/* Step 2: 阅读进度条 */}
+      <div className="reading-progress" role="progressbar" aria-valuenow={scrollProgress} aria-label="消息阅读进度">
+        <div className="reading-progress__bar" style={{ width: `${scrollProgress}%` }} />
+      </div>
+      {messages.map((m, idx) => {
+        // Step 5: CSS content-visibility（带 feature-detection，避开 VSCode Webview 旧内核）
+        const supportsCv = typeof CSS !== 'undefined' && CSS.supports?.('content-visibility', 'auto');
+        const useCv = supportsCv && messages.length > 200 && Math.abs(idx - messages.length) > 30;
+        return (
+          <div key={m.id} style={useCv ? { contentVisibility: 'auto', containIntrinsicSize: 'auto 200px' } as React.CSSProperties : undefined}>
+            <MessageItem
+              message={m}
+              onRevert={onRevert}
+              onOpenFile={onOpenFile}
+              onOpenTerminal={onOpenTerminal}
+              onRevertHunk={onRevertHunk}
+              revertedHunks={revertedHunks}
+              pendingApprovalToolIds={pendingApprovalToolIds}
+              onApprovalResponse={onApprovalResponse}
+              currentStreamMsgId={currentStreamMsgId}
+              riskLevel={riskLevel}
+              // Step 2: 流式消息无内容时显示骨架屏
+              skeleton={isMsgStreaming(m) && m.parts.every((p) => p.kind !== 'text' || !p.text)}
+            />
+          </div>
+        );
+      })}
       {/* 底部锚点 —— 通过 scrollTop = scrollHeight 滚动，ResizeObserver 自动触发 */}
     </div>
   );

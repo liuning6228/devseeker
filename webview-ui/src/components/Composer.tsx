@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
-import type { ModeStatusPayload, ProviderStatusPayload } from '../protocol';
+import type { ModeStatusPayload, ProviderStatusPayload, ContextSearchItem, SkillInfo } from '../protocol';
+import { ContextPicker } from './ContextPicker';
+import { getVsCodeApi } from '../vscode-api';
 
 export interface ComposerProps {
   disabled: boolean;
@@ -76,6 +78,30 @@ export function Composer({
   /** W15.4 · 当前是否处于 Inline Edit 模式（由 prefill.isInlineEdit 设置，发送后重置） */
   const [isInlineEditMode, setIsInlineEditMode] = useState(false);
 
+  // ─── Step 1: 输入历史管理 ───
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [draftSaved, setDraftSaved] = useState('');
+  // Step 6: 模式切换确认弹窗
+  const [pendingModeSwitch, setPendingModeSwitch] = useState<{ from: string; to: string } | null>(null);
+  // Step 7: @ 上下文选择器
+  const [showContextPicker, setShowContextPicker] = useState(false);
+  const [contextQuery, setContextQuery] = useState('');
+  // Step 12: / 命令菜单
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
+
+  // Step 12: 加载 Skill 列表
+  useEffect(() => {
+    getVsCodeApi().postMessage({ type: 'get_skills' });
+    const handler = (ev: MessageEvent) => {
+      if (ev.data?.type === 'skill_list') setSkills(ev.data.skills || []);
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
   // W12.1 · 当 prefill.nonce 变化时，将 text 拼接到 textarea 末尾（已有内容 → 空行分隔）
   useEffect(() => {
     if (!prefill) return;
@@ -110,6 +136,15 @@ export function Composer({
   const submit = useCallback(() => {
     const trimmed = text.trim();
     if (!trimmed && images.length === 0) return;
+    // Step 1: 将输入存入历史（去重，限制 50 条）
+    if (trimmed) {
+      setInputHistory((prev) => {
+        const filtered = prev.filter((h) => h !== trimmed);
+        return [...filtered, trimmed].slice(-50);
+      });
+    }
+    setHistoryIndex(-1);
+    setDraftSaved('');
     onSend(trimmed, images.length > 0 ? images : undefined);
     setText('');
     setImages([]);
@@ -122,9 +157,33 @@ export function Composer({
       if (ev.key === 'Enter' && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey) {
         ev.preventDefault();
         submit();
+        return;
+      }
+      // Step 1: Ctrl+↑/↓ 导航输入历史（不拦截普通 ArrowUp/Down，保留 textarea 原生光标移动）
+      if (ev.ctrlKey && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+        ev.preventDefault();
+        if (inputHistory.length === 0) return;
+        if (ev.key === 'ArrowUp') {
+          if (historyIndex === -1) {
+            setDraftSaved(text);
+            setHistoryIndex(inputHistory.length - 1);
+            setText(inputHistory[inputHistory.length - 1]);
+          } else if (historyIndex > 0) {
+            setHistoryIndex(historyIndex - 1);
+            setText(inputHistory[historyIndex - 1]);
+          }
+        } else {
+          if (historyIndex < inputHistory.length - 1) {
+            setHistoryIndex(historyIndex + 1);
+            setText(inputHistory[historyIndex + 1]);
+          } else {
+            setHistoryIndex(-1);
+            setText(draftSaved);
+          }
+        }
       }
     },
-    [submit],
+    [submit, text, inputHistory, historyIndex, draftSaved],
   );
 
   const handlePaste = useCallback(
@@ -220,6 +279,48 @@ export function Composer({
     });
   }, []);
 
+  // Step 1: 拖拽文件/文本到 textarea
+  const handleDrop = useCallback(
+    async (ev: React.DragEvent<HTMLTextAreaElement>) => {
+      const files = ev.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      ev.preventDefault();
+      const imageFiles: File[] = [];
+      const textFiles: File[] = [];
+      for (let i = 0; i < files.length; i++) {
+        if (files[i].type.startsWith('image/')) {
+          imageFiles.push(files[i]);
+        } else if (
+          files[i].type.startsWith('text/') ||
+          files[i].name.match(/\.(ts|tsx|js|jsx|json|md|py|go|rs|yaml|yml|toml|css|html|sh)$/)
+        ) {
+          textFiles.push(files[i]);
+        }
+      }
+      // 图片拖拽
+      for (const f of imageFiles) {
+        if (f.size > MAX_IMAGE_BYTES) {
+          setPasteError(`图片过大：${(f.size / 1024 / 1024).toFixed(1)}MB > 8MB 上限`);
+          continue;
+        }
+        if (images.length >= MAX_IMAGES) {
+          setPasteError(`最多附带 ${MAX_IMAGES} 张图片`);
+          break;
+        }
+        const url = await readFileAsDataURL(f);
+        setImages((prev) => [...prev, url]);
+      }
+      // 文本文件拖拽：读取内容并插入 textarea（作为代码块）
+      for (const f of textFiles) {
+        const content = await f.text();
+        const snippet = content.slice(0, 2000); // 限制 2000 字符
+        setText((prev) => prev + `\n\`\`\`${f.name}\n${snippet}\n\`\`\`\n`);
+      }
+      setPasteError(null);
+    },
+    [images.length],
+  );
+
   const removeImage = useCallback((index: number) => {
     setImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
@@ -231,6 +332,25 @@ export function Composer({
   const providerPreferred = provider?.preferredProvider ?? '';
   const modeList = mode?.available ?? [];
   const currentMode = mode?.current ?? 'agent';
+
+  // Step 7: 选择上下文后替换 @query 为引用文本
+  const handleContextSelect = useCallback((item: ContextSearchItem) => {
+    const el = textareaRef.current;
+    const cursorPos = el?.selectionStart ?? text.length;
+    const beforeCursor = text.slice(0, cursorPos);
+    const lastAtIndex = beforeCursor.lastIndexOf('@');
+    if (lastAtIndex >= 0) {
+      const prefix = text.slice(0, lastAtIndex);
+      const suffix = text.slice(cursorPos);
+      const ref = item.type === 'file' ? `@${item.path}`
+        : item.type === 'symbol' ? `@${item.path}#${item.name}`
+        : `@memory:${item.name}`;
+      setText(prefix + ref + ' ' + suffix);
+    }
+    setShowContextPicker(false);
+    setContextQuery('');
+    el?.focus();
+  }, [text]);
 
   return (
     <div className="composer">
@@ -278,12 +398,72 @@ export function Composer({
         className={`composer__input${isInlineEditMode ? ' composer__input--inline-edit' : ''}`}
         placeholder={isInlineEditMode ? '描述你想要的修改…（仅使用 search_replace / create_file）' : '规划与编程，@ 添加上下文，/ 使用命令'}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          const value = e.target.value;
+          setText(value);
+          const cursorPos = e.target.selectionStart ?? value.length;
+          const beforeCursor = value.slice(0, cursorPos);
+          // Step 7: @ 检测
+          const lastAtIndex = beforeCursor.lastIndexOf('@');
+          if (lastAtIndex >= 0 && !beforeCursor.slice(lastAtIndex).includes(' ')) {
+            setContextQuery(beforeCursor.slice(lastAtIndex + 1));
+            setShowContextPicker(true);
+          } else {
+            setShowContextPicker(false);
+          }
+          // Step 12: / 检测
+          const lastSlashIndex = beforeCursor.lastIndexOf('/');
+          if (lastSlashIndex >= 0 && !beforeCursor.slice(lastSlashIndex).includes(' ') && skills.length > 0) {
+            setSlashQuery(beforeCursor.slice(lastSlashIndex + 1));
+            setShowSlashMenu(true);
+          } else {
+            setShowSlashMenu(false);
+          }
+        }}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
+        onDrop={handleDrop}
         disabled={disabled}
         rows={2}
       />
+      {/* Step 7: @ 上下文选择器弹出层 */}
+      {showContextPicker && (
+        <ContextPicker
+          query={contextQuery}
+          onSelect={handleContextSelect}
+          onClose={() => { setShowContextPicker(false); setContextQuery(''); }}
+        />
+      )}
+      {/* Step 12: / 命令菜单弹出层 */}
+      {showSlashMenu && (
+        <div className="composer__slash-menu" role="listbox" aria-label="命令菜单">
+          {skills
+            .filter((s) => !slashQuery || s.name.toLowerCase().includes(slashQuery.toLowerCase()))
+            .slice(0, 10)
+            .map((s) => (
+              <button key={s.name} className="composer__slash-item" role="option"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const el = textareaRef.current;
+                  if (!el) return;
+                  const val = el.value;
+                  const cursorPos = el.selectionStart ?? val.length;
+                  const before = val.slice(0, cursorPos);
+                  const slashIdx = before.lastIndexOf('/');
+                  const prefix = slashIdx >= 0 ? val.slice(0, slashIdx) : '';
+                  const suffix = val.slice(cursorPos);
+                  const cmd = `/${s.name}${s.argsTemplate ? ` ${s.argsTemplate}` : ''}`;
+                  setText(prefix + cmd + ' ' + suffix);
+                  setShowSlashMenu(false);
+                  el.focus();
+                }}>
+                <span className="composer__slash-icon">⚡</span>
+                <span className="composer__slash-name">/{s.name}</span>
+                <span className="composer__slash-desc">{s.description}</span>
+              </button>
+            ))}
+        </div>
+      )}
       <div className="composer__footer">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">
@@ -298,7 +478,10 @@ export function Composer({
               }
               onChange={(e) => {
                 const v = e.target.value as 'agent' | 'plan' | 'debug' | 'ask';
-                onSelectMode?.(v);
+                // Step 6: 切换到不同模式时弹出确认对话框
+                if (v !== currentMode) {
+                  setPendingModeSwitch({ from: currentMode, to: v });
+                }
               }}
               aria-label="选择智能体模式"
             >
@@ -399,6 +582,24 @@ export function Composer({
           </div>
         </div>
       </div>
+      {/* Step 6: 模式切换确认对话框 */}
+      {pendingModeSwitch && (
+        <div className="composer__mode-switch-overlay" onClick={() => setPendingModeSwitch(null)}>
+          <div className="composer__mode-switch-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="composer__mode-switch-title">确认模式切换</div>
+            <div className="composer__mode-switch-desc">
+              从 <strong>{pendingModeSwitch.from}</strong> 切换到 <strong>{pendingModeSwitch.to}</strong>
+            </div>
+            <div className="composer__mode-switch-actions">
+              <button className="btn btn-outline" onClick={() => setPendingModeSwitch(null)}>取消</button>
+              <button className="btn btn-primary" onClick={() => {
+                onSelectMode?.(pendingModeSwitch.to as 'agent' | 'plan' | 'debug' | 'ask');
+                setPendingModeSwitch(null);
+              }}>确认切换</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

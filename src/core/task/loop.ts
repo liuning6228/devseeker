@@ -797,22 +797,24 @@ export class TaskLoop {
       if (parsed.ok && REQUIRED_ARGS_TOOLS.has(call.name) && Object.keys(args).length === 0) {
         const emptyMsg = `Error: 工具 ${call.name} 收到空参数。这通常是因为 SSE 流断裂后重试返回了不完整的 tool call。请重新生成完整的参数再调用。`;
         this.history.addToolResult(call.id, emptyMsg, call.name);
-        this.emit({
-          type: 'tool_exec_start',
-          taskId: this.taskId,
-          toolCallId: call.id,
-          name: call.name,
-          args,
-        });
-        this.emit({
-          type: 'tool_exec_end',
-          taskId: this.taskId,
-          toolCallId: call.id,
-          name: call.name,
-          ok: false,
-          contentPreview: truncate(emptyMsg, 500),
-          errorCode: ErrorCodes.TOOL_ARGS_INVALID,
-        });
+      this.emit({
+        type: 'tool_exec_start',
+        taskId: this.taskId,
+        toolCallId: call.id,
+        name: call.name,
+        args,
+        startTime: Date.now(),
+      });
+      this.emit({
+        type: 'tool_exec_end',
+        taskId: this.taskId,
+        toolCallId: call.id,
+        name: call.name,
+        ok: false,
+        contentPreview: truncate(emptyMsg, 500),
+        errorCode: ErrorCodes.TOOL_ARGS_INVALID,
+        endTime: Date.now(),
+      });
         continue;
       }
 
@@ -830,6 +832,7 @@ export class TaskLoop {
           ok: false,
           contentPreview: blockedMsg,
           errorCode: ErrorCodes.TOOL_EXEC_UNSAFE_BLOCKED,
+          endTime: Date.now(),
         });
         continue;
       }
@@ -856,6 +859,7 @@ export class TaskLoop {
           ok: false,
           contentPreview: truncate(healed, 500),
           errorCode: ErrorCodes.TOOL_ARGS_INVALID_JSON,
+          endTime: Date.now(),
         });
         continue;
       }
@@ -871,6 +875,7 @@ export class TaskLoop {
         toolCallId: call.id,
         name: call.name,
         args,
+        startTime: Date.now(),
       });
 
       // 累积中间输出，用于 tool_exec_output 事件
@@ -1020,6 +1025,7 @@ export class TaskLoop {
         ok: result.ok,
         contentPreview: endContentPreview,
         ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+        endTime: Date.now(),
       });
       // W15.8 · 工具正常执行完毕，通知 StreamingFileWriter 清理临时文件
       // （工具本身的 writeFile 已写入真实文件，临时文件不再需要）

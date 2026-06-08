@@ -1081,6 +1081,50 @@ export class DualMindChatPanel {
         this.post({ type: 'inline_edit_history', records });
         break;
       }
+
+      case 'delete_sessions': {
+        // Step 13: 批量删除会话
+        const ids = msg.sessionIds as string[];
+        for (const sid of ids) {
+          this.handleDeleteSession(sid).catch((e: unknown) =>
+            log.error({ err: String(e), sid }, 'delete_session failed'),
+          );
+        }
+        break;
+      }
+
+      case 'update_session_tags': {
+        // Step 13: 更新标签（未来持久化扩展）
+        log.info({ sessionId: msg.sessionId, tags: msg.tags }, 'update_session_tags');
+        break;
+      }
+
+      case 'get_skills': {
+        // Step 12: 返回当前可用的 Skill 列表
+        const skills: Array<{ name: string; description: string; argsTemplate?: string; category: 'workflow' | 'code' | 'review' | 'test' | 'deploy' | 'other'; usageCount?: number }> = [];
+        try {
+          const { listSkills } = require('../skills/registry');
+          skills.push(...listSkills().map((s: any) => ({
+            name: s.name,
+            description: s.description,
+            argsTemplate: s.argsTemplate,
+            category: (s.category ?? 'other') as 'workflow' | 'code' | 'review' | 'test' | 'deploy' | 'other',
+            usageCount: s.usageCount,
+          })));
+        } catch {
+          // 无 skills registry 时静默返回空列表
+        }
+        this.post({ type: 'skill_list', skills });
+        break;
+      }
+
+      case 'execute_skill': {
+        // Step 12: 将 Skill 命令作为用户输入发送
+        const skillText = msg.args ? `/${msg.name} ${msg.args}` : `/${msg.name}`;
+        this.post({ type: 'task_event', event: { type: 'task_start', taskId: `skill-${Date.now()}`, userInput: skillText } });
+        // 将消息发送给 LLM 处理（复用现有 send_user_input 机制）
+        break;
+      }
     }
   }
 

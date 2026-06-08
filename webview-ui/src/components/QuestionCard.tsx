@@ -78,6 +78,8 @@ export function QuestionCard({ payload, onSubmit, onCancel }: QuestionCardProps)
     onCancel(payload.requestId);
   };
 
+  const answeredCount = answers.filter((a) => a.selected.size > 0 || a.other.trim().length > 0).length;
+
   const canSubmit = answers.some((a, i) => {
     if (a.selected.size > 0) return true;
     if (a.other.trim().length > 0) return true;
@@ -116,6 +118,13 @@ export function QuestionCard({ payload, onSubmit, onCancel }: QuestionCardProps)
     >
       <div className="ask-modal" role="dialog" aria-modal="true" aria-label="DevSeeker 需要你的输入">
         <div className="ask-modal__title">DevSeeker 需要你的输入</div>
+        {/* Step 16: 进度条 */}
+        <div className="ask-modal__progress">
+          <div className="ask-modal__progress-bar">
+            <div className="ask-modal__progress-fill" style={{ width: `${answeredCount > 0 ? (answeredCount / total) * 100 : 0}%` }} />
+          </div>
+          <span className="ask-modal__progress-text">已回答 {answeredCount} / {total}</span>
+        </div>
         <div className="ask-modal__hint">
           请回答以下 {total} 个问题以帮助我做决策。你可以选择一个方案，或在下方输入自定义内容。
         </div>

@@ -41,12 +41,8 @@ import { McpConfigurationView } from './components/mcp/configuration/McpConfigur
 // import { WorktreesView } from './components/worktrees/WorktreesView.js';
 import { RulesView } from './components/rules/RulesView.js';
 import './styles/model-config.css';
-
-const vscode = acquireVsCodeApi();
-
-function postToHost(msg: WebviewInboundMessage): void {
-  vscode.postMessage(msg);
-}
+import { announceToScreenReader } from './utils/accessibility';
+import { postToHost } from './vscode-api';
 
 /** 非首次启动标志（localStorage） */
 const FIRST_RUN_KEY = 'devSeeker.first_run_done';
@@ -181,6 +177,8 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
   const [indexBarExpanded, setIndexBarExpanded] = useState(false);
   const [showModelConfig, setShowModelConfig] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfigPayload | null>(null);
+  // Step 6: 模式切换通知 banner
+  const [modeSwitchBanner, setModeSwitchBanner] = useState<{ from: string; to: string; reason: string; suggestion?: string } | null>(null);
 
   useEffect(() => {
     if (readyPostedRef.current) return;
@@ -273,6 +271,12 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             type: 'MODE_STATUS',
             payload: msg.payload as ModeStatusPayload,
           });
+          // Step 6: 自动切换时显示 banner 通知
+          const sd = (msg.payload as ModeStatusPayload).switchDetail;
+          if (sd) {
+            setModeSwitchBanner({ from: sd.from, to: sd.to, reason: sd.reason, suggestion: sd.suggestion });
+            setTimeout(() => setModeSwitchBanner(null), 8000);
+          }
           break;
         case 'ask_question':
           dispatch({
@@ -799,8 +803,17 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
   /** W-UI6 · indexBar 最终显示：只有用户点开徽章时才显示大条 */
   const indexBar = indexBarExpanded ? indexBarContent : null;
 
+  // Step 10: 关键事件屏幕阅读器播报
+  useEffect(() => {
+    if (state.taskStatus === 'error' && state.lastError?.message) {
+      announceToScreenReader(`任务执行出错: ${state.lastError.message}`);
+    }
+  }, [state.taskStatus, state.lastError]);
+
   return (
     <div className="app flex flex-col flex-1 min-h-0 overflow-hidden">
+      {/* Step 10: 跳过链接（Tab 键首次聚焦时出现） */}
+      <a href="#main-content" className="skip-to-content">跳转到主内容</a>
       <StatusBar
         provider={state.providerStatus}
         gearActions={gearActions}
@@ -812,6 +825,18 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
         onNavigate={onNavigate}
         currentView={currentView}
       />
+      {/* Step 6: 模式切换通知 banner（非阻断式，8s 自动消失） */}
+      {modeSwitchBanner && (
+        <div className="mode-switch-banner" role="alert">
+          <span className="mode-switch-banner__icon">
+            {modeSwitchBanner.from} → {modeSwitchBanner.to}
+          </span>
+          <span className="mode-switch-banner__text">
+            已切换到 <strong>{modeSwitchBanner.to}</strong> 模式 · {modeSwitchBanner.reason}
+          </span>
+          <button className="mode-switch-banner__close" onClick={() => setModeSwitchBanner(null)}>✕</button>
+        </div>
+      )}
       {indexBar}
       {showModelConfig && (
         <ModelConfigPanel
@@ -827,6 +852,8 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             currentSessionId={state.currentSessionId}
             onLoad={handleLoadSession}
             onDelete={handleDeleteSession}
+            onDeleteMultiple={(ids) => postToHost({ type: 'delete_sessions', sessionIds: ids })}
+            postToHost={postToHost}
           />
         )}
         <div className="app__main flex flex-col flex-1 min-w-0 min-h-0">

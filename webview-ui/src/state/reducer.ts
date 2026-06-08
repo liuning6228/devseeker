@@ -40,6 +40,10 @@ export interface ToolCallPart {
   diff?: ToolDiffPayload;
   /** W7b4b · 最近一次 revert 的状态（undefined = 未 revert） */
   revertState?: { ok: boolean; message?: string };
+  /** Step 9: Extension 侧开始时间戳 */
+  startTime?: number;
+  /** Step 9: 执行耗时 ms（Extension 侧端到端计算） */
+  duration?: number;
 }
 
 export type MessagePart = TextPart | ToolCallPart;
@@ -64,6 +68,18 @@ export interface ContextStatsSnapshot {
   compressedTokens: number;
   savingsPercent: number;
   inputBudget: number;
+  /** Step 4: 上下文中引用的文件/符号/记忆列表 */
+  items?: ContextItemEntry[];
+}
+
+/** Step 4: 上下文条目 */
+export interface ContextItemEntry {
+  id: string;
+  type: 'file' | 'symbol' | 'memory';
+  name: string;
+  path: string;
+  estimatedTokens: number;
+  recent?: boolean;
 }
 
 export type TaskStatus = 'idle' | 'running' | 'error';
@@ -83,7 +99,16 @@ export interface AppState {
   /** 方案 B：当前流式消息的 streamId，由 turn_start 设置，用于 StreamController DOM 锚点绑定 */
   currentStreamMsgId?: string;
   currentSessionId?: string;
-  lastError?: { code?: string; message?: string };
+  lastError?: {
+    code?: string;
+    message?: string;
+    /** Step 8: 错误分类 */
+    category?: 'api' | 'network' | 'tool' | 'timeout' | 'auth' | 'unknown';
+    /** Step 8: 修复建议 */
+    suggestion?: string;
+    /** Step 8: 能否重试 */
+    retryable?: boolean;
+  };
   lastUsage?: UsageSnapshot;
   /** W8.3 · 最后一次向 LLM 提交前的上下文压缩快照 */
   lastContextStats?: ContextStatsSnapshot;
@@ -111,6 +136,8 @@ export interface AppState {
   pendingPrefill?: { text: string; nonce: number; isInlineEdit?: boolean };
   /** W15.6 · 已被 revert 的 hunk nonce 集合 */
   revertedHunks: Set<string>;
+  /** Step 14: 工具调用 → 消息索引的映射（O(1) 查找） */
+  toolCallIndex: Map<string, number>;
 }
 
 export const initialState: AppState = {
@@ -123,6 +150,7 @@ export const initialState: AppState = {
   pendingPreviews: [],
   pendingApprovalToolIds: new Set(),
   revertedHunks: new Set(),
+  toolCallIndex: new Map(),
 };
 
 /* ─────────── Actions ─────────── */
@@ -191,6 +219,7 @@ export function reducer(state: AppState, action: Action): AppState {
         pendingPreviews: [],
         pendingApprovalToolIds: new Set(),
         revertedHunks: new Set(),
+        toolCallIndex: new Map(),
         messages: action.messages.map((m, i) => ({
           id: `hist-${i}`,
           role: (m.role as MessageRole) ?? 'assistant',
@@ -351,8 +380,10 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
     case 'reasoning_delta':
       return appendReasoning(state, ev.text);
 
-    case 'tool_start':
-      return appendToolCall(state, ev.toolCallId, ev.name);
+    case 'tool_start': {
+      const withIndex = state.toolCallIndex.set(ev.toolCallId, state.messages.length - 1);
+      return { ...appendToolCall(state, ev.toolCallId, ev.name), toolCallIndex: new Map(withIndex) };
+    }
 
     case 'tool_args_delta':
       return updateToolPart(state, ev.toolCallId, (p) => ({
@@ -365,6 +396,7 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
         ...p,
         status: 'running',
         argsPreview: safeStringify(ev.args),
+        startTime: ev.startTime, // Step 9
       }));
 
     case 'tool_exec_output':
@@ -383,6 +415,7 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
         // 避免 tool_exec_end 的截断 finalContent 覆盖用户已看到的终端实时输出。
         contentPreview: (p.contentPreview ?? '') || ev.contentPreview,
         errorCode: ev.errorCode,
+        duration: p.startTime && ev.endTime ? ev.endTime - p.startTime : undefined, // Step 9
       }));
 
     case 'usage':
