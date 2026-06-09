@@ -62,6 +62,10 @@ export interface SearchCodebaseDeps {
    */
   getIndex(): IndexReader | undefined;
   /**
+   * C1 · 可选返回资产索引(文档画像引擎)；未传则不做资产检索。
+   */
+  getAssetIndex?(): IndexReader | undefined;
+  /**
    * W13.1-B · 可选注入 shell 探测结果；未传则走 `collectEnvironment()` 默认。
    * 单测可直接注入，避免依赖 process / SHELL 环境变量。
    */
@@ -94,20 +98,33 @@ export class SearchCodebaseTool implements ITool<SearchCodebaseArgs, ToolResult>
     }
 
     try {
-      const rawHits = await index.search(args.query, topK);
-      if (!rawHits.length) {
+      // C1 · 并行查询代码索引和资产索引
+      const assetIndex = this.deps.getAssetIndex?.();
+      const [codeHits, assetHits] = await Promise.all([
+        index.search(args.query, topK),
+        assetIndex ? assetIndex.search(args.query, topK) : [],
+      ]);
+
+      const allHits = [...codeHits, ...assetHits]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topK);
+
+      if (!allHits.length) {
         return ok(`Query: "${args.query}"\nResults: 0 matches\n`, {
           query: args.query,
           count: 0,
         });
       }
 
-      // 从磁盘读取原文填充 text（索引库不再存储 text 文本）
+      // 从磁盘读取原文填充 text（资产索引的 text 已在 AssetMeta.description 中,直接复用）
       const workspaceRoot = ctx.workspaceRoot;
       const hits: Array<SearchResult & { text: string }> = await Promise.all(
-        rawHits.map(async (h) => {
+        allHits.map(async (h) => {
           let text: string;
-          if (workspaceRoot) {
+          // 资产索引的结果已有完整 text
+          if (h.text && h.text.length > 80) {
+            text = h.text;
+          } else if (workspaceRoot) {
             text = await readFileLines(join(workspaceRoot, h.filePath), h.startLine, h.endLine);
           } else {
             text = `[file not accessible: no workspace root]`;
@@ -121,8 +138,9 @@ export class SearchCodebaseTool implements ITool<SearchCodebaseArgs, ToolResult>
       parts.push(`Results: ${hits.length} matches`);
       parts.push('');
       hits.forEach((h, i) => {
+        const label = h.filePath.endsWith('.pdf') ? '📄' : '';
         parts.push(
-          `## ${i + 1}. score=${h.score.toFixed(3)} [${h.filePath}:${h.startLine}-${h.endLine}]`,
+          `## ${i + 1}. ${label} score=${h.score.toFixed(3)} [${h.filePath}:${h.startLine}-${h.endLine}]`,
         );
         parts.push('```');
         parts.push(h.text);

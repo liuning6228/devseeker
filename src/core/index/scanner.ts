@@ -88,6 +88,14 @@ export const DEFAULT_INCLUDE_EXT = new Set<string>([
   '.md',
   '.sh',
   '.ps1',
+  // 资产文件索引（C1 文档画像引擎）
+  '.pdf',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.bmp',
+  '.svg',
 ]);
 
 /** 默认单文件尺寸上限（字节） */

@@ -63,12 +63,15 @@ describe('scanWorkspace', () => {
 
   it('skips files not in include extension list', async () => {
     await mkfile('a.ts');
-    await mkfile('binary.png', 'not really png');
-    await mkfile('docs.pdf', 'not really pdf');
+    // .png 和 .pdf 现在被 scanner 的 DEFAULT_INCLUDE_EXT 包含(C1 文档画像引擎)
+    // 所以只验证 .exe / .bin 等非白名单扩展名被跳过
+    await mkfile('binary.exe', 'not really exe');
+    await mkfile('docs.bin', 'not really bin');
+    await mkfile('archive.zip', 'zip');
 
     const r = await scanWorkspace(tmpRoot);
     expect(r.files.map((f) => f.relPath)).toEqual(['a.ts']);
-    expect(r.skippedExt).toBeGreaterThanOrEqual(2);
+    expect(r.skippedExt).toBeGreaterThanOrEqual(3);
   });
 
   it('skips files larger than maxFileSize', async () => {

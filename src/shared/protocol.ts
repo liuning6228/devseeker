@@ -148,6 +148,14 @@ export type TaskEvent =
       agentType?: string;
       /** 是否失败 */
       failed?: boolean;
+    }
+  /** F1 · 模糊度检测结果（TaskLoop 自动触发，不阻塞执行） */
+  | {
+      type: 'ambiguity_detected';
+      taskId: string;
+      score: number;
+      signals: Array<{ type: string; severity: number; question: string }>;
+      message: string;
     };
 
 // ─────────── Webview → Extension ───────────

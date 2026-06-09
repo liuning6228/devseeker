@@ -38,6 +38,7 @@ import {
   tryHeal as tryHealTool,
 } from '../self-healing/tool-healing.js';
 import { DynamicPromptModifier } from '../self-healing/dynamic-prompt-modifier.js';
+import { detectAmbiguity } from './ambiguity-detector.js';
 import { FileStateCache } from '../tools/file-state-cache.js';
 import type {
   HookManager,
@@ -330,6 +331,34 @@ export class TaskLoop {
 
     this.history.addUser(userInput, images);
     this.emit({ type: 'task_start', taskId: this.taskId, userInput });
+
+    // F1 · 模糊度检测: 仅对首次用户消息触发,不阻塞执行流
+    // ambiguityCheckCount 是 TaskLoop 类上新增的属性,在此初始化
+    if ((this as Record<string, unknown>).ambiguityCheckCount === undefined) {
+      (this as Record<string, unknown>).ambiguityCheckCount = 0;
+    }
+    const checkCount = (this as Record<string, unknown>).ambiguityCheckCount as number;
+    if (checkCount === 0) {
+      (this as Record<string, unknown>).ambiguityCheckCount = 1;
+      // 粗略估计文件引用数（找路径模式 `path/to/file`）
+      const fileRefCount = (userInput.match(/[a-zA-Z0-9_\-/]+\.[a-zA-Z0-9]+/g) || []).length;
+      const ambiguity = detectAmbiguity(userInput, fileRefCount);
+      if (ambiguity.score > 0.6) {
+        log.info(
+          { score: ambiguity.score, signals: ambiguity.signals.map(s => s.type) },
+          '[F1] 模糊度检测触发',
+        );
+        this.emit({
+          type: 'ambiguity_detected',
+          taskId: this.taskId,
+          score: ambiguity.score,
+          signals: ambiguity.signals.map(s => ({ type: s.type, severity: s.severity, question: s.question })),
+          message: userInput,
+        });
+      } else {
+        log.debug({ score: ambiguity.score }, '[F1] 模糊度检测通过');
+      }
+    }
 
     let taskOk = true;
     let taskErrorCode: string | undefined;
