@@ -459,6 +459,8 @@ export interface AskQuestionItem {
   options: AskQuestionOption[];
   /** true 多选；缺省单选 */
   multiSelect?: boolean;
+  /** 是否显示"其他"自定义输入框；默认 true（除非显式 false） */
+  allowOther?: boolean;
 }
 
 /** Extension → Webview：发起一次询问 */

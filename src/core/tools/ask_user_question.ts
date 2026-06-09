@@ -20,6 +20,7 @@
  *
  * 设计权衡：
  * - UI 总是自动追加 "Other" 选项（webview 层处理），工具层只关心结构化答案
+ * - LLM 可通过 questions[i].allowOther=false 禁用"其他"输入框（默认开启）
  * - `selected` 数组即使单选也用数组，保持协议一致
  */
 
@@ -68,14 +69,16 @@ const PARAMS_SCHEMA = {
       type: 'array',
       minItems: 1,
       maxItems: 4,
-      description: '1-4 个问题卡片；每个卡片 2-4 个选项。',
+      description: '1-4 个问题卡片；每个卡片 2-4 个选项（可少至 0 个如果 allowOther=true）。',
       items: {
         type: 'object',
-        required: ['header', 'question', 'options'],
+        required: ['header', 'question'],
         properties: {
           header: { type: 'string', description: '短标签（≤12 字符），UI 以 chip 展示' },
           question: { type: 'string', description: '完整问题文本（以问号结尾）' },
           multiSelect: { type: 'boolean', description: '是否多选；缺省单选' },
+          allowOther: { type: 'boolean',
+            description: '是否显示"其他"自定义输入框（默认 true）。设为 false 表示只接受预设选项，用户不可自定义。' },
           options: {
             type: 'array',
             minItems: 2,
@@ -183,8 +186,16 @@ function validate(
     if (typeof q.question !== 'string' || q.question.length === 0) {
       return { ok: false, msg: `questions[${i}].question 必填` };
     }
-    if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 4) {
-      return { ok: false, msg: `questions[${i}].options 必须为长度 2-4 的数组` };
+    if (!Array.isArray(q.options) || q.options.length > 4) {
+      return { ok: false, msg: `questions[${i}].options 必须为长度 0-4 的数组` };
+    }
+    // options 为空时需要 allowOther=true 才合法
+    if (q.options.length === 0 && q.allowOther !== true) {
+      return { ok: false, msg: `questions[${i}] options 为空时需要设置 allowOther=true` };
+    }
+    // options 长度为 1 时也非法（除非 allowOther=true——允许只有"其他"输入框且无预设选项）
+    if (q.options.length === 1 && q.allowOther !== true) {
+      return { ok: false, msg: `questions[${i}] options 长度为 1 时需要设置 allowOther=true（或提供 2-4 个预设选项）` };
     }
     for (let j = 0; j < q.options.length; j += 1) {
       const opt = q.options[j];

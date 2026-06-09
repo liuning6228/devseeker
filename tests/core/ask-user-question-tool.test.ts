@@ -84,7 +84,7 @@ describe('AskUserQuestionTool validate', () => {
     expect(r.errorCode).toBe(ErrorCodes.TOOL_ARGS_INVALID);
   });
 
-  it('rejects options with length 1', async () => {
+  it('rejects options with length 1 (neither allowOther)', async () => {
     const qs: AskQuestionItem[] = [
       {
         header: 'h',
@@ -93,6 +93,7 @@ describe('AskUserQuestionTool validate', () => {
       },
     ];
     const r = await tool.execute({ questions: qs }, mkCtx());
+    // 注: options.length >= 1 但 < 2 且 allowOther 未设置 → 仍为非法
     expect(r.ok).toBe(false);
     expect(r.errorCode).toBe(ErrorCodes.TOOL_ARGS_INVALID);
   });

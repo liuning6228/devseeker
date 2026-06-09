@@ -85,7 +85,7 @@ export function QuestionCard({ payload, onSubmit, onCancel }: QuestionCardProps)
     if (a.other.trim().length > 0) return true;
     const q = payload.questions[i];
     // 如果没有 options（纯文本输入模式），只要有 "其他" 内容即可
-    if (!q) return false;
+    if (!q || q.options.length === 0) return a.other.trim().length > 0;
     // 有 options 但未选且 "其他" 为空 → 不可提交
     return false;
   });
@@ -137,11 +137,13 @@ export function QuestionCard({ payload, onSubmit, onCancel }: QuestionCardProps)
                 {q.multiSelect && <span className="ask-modal__multi">多选</span>}
               </div>
               <div className="ask-modal__text">{q.question}</div>
+              {q.options.length > 0 && (
               <div className="ask-modal__select-hint">
                 {q.multiSelect ? '请选择一个或多个选项：' : '请选择一个选项：'}
               </div>
+              )}
               <ul className="ask-modal__options">
-                {q.options.map((opt, j) => {
+                {q.options.length > 0 && q.options.map((opt, j) => {
                   const checked = a.selected.has(opt.label);
                   return (
                     <li
@@ -173,18 +175,22 @@ export function QuestionCard({ payload, onSubmit, onCancel }: QuestionCardProps)
                   );
                 })}
               </ul>
+              {(q.allowOther !== false) && (
               <div className="ask-modal__other">
-                <div className="ask-modal__other-header">其他方案（可选，手动输入）</div>
+                <div className="ask-modal__other-header">
+                  {q.options.length > 0 ? '其他方案（可选，手动输入）' : '输入你的方案'}
+                </div>
                 <label>
                   <textarea
                     className="ask-modal__other-input"
-                    placeholder="输入你的自定义方案…"
+                    placeholder={q.options.length > 0 ? '输入你的自定义方案…' : '在此输入你的方案…'}
                     value={a.other}
                     onChange={(e) => updateAnswer(i, (prev) => ({ ...prev, other: e.target.value }))}
                     rows={2}
                   />
                 </label>
               </div>
+              )}
             </div>
           );
         })}
