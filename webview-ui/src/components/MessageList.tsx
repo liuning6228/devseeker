@@ -117,11 +117,13 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
       <div className="message-list message-empty" role="log" aria-live="polite">
         输入消息与 DevSeeker 开始对话。支持：
         <br />
-        · <code>@</code> 引用文件/符号添加上下文
+        · <code>@</code> 引用文件/符号添加上下文 · 自然语言直接描述需求
         <br />
         · <code>/</code> 命令：<code>/fix</code> 修复 · <code>/refactor</code> 重构 · <code>/review</code> 评审 · <code>/commit</code> 提交
         <br />
-        · 自然语言直接描述需求
+        · 多级 LLM 配置（主力/降级/推理模型自动路由） · 多级 VLLM 配置（嵌入/语义索引）
+        <br />
+        · 网络 API 配置（百度/必应/Tavily 搜索 · Jina 网页抓取）
       </div>
     );
   }
