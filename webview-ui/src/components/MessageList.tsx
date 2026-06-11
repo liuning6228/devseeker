@@ -115,9 +115,13 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
   if (messages.length === 0) {
     return (
       <div className="message-list message-empty" role="log" aria-live="polite">
-        输入消息与 DevSeeker 开始对话。例如：
+        输入消息与 DevSeeker 开始对话。支持：
         <br />
-        <code>请读一下 package.json 并告诉我使用了哪些依赖</code>
+        · <code>@</code> 引用文件/符号添加上下文
+        <br />
+        · <code>/</code> 命令：<code>/fix</code> 修复 · <code>/refactor</code> 重构 · <code>/review</code> 评审 · <code>/commit</code> 提交
+        <br />
+        · 自然语言直接描述需求
       </div>
     );
   }
