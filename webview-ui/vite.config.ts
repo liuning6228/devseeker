@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => ({
   root: __dirname,
   base: './',
   resolve: {
+    dedupe: ['react', 'react-dom'],
     alias: {
       // W9.14: 复用 extension 侧 Markdown 解析器（纯 TS，无 DOM 依赖）
       '@core/markdown': resolve(__dirname, '../src/core/markdown'),

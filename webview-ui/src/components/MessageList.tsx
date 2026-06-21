@@ -119,7 +119,7 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
         <br />
         · <code>@</code> 引用文件/符号添加上下文 · 自然语言直接描述需求
         <br />
-        · <code>/</code> 命令：<code>/fix</code> 修复 · <code>/refactor</code> 重构 · <code>/review</code> 评审 · <code>/commit</code> 提交
+        <span style={{ whiteSpace: 'nowrap' }}>· <code>/</code> 命令：<code>/fix</code> 修复 · <code>/refactor</code> 重构 · <code>/review</code> 评审 · <code>/commit</code> 提交</span>
         <br />
         · 多级 LLM 配置（主力/降级/推理模型自动路由） · 多级 VLLM 配置（嵌入/语义索引）
         <br />
