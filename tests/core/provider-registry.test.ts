@@ -18,21 +18,24 @@ import { randomUUID } from 'node:crypto';
 
 /** 造一个 mock vscode.WorkspaceConfiguration */
 function mockConfig(overrides: Record<string, unknown> = {}): any {
+  // 仅预填 LLM L1 默认 provider（测试用例大多围绕 DeepSeek L1 展开），其他字段由 overrides 显式提供。
+  // 缺省字段视为"未配置"，由代码侧 PROVIDER_DEFAULTS / readLevelConfig fallback 兜底。
+  // 不要在此处预填 model / baseUrl / reasoningModel 等，否则会破坏
+  // "未配置时 getDefaultProvider 返回 undefined" 等测试用例。
   const data: Record<string, unknown> = {
     'models.llm.level1.provider': 'deepseek',
-    'models.llm.level1.apiKey': 'sk-ds-abc',
-    'models.llm.level1.model': 'deepseek-chat',
-    'models.llm.level1.apiKeys': [],
-    'models.llm.level1.baseUrl': '',
-    'models.llm.level1.reasoningModel': '',
-    'models.llm.level1.contextWindow': 0,
-    'models.vllm.level1.provider': '',
-    'models.vllm.level1.apiKey': '',
     ...overrides,
   };
   return {
     get: (key: string, def?: unknown) => data[key] ?? def,
     has: (key: string) => key in data,
+    // 模拟 vscode inspect API：globalValue 仅在 key 被显式设置时返回
+    inspect: <T>(key: string) => {
+      if (!(key in data)) {
+        return { globalValue: undefined, defaultValue: undefined, workspaceValue: undefined, workspaceFolderValue: undefined };
+      }
+      return { globalValue: data[key] as T, defaultValue: undefined, workspaceValue: undefined, workspaceFolderValue: undefined };
+    },
   };
 }
 

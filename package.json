@@ -253,13 +253,13 @@
         },
         "devSeeker.models.llm.level1.baseUrl": {
           "type": "string",
-          "default": "",
-          "description": "LLM Level 1 Base URL（留空则使用 Provider 默认值）"
+          "default": "https://api.deepseek.com/v1",
+          "description": "LLM Level 1 Base URL（DeepSeek 默认 https://api.deepseek.com/v1；留空回落到 Provider 默认值）"
         },
         "devSeeker.models.llm.level1.reasoningModel": {
           "type": "string",
-          "default": "",
-          "description": "LLM Level 1 推理模型（如 deepseek-v4-pro，留空则无；旧名 deepseek-reasoner 已停服）"
+          "default": "deepseek-v4-pro",
+          "description": "LLM Level 1 推理模型（DeepSeek 默认 deepseek-v4-pro；留空则无推理模型切换；旧名 deepseek-reasoner 已于 2026-07-24 停服）"
         },
         "devSeeker.models.llm.level1.contextWindow": {
           "type": "integer",
@@ -406,8 +406,8 @@
         },
         "devSeeker.models.vllm.level1.baseUrl": {
           "type": "string",
-          "default": "",
-          "description": "VLLM Level 1 Base URL（留空则使用 Provider 默认值）"
+          "default": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "description": "VLLM Level 1 Base URL（Qwen 默认 https://dashscope.aliyuncs.com/compatible-mode/v1；留空回落到 Provider 默认值）"
         },
         "devSeeker.models.vllm.level1.contextWindow": {
           "type": "integer",

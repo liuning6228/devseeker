@@ -881,6 +881,7 @@ export class DualMindChatPanel {
         // W12.3 · 冷启动指标：webview DOM 就绪（距 activate 起点的毫秒数）
         perfProbe.markWebviewReady();
         this.pushProviderStatus();
+        this.pushModelConfig(); // 首次就绪即推送模型配置，避免 ModelConfigPanel 显示空白
         this.pushCostSummary();
         this.pushSessionList();
         this.pushIndexStatus();

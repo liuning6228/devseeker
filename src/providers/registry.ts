@@ -354,7 +354,38 @@ export class ProviderRegistry {
     level: ModelLevel,
   ): ModelLevelConfig | undefined {
     const prefix = `models.${track}.level${level}`;
-    const provider = config.get<string>(`${prefix}.provider`)?.trim() as ProviderType | undefined;
+    // 用 inspect 区分"用户显式写入"与"package.json default"：
+    // - 所有 scope 都无值（workspace/global/default 全为 undefined）→ 视为未配置 → 返回 undefined
+    // - 任一层级有值 → 使用该值（按 workspace > global > default 优先级）
+    // 这样 VS Code Settings 页能用 package.json default 显示默认值，
+    // 代码侧也能正确识别"未配置"语义，避免把 package.json 默认值当成用户值写回。
+    const pickValue = <T>(info: { defaultValue?: T; globalValue?: T; workspaceValue?: T; workspaceFolderValue?: T } | undefined): T | undefined => {
+      if (!info) return undefined;
+      if (info.workspaceFolderValue !== undefined) return info.workspaceFolderValue;
+      if (info.workspaceValue !== undefined) return info.workspaceValue;
+      if (info.globalValue !== undefined) return info.globalValue;
+      // defaultValue 来自 package.json；当且仅当其他层级全无值时才用到。
+      // 但这里不把它视为"用户配置"——返回 undefined，让下游 PROVIDER_DEFAULTS 兜底。
+      return undefined;
+    };
+    const inspectStr = (key: string): string | undefined => {
+      const v = pickValue<string>(config.inspect<string>(key));
+      if (typeof v !== 'string') return undefined;
+      const trimmed = v.trim();
+      return trimmed || undefined;
+    };
+    const inspectArr = (key: string): string[] | undefined => {
+      const v = pickValue<string[]>(config.inspect<string[]>(key));
+      if (!Array.isArray(v)) return undefined;
+      const filtered = v.filter((k) => k?.trim());
+      return filtered.length ? filtered : undefined;
+    };
+    const inspectNum = (key: string): number | undefined => {
+      const v = pickValue<number>(config.inspect<number>(key));
+      return typeof v === 'number' && v > 0 ? v : undefined;
+    };
+
+    const provider = inspectStr(`${prefix}.provider`) as ProviderType | undefined;
 
     if (!provider) {
       // L2/L3 可选：未配置 provider → 不注册（避免幻影 Provider 占据降级链和 UI 下拉）
@@ -370,12 +401,16 @@ export class ProviderRegistry {
 
     return {
       provider,
-      model: config.get<string>(`${prefix}.model`)?.trim() || PROVIDER_DEFAULTS[provider].model,
-      apiKey: config.get<string>(`${prefix}.apiKey`)?.trim() || undefined,
-      apiKeys: config.get<string[]>(`${prefix}.apiKeys`)?.filter((k) => k?.trim()) || undefined,
-      baseUrl: config.get<string>(`${prefix}.baseUrl`)?.trim() || undefined,
-      reasoningModel: config.get<string>(`${prefix}.reasoningModel`)?.trim() || undefined,
-      contextWindow: config.get<number>(`${prefix}.contextWindow`) || undefined,
+      // model 字段兜底：用户未显式配置时用 PROVIDER_DEFAULTS 默认值（保证 ModelLevelConfig.model 类型 string）
+      // 结合 package.json default 与 PROVIDER_DEFAULTS 取同一值，VS Code Settings 页与 webview 显示一致
+      model: inspectStr(`${prefix}.model`) ?? (track === 'vllm' && PROVIDER_DEFAULTS[provider].vllmModel
+        ? PROVIDER_DEFAULTS[provider].vllmModel!
+        : PROVIDER_DEFAULTS[provider].model),
+      apiKey: inspectStr(`${prefix}.apiKey`),
+      apiKeys: inspectArr(`${prefix}.apiKeys`),
+      baseUrl: inspectStr(`${prefix}.baseUrl`),
+      reasoningModel: inspectStr(`${prefix}.reasoningModel`),
+      contextWindow: inspectNum(`${prefix}.contextWindow`),
     };
   }
 
