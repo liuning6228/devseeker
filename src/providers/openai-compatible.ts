@@ -78,7 +78,7 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
   protected readonly model: string;
   /**
    * reasoning 模型 id（W15.5 Auto-Thinking-Router 需公开供 panel 读取）。
-   * 仅对具备 reasoning capability 的子类有效（如 DeepSeek 的 deepseek-reasoner）。
+   * 仅对具备 reasoning capability 的子类有效（如 DeepSeek 的 deepseek-v4-pro）。
    */
   readonly reasoningModel?: string;
   protected readonly timeoutMs: number;

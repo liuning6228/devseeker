@@ -66,7 +66,7 @@ export interface PromptBuildContext {
    */
   taskContext?: string;
   /**
-   * V2 M3.14.6 · 当前使用的模型 ID（如 "deepseek-chat"、"deepseek-reasoner"）；
+   * V2 M3.14.6 · 当前使用的模型 ID（如 "deepseek-v4-flash"、"deepseek-v4-pro"）；
    * 用于选择 model variant，为空时使用 generic variant。
    */
   modelId?: string;

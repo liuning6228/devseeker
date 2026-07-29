@@ -53,6 +53,29 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderType, string> = {
 
 // ─────────── Provider 可选模型列表 ───────────
 
+/**
+ * DeepSeek 旧版模型名 → V4 模型名映射。
+ *
+ * DeepSeek 于 2026-04-24 上线 V4 系列（deepseek-v4-pro / deepseek-v4-flash），
+ * 并于 2026-07-24 停止旧名 deepseek-chat / deepseek-reasoner 的服务。
+ * 为保证存量用户配置平滑生效（VS Code settings.json 里可能残留旧名），
+ * 在读取配置阶段自动映射到新模型名。
+ */
+export const DEEPSEEK_LEGACY_MODEL_MAP: Record<string, string> = {
+  'deepseek-chat': 'deepseek-v4-flash',
+  'deepseek-reasoner': 'deepseek-v4-pro',
+  'deepseek-coder': 'deepseek-v4-flash',
+};
+
+/**
+ * 将可能为旧版模型名映射到最新名；未知名称原样返回。
+ * 供 model-config 读取、旧配置迁移、Provider 实例化时使用。
+ */
+export function normalizeDeepSeekModel(model: string | undefined): string | undefined {
+  if (!model) return model;
+  return DEEPSEEK_LEGACY_MODEL_MAP[model] ?? model;
+}
+
 /** 模型选项（用于 UI 下拉） */
 export interface ModelOption {
   id: string;
@@ -65,8 +88,9 @@ export interface ModelOption {
 /** 每个 Provider 的可选模型列表（按推荐度排序） */
 export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
   deepseek: [
-    { id: 'deepseek-chat', label: 'deepseek-chat (V3)' },
-    { id: 'deepseek-reasoner', label: 'deepseek-reasoner (R1)' },
+    // ── DeepSeek V4 系列（当前主力，2026-04-24 上线，旧 deepseek-chat / deepseek-reasoner 已于 2026-07-24 停服）
+    { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash (V4, 高并发)' },
+    { id: 'deepseek-v4-pro', label: 'deepseek-v4-pro (V4, 强推理)' },
   ],
   openai: [
     { id: 'gpt-4o-mini', label: 'gpt-4o-mini' },
@@ -143,7 +167,8 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'qwen/qwen3-next-80b-a3b-instruct:free', label: 'Qwen3 Next 80B', free: true },
     { id: 'openai/gpt-oss-120b:free', label: 'GPT-OSS 120B', free: true },
     { id: 'openai/gpt-oss-20b:free', label: 'GPT-OSS 20B', free: true },
-    { id: 'deepseek/deepseek-chat:free', label: 'DeepSeek V3', free: true },
+    { id: 'deepseek/deepseek-v4-flash:free', label: 'DeepSeek V4 Flash (via OpenRouter)', free: true },
+    { id: 'deepseek/deepseek-chat:free', label: 'DeepSeek V3 (via OpenRouter, legacy)', free: true },
     { id: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1', free: true },
     { id: 'deepseek/deepseek-r1-0528:free', label: 'DeepSeek R1 0528', free: true },
     { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B', free: true },
@@ -216,7 +241,7 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'llama3.2:3b', label: 'llama3.2:3b' },
   ],
   'custom-openai': [
-    { id: '_placeholder_', label: '自由输入任意 Model ID（如 gpt-4o-mini / deepseek-chat 等）' },
+    { id: '_placeholder_', label: '自由输入任意 Model ID（如 gpt-4o-mini / deepseek-v4-flash 等）' },
   ],
 };
 
@@ -229,7 +254,7 @@ export type ModelLevel = 1 | 2 | 3;
 export interface ModelLevelConfig {
   /** Provider 类型 */
   provider: ProviderType;
-  /** 模型名称（如 deepseek-chat / qwen-plus / gpt-4o-mini） */
+  /** 模型名称（如 deepseek-v4-flash / qwen-plus / gpt-4o-mini） */
   model: string;
   /** API Key（Ollama 本地可为空） */
   apiKey?: string;
@@ -243,7 +268,7 @@ export interface ModelLevelConfig {
   baseUrl?: string;
   /**
    * 可选：reasoning 模型 id。
-   * 仅对具备 reasoning capability 的 Provider 有效（如 DeepSeek 的 deepseek-reasoner）。
+   * 仅对具备 reasoning capability 的 Provider 有效（如 DeepSeek 的 deepseek-v4-pro）。
    * 在 Auto-Thinking-Router 探测到需要 reasoning 时，本级会切换到此模型。
    */
   reasoningModel?: string;
@@ -293,8 +318,8 @@ export interface ProviderDefaults {
 export const PROVIDER_DEFAULTS: Record<ProviderType, ProviderDefaults> = {
   deepseek: {
     baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-chat', // 当前路由到 V4-Flash 非thinking；可直接填 deepseek-v4-pro / deepseek-v4-flash
-    reasoningModel: 'deepseek-reasoner', // 当前路由到 V4-Flash thinking 模式
+    model: 'deepseek-v4-flash', // DeepSeek-V4-Flash：默认推荐，高并发低成本，1M 上下文，支持思考/非思考模式
+    reasoningModel: 'deepseek-v4-pro', // DeepSeek-V4-Pro：复杂推理/编码任务推荐
     hasVision: false,
   },
   openai: {
@@ -355,16 +380,29 @@ export function resolveBaseUrl(config: ModelLevelConfig): string {
 /** 获取某级配置的有效 model（用户未配则回退到 Provider 默认值） */
 export function resolveModel(config: ModelLevelConfig, track?: 'llm' | 'vllm'): string {
   const custom = (config.model ?? '').trim();
-  if (custom) return custom;
-  const defaults = PROVIDER_DEFAULTS[config.provider];
-  if (track === 'vllm' && defaults.vllmModel) return defaults.vllmModel;
-  return defaults.model;
+  const fallback = (() => {
+    const defaults = PROVIDER_DEFAULTS[config.provider];
+    if (track === 'vllm' && defaults.vllmModel) return defaults.vllmModel;
+    return defaults.model;
+  })();
+  const raw = custom || fallback;
+  // DeepSeek 旧名 deepseek-chat / deepseek-reasoner 已停服，自动映射到 V4
+  if (config.provider === 'deepseek') {
+    return normalizeDeepSeekModel(raw) ?? raw;
+  }
+  return raw;
 }
 
 /** 获取某级配置的有效 reasoningModel */
 export function resolveReasoningModel(config: ModelLevelConfig): string | undefined {
-  if (config.reasoningModel?.trim()) return config.reasoningModel.trim();
-  return PROVIDER_DEFAULTS[config.provider].reasoningModel;
+  const raw = config.reasoningModel?.trim()
+    ? config.reasoningModel.trim()
+    : PROVIDER_DEFAULTS[config.provider].reasoningModel;
+  if (!raw) return raw;
+  if (config.provider === 'deepseek') {
+    return normalizeDeepSeekModel(raw);
+  }
+  return raw;
 }
 
 /** 将 ModelTrackConfig 展平为 (level + config) 数组，便于遍历 */
@@ -430,10 +468,11 @@ export function migrateFromLegacyFlat(legacy: LegacyFlatConfig): ModelsConfig {
   if (legacy.deepseek?.apiKey?.trim()) {
     llmLevels.push({
       provider: 'deepseek',
-      model: legacy.deepseek.model || 'deepseek-chat',
+      // 兼容旧设置中的 deepseek-chat / deepseek-reasoner 等已停服的模型名
+      model: normalizeDeepSeekModel(legacy.deepseek.model) || 'deepseek-v4-flash',
       apiKey: legacy.deepseek.apiKey,
       baseUrl: legacy.deepseek.baseUrl,
-      reasoningModel: 'deepseek-reasoner',
+      reasoningModel: 'deepseek-v4-pro',
     });
   }
 
@@ -508,7 +547,7 @@ export function migrateFromLegacyFlat(legacy: LegacyFlatConfig): ModelsConfig {
 
   // 至少需要 LLM Level 1，否则用 DeepSeek 占位（引导用户填 key）
   if (llmLevels.length === 0) {
-    llmLevels.push({ provider: 'deepseek', model: 'deepseek-chat' });
+    llmLevels.push({ provider: 'deepseek', model: 'deepseek-v4-flash' });
   }
   if (vllmLevels.length === 0) {
     // VLLM 默认用 qwen
@@ -523,7 +562,7 @@ export function migrateFromLegacyFlat(legacy: LegacyFlatConfig): ModelsConfig {
       llmLevels.push({ provider: 'ollama', model: 'qwen3:8b' });
     } else {
       // 兜底：用 deepseek 占位（用户后续可自行修改）
-      llmLevels.push({ provider: 'deepseek', model: 'deepseek-chat' });
+      llmLevels.push({ provider: 'deepseek', model: 'deepseek-v4-flash' });
     }
   }
 

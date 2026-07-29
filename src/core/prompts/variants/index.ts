@@ -18,7 +18,7 @@ export type VariantId = 'generic' | 'deepseek' | 'qwen';
 
 export interface VariantProfile {
   id: VariantId;
-  /** model id 前缀匹配模式（如 "deepseek" 匹配 "deepseek-chat"、"deepseek-reasoner"） */
+  /** model id 前缀匹配模式（如 "deepseek" 匹配 "deepseek-v4-flash"、"deepseek-v4-pro"） */
   modelPrefix: string;
   /** 该 variant 的友好名称 */
   label: string;
@@ -72,12 +72,12 @@ const VARIANTS: VariantProfile[] = [
 /**
  * 根据模型 id 选择 variant。
  * 按 modelPrefix 最长匹配取优先级：
- * "deepseek-reasoner" → deepseek variant
+ * "deepseek-v4-pro" / "deepseek-v4-flash" → deepseek variant
  * "qwen-plus" → qwen variant
  * "claude-sonnet" → generic
  */
 export function selectVariant(modelId: string): VariantProfile {
-  // 按前缀长度降序匹配（确保 "deepseek-reasoner" 命中 deepseek 而非 generic）
+  // 按前缀长度降序匹配（确保 "deepseek-v4-pro" 命中 deepseek 而非 generic）
   const sorted = [...VARIANTS]
     .filter((v) => v.modelPrefix.length > 0)
     .sort((a, b) => b.modelPrefix.length - a.modelPrefix.length);

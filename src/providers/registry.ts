@@ -55,7 +55,9 @@ function buildProvider(
   providerId: ProviderId,
   track: 'llm' | 'vllm',
 ): IProvider {
-  const apiKey = levelConfig.apiKey ?? '';
+  // P1-1: apiKey 未填但 apiKeys 有值时取 Key 池第一个，
+  // 避免实例带 placeholder key 发请求（initFromConfig 不会主动 updateApiKey(pool[0])）
+  const apiKey = resolveApiKeys(levelConfig)[0] ?? '';
   const baseUrl = resolveBaseUrl(levelConfig);
   const model = resolveModel(levelConfig, track);
   const reasoningModel = resolveReasoningModel(levelConfig);
@@ -333,7 +335,8 @@ export class ProviderRegistry {
 
   /** 从 VSCode 配置读取单轨（LLM 或 VLLM）的 3 级配置 */
   private readTrackConfig(config: vscode.WorkspaceConfiguration, track: 'llm' | 'vllm'): ModelTrackConfig {
-    const level1 = this.readLevelConfig(config, track, 1);
+    // Level 1 必有值（provider 为空时 readLevelConfig 返回默认占位）
+    const level1 = this.readLevelConfig(config, track, 1) as ModelLevelConfig;
     const level2 = this.readLevelConfig(config, track, 2);
     const level3 = this.readLevelConfig(config, track, 3);
 
@@ -344,16 +347,18 @@ export class ProviderRegistry {
     };
   }
 
-  /** 从 VSCode 配置读取单级配置；provider 为空则返回 undefined */
+  /** 从 VSCode 配置读取单级配置；L2/L3 的 provider 为空则返回 undefined（未配置） */
   private readLevelConfig(
     config: vscode.WorkspaceConfiguration,
     track: 'llm' | 'vllm',
     level: ModelLevel,
-  ): ModelLevelConfig {
+  ): ModelLevelConfig | undefined {
     const prefix = `models.${track}.level${level}`;
     const provider = config.get<string>(`${prefix}.provider`)?.trim() as ProviderType | undefined;
 
     if (!provider) {
+      // L2/L3 可选：未配置 provider → 不注册（避免幻影 Provider 占据降级链和 UI 下拉）
+      if (level !== 1) return undefined;
       // Level 1 必填，返回占位（引导用户配置）
       const defaultProvider = track === 'llm' ? 'deepseek' : 'qwen';
       const defaults = PROVIDER_DEFAULTS[defaultProvider];
@@ -541,6 +546,16 @@ export class ProviderRegistry {
   private hasValidKey(providerId: ProviderId): boolean {
     const pool = this.apiKeyPool.get(providerId);
     return !!pool && pool.length > 0;
+  }
+
+  /**
+   * Provider 是否具备可发请求的凭证（供 panel 层在发请求前校验）。
+   * Ollama 本地部署无需 key；其余类型要求 Key 池非空，
+   * 否则实例持有的是 placeholder key，请求必然 401。
+   */
+  hasUsableCredentials(providerId: ProviderId): boolean {
+    if (providerId.split(':')[0] === 'ollama') return true;
+    return this.hasValidKey(providerId);
   }
 
   /**

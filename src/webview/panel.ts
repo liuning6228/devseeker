@@ -701,14 +701,19 @@ export class DualMindChatPanel {
     const registry = getProviderRegistry();
     const modelsConfig = registry.readModelsConfigPublic(config);
 
-    const toPayload = (c: ModelLevelConfig, track: 'llm' | 'vllm'): ModelLevelConfigPayload => ({
-      provider: c.provider,
-      model: c.model || (track === 'vllm' && PROVIDER_DEFAULTS[c.provider]?.vllmModel ? PROVIDER_DEFAULTS[c.provider].vllmModel! : PROVIDER_DEFAULTS[c.provider]?.model) || '',
-      apiKeySet: !!(c.apiKey ?? '').trim() || (c.apiKeys?.length ?? 0) > 0,
-      baseUrl: c.baseUrl || '',
-      reasoningModel: c.reasoningModel || '',
-      apiKeysCount: c.apiKeys?.length ?? 0,
-    });
+    const toPayload = (c: ModelLevelConfig, track: 'llm' | 'vllm'): ModelLevelConfigPayload => {
+      // 统一用 PROVIDER_DEFAULTS 兜底，保证 webview 显示的值与 VS Code Settings 页一致
+      const defaults = PROVIDER_DEFAULTS[c.provider];
+      const defaultModel = track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model;
+      return {
+        provider: c.provider,
+        model: c.model || defaultModel || '',
+        apiKeySet: !!(c.apiKey ?? '').trim() || (c.apiKeys?.length ?? 0) > 0,
+        baseUrl: c.baseUrl || defaults.baseUrl || '',
+        reasoningModel: c.reasoningModel || defaults.reasoningModel || '',
+        apiKeysCount: c.apiKeys?.length ?? 0,
+      };
+    };
 
     const providerDefaults: ModelConfigPayload['providerDefaults'] = {};
     const providerModels: ModelConfigPayload['providerModels'] = {};
@@ -762,17 +767,34 @@ export class DualMindChatPanel {
       const modelKey = `models.${track}.level${level}.model`;
       const baseUrlKey = `models.${track}.level${level}.baseUrl`;
 
-      // 同时写入 provider + model + baseUrl（一并更新避免 UI 闪烁）
+      // 链式写入：provider → model → baseUrl。空 baseUrl 写 undefined（删除设置，回落到 Provider 默认值），
+      // 避免将 "" 写入 settings.json 被 VS Code 视为"覆盖为空"。
       Promise.resolve(config.update(key, value || undefined, vscode.ConfigurationTarget.Global)).then(() => {
         return config.update(modelKey, defaultModel || undefined, vscode.ConfigurationTarget.Global);
       }).then(() => {
-        return config.update(baseUrlKey, defaults.baseUrl || undefined, vscode.ConfigurationTarget.Global);
+        // 仅当 default baseUrl 非空时才显式写入；否则用 undefined 删除用户残留的旧 baseUrl，
+        // 让读侧（pushModelConfig / registry.readLevelConfig）通过 PROVIDER_DEFAULTS 兜底。
+        return config.update(
+          baseUrlKey,
+          defaults.baseUrl ? defaults.baseUrl : undefined,
+          vscode.ConfigurationTarget.Global,
+        );
       }).then(() => {
         this.pushModelConfig();
       }).catch((err: unknown) => {
         log.error({ err: String(err), key }, 'Failed to update model config (provider switch)');
       });
       return;
+    }
+
+    // apiKey 兜底防御：若 webview 意外传回掩码字符或纯空白，直接忽略，避免污染 settings.json
+    if (field === 'apiKey' && typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed === '••••••••' || !trimmed) {
+        // 不写入；保持原有 key 不变，但仍重新推送当前 config 给 webview 以刷新 UI 状态
+        this.pushModelConfig();
+        return;
+      }
     }
 
     config.update(key, value || undefined, vscode.ConfigurationTarget.Global).then(
@@ -1377,10 +1399,12 @@ export class DualMindChatPanel {
     const track = 'llm';
     
     // 获取默认 provider
+    // preferred 指向的实例可能是无 Key 的占位注册（如残留的旧选择），此时回退默认 Provider
     let defaultProvider: IProvider | undefined;
-    if (preferred) {
+    if (preferred && registry.hasUsableCredentials(preferred)) {
       defaultProvider = registry.get(preferred);
-    } else {
+    }
+    if (!defaultProvider) {
       defaultProvider = registry.getDefaultProvider(track);
     }
 
@@ -1418,6 +1442,22 @@ export class DualMindChatPanel {
         return;
       }
       provider = decision.provider;
+    }
+
+    // 凭证守卫：占位注册的 Provider 持有 placeholder key，发请求必然 401。
+    // 在这里拦截并给出配置引导，避免用户只看到无回复/鉴权失败。
+    if (!registry.hasUsableCredentials(provider.id)) {
+      this.post({
+        type: 'task_event',
+        event: {
+          type: 'task_end',
+          taskId: 'nil',
+          reason: 'error',
+          errorCode: ErrorCodes.PROVIDER_AUTH_INVALID_API_KEY,
+          errorMessage: `Provider ${provider.id} 未配置 API Key。请打开模型配置面板，在对应 Level 的 "API Key" 输入框填入有效的 Key（注意不要只填在备注/其他 Level）。`,
+        },
+      });
+      return;
     }
 
     this.activeProviderId = provider.id;
@@ -1612,7 +1652,7 @@ export class DualMindChatPanel {
         }
         return { verdict: 'allow' };
       },
-      // W15.5 · Auto-Thinking-Router：reasoning 模式下透传 deepseek-reasoner 等 id
+      // W15.5 · Auto-Thinking-Router：reasoning 模式下透传 deepseek-v4-pro 等 reasoningModel id
       ...(modelOverride ? { modelOverride } : {}),
       onEvent: (event) => {
         const t0 = performance.now();

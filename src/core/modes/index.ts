@@ -198,7 +198,7 @@ export function renderModePromptSection(mode: Mode): string {
         '- At least ONE evidence-gathering action (read_file / trace_error / bash / goto_definition etc.) is REQUIRED before editing code.',
         '- DebugModeGate enforces this rule — editing without evidence will be REJECTED.',
         '- If the issue is intermittent or flaky, run the test multiple times.',
-        '- Prefer a reasoning-capable model if available (deepseek-reasoner, o1, etc.).',
+        '- Prefer a reasoning-capable model if available (deepseek-v4-pro, o3, etc.).',
         '',
         'When the bug is fixed and verified (Step 5 PASSES), call',
         '`switch_mode(target_mode_id="agent")` to return to full-capability coding mode.',

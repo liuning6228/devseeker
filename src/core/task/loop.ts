@@ -151,7 +151,7 @@ export interface TaskLoopConfig {
   contextManager?: ContextManager;
   /**
    * 可选：本次 TaskLoop 生命周期内所有轮次强制走指定模型 id（W15.5 Auto-Thinking-Router）。
-   * 典型用法：panel 侧探测到需 reasoning → 传 deepseek-reasoner，
+   * 典型用法：panel 侧探测到需 reasoning → 传 deepseek-v4-pro（DeepSeek V4-Pro），
    * Provider.createMessage 收到后通过 options.modelOverride 切模型。
    * 未传则走 Provider 的默认 model。
    */
@@ -219,7 +219,7 @@ export class TaskLoop {
   private evidenceToolCalled = false;
   private static readonly MAX_DEGRADE = 2;
   private static readonly DEGRADE_THRESHOLD = 3;
-  private static readonly REASONING_MODEL = 'deepseek-reasoner';
+  private static readonly REASONING_MODEL = 'deepseek-v4-pro';
   /** 需要路由降级的编辑工具集合 */
   private static readonly EDIT_TOOLS = new Set(['search_replace', 'write_file', 'append_file', 'delete_file']);
 
@@ -1142,7 +1142,7 @@ function getEffectiveModelOverride(
   isDegraded: boolean,
 ): string | undefined {
   // static property 访问通过 class 名
-  const staticREASONING_MODEL = 'deepseek-reasoner';
+  const staticREASONING_MODEL = 'deepseek-v4-pro';
   if (isDegraded) return staticREASONING_MODEL;
   return baseModelOverride;
 }

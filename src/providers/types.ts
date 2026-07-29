@@ -76,7 +76,7 @@ export interface CreateMessageOptions {
   topP?: number;
   /** 可中断信号（TaskLoop Stop 按钮传入） */
   signal?: AbortSignal;
-  /** 本次请求额外的模型覆盖（Debug 模式可传 deepseek-reasoner） */
+  /** 本次请求额外的模型覆盖（Debug 模式可传 deepseek-v4-pro） */
   modelOverride?: string;
 }
 

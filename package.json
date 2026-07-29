@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -222,7 +222,9 @@
             "deepseek",
             "openai",
             "qwen",
+            "qwen-code",
             "anthropic",
+            "openrouter",
             "ollama",
             "custom-openai"
           ],
@@ -231,8 +233,8 @@
         },
         "devSeeker.models.llm.level1.model": {
           "type": "string",
-          "default": "deepseek-chat",
-          "description": "LLM Level 1 模型名称"
+          "default": "deepseek-v4-flash",
+          "description": "LLM Level 1 模型名称（DeepSeek 默认使用 V4-Flash；旧名 deepseek-chat 已于 2026-07-24 停服）"
         },
         "devSeeker.models.llm.level1.apiKey": {
           "type": "string",
@@ -257,7 +259,7 @@
         "devSeeker.models.llm.level1.reasoningModel": {
           "type": "string",
           "default": "",
-          "description": "LLM Level 1 推理模型（如 deepseek-reasoner，留空则无）"
+          "description": "LLM Level 1 推理模型（如 deepseek-v4-pro，留空则无；旧名 deepseek-reasoner 已停服）"
         },
         "devSeeker.models.llm.level1.contextWindow": {
           "type": "integer",
@@ -271,7 +273,9 @@
             "deepseek",
             "openai",
             "qwen",
+            "qwen-code",
             "anthropic",
+            "openrouter",
             "ollama",
             "custom-openai"
           ],
@@ -320,7 +324,9 @@
             "deepseek",
             "openai",
             "qwen",
+            "qwen-code",
             "anthropic",
+            "openrouter",
             "ollama",
             "custom-openai"
           ],
@@ -369,7 +375,9 @@
             "deepseek",
             "openai",
             "qwen",
+            "qwen-code",
             "anthropic",
+            "openrouter",
             "ollama",
             "custom-openai"
           ],
@@ -413,7 +421,9 @@
             "deepseek",
             "openai",
             "qwen",
+            "qwen-code",
             "anthropic",
+            "openrouter",
             "ollama",
             "custom-openai"
           ],
@@ -457,7 +467,9 @@
             "deepseek",
             "openai",
             "qwen",
+            "qwen-code",
             "anthropic",
+            "openrouter",
             "ollama",
             "custom-openai"
           ],

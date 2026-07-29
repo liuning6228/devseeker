@@ -7,7 +7,7 @@
 /**
  * W15.2 · ReasoningCache
  *
- * 对 reasoning 模型（deepseek-reasoner 等）的调用结果做内存缓存，
+ * 对 reasoning 模型（deepseek-v4-pro 等）的调用结果做内存缓存，
  * 相同 messages 在 TTL 内复用已缓存的 StreamEvent，避免重复 API 调用与等待。
  *
  * 缓存 key：messages 数组的 SHA256（规范化后）。
