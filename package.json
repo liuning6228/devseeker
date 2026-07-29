@@ -310,8 +310,32 @@
         },
         "devSeeker.models.llm.level1.reasoningModel": {
           "type": "string",
+          "enum": [
+            "",
+            "deepseek-v4-pro",
+            "o3",
+            "o4-mini",
+            "qwq-plus",
+            "qwen3-235b-a22b",
+            "qwen3-32b",
+            "deepseek/deepseek-r1:free",
+            "openai/o3:free",
+            "qwen/qwq-32b:free"
+          ],
+          "enumDescriptions": [
+            "（不使用推理模型）",
+            "DeepSeek V4 Pro · 复杂推理/编码",
+            "OpenAI o3 · 强推理",
+            "OpenAI o4-mini · 轻量推理",
+            "QwQ Plus · Qwen 推理（免费）",
+            "Qwen3 235B · 开源旗舰 Thinking",
+            "Qwen3 32B · 开源 Thinking",
+            "DeepSeek R1 (via OpenRouter, 免费)",
+            "OpenAI o3 (via OpenRouter, 免费)",
+            "QwQ 32B (via OpenRouter, 免费)"
+          ],
           "default": "deepseek-v4-pro",
-          "description": "LLM Level 1 推理模型（DeepSeek 默认 deepseek-v4-pro；留空则无推理模型切换；旧名 deepseek-reasoner 已于 2026-07-24 停服）"
+          "description": "LLM Level 1 推理模型（DeepSeek 默认 V4-Pro；选择空值表示不使用推理模型）"
         },
         "devSeeker.models.llm.level1.contextWindow": {
           "type": "integer",
@@ -383,8 +407,28 @@
         },
         "devSeeker.models.llm.level2.reasoningModel": {
           "type": "string",
+          "enum": [
+            "",
+            "deepseek-v4-pro",
+            "o3",
+            "o4-mini",
+            "qwq-plus",
+            "qwen3-235b-a22b",
+            "qwen3-32b",
+            "deepseek/deepseek-r1:free"
+          ],
+          "enumDescriptions": [
+            "（不使用推理模型）",
+            "DeepSeek V4 Pro · 复杂推理/编码",
+            "OpenAI o3 · 强推理",
+            "OpenAI o4-mini · 轻量推理",
+            "QwQ Plus · Qwen 推理（免费）",
+            "Qwen3 235B · 开源旗舰 Thinking",
+            "Qwen3 32B · 开源 Thinking",
+            "DeepSeek R1 (via OpenRouter, 免费)"
+          ],
           "default": "deepseek-v4-pro",
-          "description": "LLM Level 2 推理模型（配置 Provider 后生效；推荐 deepseek-v4-pro）"
+          "description": "LLM Level 2 推理模型（推荐 deepseek-v4-pro）"
         },
         "devSeeker.models.llm.level2.contextWindow": {
           "type": "integer",
@@ -449,8 +493,20 @@
         },
         "devSeeker.models.llm.level3.reasoningModel": {
           "type": "string",
+          "enum": [
+            "",
+            "deepseek-r1",
+            "qwq-32b",
+            "deepseek/deepseek-r1:free"
+          ],
+          "enumDescriptions": [
+            "（不使用推理模型）",
+            "DeepSeek R1 · 本地部署",
+            "QwQ 32B · 本地部署",
+            "DeepSeek R1 (via OpenRouter, 免费)"
+          ],
           "default": "",
-          "description": "LLM Level 3 推理模型（可选，留空表示不使用推理模型）"
+          "description": "LLM Level 3 推理模型（可选；Ollama 本地可选 deepseek-r1 或 qwq-32b）"
         },
         "devSeeker.models.llm.level3.contextWindow": {
           "type": "integer",
