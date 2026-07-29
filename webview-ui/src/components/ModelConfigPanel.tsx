@@ -45,6 +45,7 @@ function LevelConfigForm({
   defaults,
   providerTypes,
   models,
+  reasoningModels,
   expanded: defaultExpanded,
   postMessage,
 }: {
@@ -54,6 +55,7 @@ function LevelConfigForm({
   defaults: ModelConfigPayload['providerDefaults'];
   providerTypes: string[];
   models: ModelConfigPayload['providerModels'];
+  reasoningModels: ModelConfigPayload['providerReasoningModels'];
   expanded: boolean;
   postMessage: (msg: WebviewInboundMessage) => void;
 }): JSX.Element {
@@ -124,6 +126,8 @@ function LevelConfigForm({
   }
   // 从 providerModels 获取当前 provider 的完整模型列表
   const allModels = models[provider] ?? [];
+  // 获取当前 provider 的推理模型列表
+  const allReasoningModels = reasoningModels[provider] ?? [];
 
   return (
     <div className={`mc-level ${expanded ? 'mc-level--expanded' : ''}`}>
@@ -211,14 +215,22 @@ function LevelConfigForm({
           {track === 'llm' && (
             <label className="mc-field mc-field--optional">
               <span className="mc-field__label">Reasoning Model</span>
-              <input
-                className="mc-field__input"
-                type="text"
-                placeholder={def?.reasoningModel ? `默认: ${def.reasoningModel}` : '可选...'}
-                value={reasoningModel}
-                onChange={(e) => setReasoningModel(e.target.value)}
-                onBlur={(e) => handleFieldBlur('reasoningModel', e.target.value)}
-              />
+              <div className="mc-field__combo">
+                <input
+                  className="mc-field__input"
+                  type="text"
+                  list={`reasoning-model-list-${track}-${level}`}
+                  placeholder={def?.reasoningModel ? `默认: ${def.reasoningModel}` : '可选...'}
+                  value={reasoningModel}
+                  onChange={(e) => setReasoningModel(e.target.value)}
+                  onBlur={(e) => handleFieldBlur('reasoningModel', e.target.value)}
+                />
+                <datalist id={`reasoning-model-list-${track}-${level}`}>
+                  {allReasoningModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.free ? `${m.label} [FREE]` : m.label}</option>
+                  ))}
+                </datalist>
+              </div>
             </label>
           )}
 
@@ -298,6 +310,7 @@ export function ModelConfigPanel({ config, onClose, postMessage }: ModelConfigPa
           defaults={config.providerDefaults}
           providerTypes={config.providerTypes}
           models={config.providerModels}
+          reasoningModels={config.providerReasoningModels}
           expanded={true}
           postMessage={postMessage}
         />
@@ -310,6 +323,7 @@ export function ModelConfigPanel({ config, onClose, postMessage }: ModelConfigPa
             defaults={config.providerDefaults}
             providerTypes={config.providerTypes}
             models={config.providerModels}
+            reasoningModels={config.providerReasoningModels}
             expanded={false}
             postMessage={postMessage}
           />
@@ -323,6 +337,7 @@ export function ModelConfigPanel({ config, onClose, postMessage }: ModelConfigPa
             defaults={config.providerDefaults}
             providerTypes={config.providerTypes}
             models={config.providerModels}
+            reasoningModels={config.providerReasoningModels}
             expanded={false}
             postMessage={postMessage}
           />

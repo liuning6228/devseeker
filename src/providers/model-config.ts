@@ -288,6 +288,46 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
   ],
 };
 
+/** 每个 Provider 的推理模型列表（仅包含支持 reasoning/thinking 模式的模型） */
+export const PROVIDER_REASONING_MODELS: Record<ProviderType, ModelOption[]> = {
+  deepseek: [
+    { id: 'deepseek-v4-pro', label: 'deepseek-v4-pro (V4, 强推理)' },
+  ],
+  openai: [
+    { id: 'o3', label: 'o3 (强推理)' },
+    { id: 'o4-mini', label: 'o4-mini (轻量推理)' },
+  ],
+  qwen: [
+    { id: 'qwq-plus-latest', label: 'qwq-plus-latest (Reasoning, 免费)' },
+    { id: 'qwq-plus', label: 'qwq-plus (Reasoning, 免费)' },
+    { id: 'qwq-32b', label: 'qwq-32b (Reasoning)' },
+    { id: 'qwen3-235b-a22b', label: 'qwen3-235b-a22b (Thinking)' },
+    { id: 'qwen3-32b', label: 'qwen3-32b (Thinking)' },
+    { id: 'qwen3-14b', label: 'qwen3-14b (Thinking)' },
+    { id: 'qwen3-8b', label: 'qwen3-8b (Thinking)' },
+  ],
+  'qwen-code': [
+    { id: 'qwq-plus', label: 'qwq-plus (Reasoning, 免费)' },
+    { id: 'qwen3-235b-a22b', label: 'qwen3-235b-a22b (Thinking)' },
+  ],
+  anthropic: [],  // Claude 暂无独立推理模型
+  openrouter: [
+    { id: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1 (免费)' },
+    { id: 'openai/o3:free', label: 'OpenAI o3 (免费)' },
+    { id: 'openai/o4-mini:free', label: 'OpenAI o4-mini (免费)' },
+    { id: 'qwen/qwq-32b:free', label: 'QwQ 32B (免费)' },
+    { id: 'qwen/qwen3-235b-a22b:free', label: 'Qwen3 235B (免费)' },
+  ],
+  ollama: [
+    { id: 'deepseek-r1', label: 'deepseek-r1 (本地)' },
+    { id: 'qwq', label: 'qwq (本地)' },
+    { id: 'qwen3:8b', label: 'qwen3:8b (Thinking, 本地)' },
+    { id: 'qwen3:14b', label: 'qwen3:14b (Thinking, 本地)' },
+    { id: 'qwen3:32b', label: 'qwen3:32b (Thinking, 本地)' },
+  ],
+  'custom-openai': [],
+};
+
 // ─────────── 单级模型配置 ───────────
 
 /** 3 级降级链中的级别 */

@@ -310,6 +310,8 @@ export interface ModelConfigPayload {
   providerDefaults: Record<string, { model: string; reasoningModel?: string; baseUrl: string }>;
   /** 每个 Provider 的可选模型列表（含 free 标注） */
   providerModels: Record<string, Array<{ id: string; label: string; free?: boolean }>>;
+  /** 每个 Provider 的推理模型列表（仅含支持 reasoning/thinking 的模型） */
+  providerReasoningModels: Record<string, Array<{ id: string; label: string; free?: boolean }>>;
   /** 当前生效的 Provider ID（状态指示） */
   activeProviderId?: string;
   activeProviderOk?: boolean;

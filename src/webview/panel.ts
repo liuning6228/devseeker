@@ -44,6 +44,7 @@ import {
   PROVIDER_DEFAULTS,
   PROVIDER_DISPLAY_NAMES,
   PROVIDER_MODELS,
+  PROVIDER_REASONING_MODELS,
 } from '../providers/model-config.js';
 import { ModelRouter, shouldKeepVisionPolicy, hasVisionContent } from '../core/router/router.js';
 import { detectReasoningNeed } from '../core/router/reasoning-probe.js';
@@ -717,6 +718,7 @@ export class DualMindChatPanel {
 
     const providerDefaults: ModelConfigPayload['providerDefaults'] = {};
     const providerModels: ModelConfigPayload['providerModels'] = {};
+    const providerReasoningModels: ModelConfigPayload['providerReasoningModels'] = {};
     for (const pt of PROVIDER_TYPES) {
       const def = PROVIDER_DEFAULTS[pt];
       providerDefaults[pt] = {
@@ -725,6 +727,7 @@ export class DualMindChatPanel {
         baseUrl: def.baseUrl,
       };
       providerModels[pt] = PROVIDER_MODELS[pt] ?? [];
+      providerReasoningModels[pt] = PROVIDER_REASONING_MODELS[pt] ?? [];
     }
 
     const payload: ModelConfigPayload = {
@@ -741,6 +744,7 @@ export class DualMindChatPanel {
       providerTypes: [...PROVIDER_TYPES],
       providerDefaults,
       providerModels,
+      providerReasoningModels,
       activeProviderId: this.activeProviderId,
       activeProviderOk: registry.get(this.activeProviderId ?? '') !== undefined,
     };
