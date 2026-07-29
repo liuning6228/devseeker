@@ -20,6 +20,7 @@ import * as vscode from 'vscode';
 import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { initLogger, getLogger, closeLogger, type LogLevel } from './infra/logger.js';
+import { migrateDeepSeekModelNames } from './providers/model-config.js';
 import { perfProbe } from './infra/perf-probe.js';
 import { AgentError, toAgentError } from './core/errors/index.js';
 import { DualMindChatPanel } from './webview/panel.js';
@@ -87,6 +88,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
     'DevSeeker activating',
   );
+
+  // v0.2.2 · 启动时迁移 settings.json 中的旧版 DeepSeek 模型名（deepseek-chat → deepseek-v4-flash 等）
+  // 保证 VS Code Settings 页显示与实际运行的模型名一致
+  try {
+    const didMigrate = await migrateDeepSeekModelNames(
+      vscode.workspace.getConfiguration('devSeeker'),
+      vscode.ConfigurationTarget.Global,
+    );
+    if (didMigrate) {
+      log.info('Migrated legacy DeepSeek model names in settings.json');
+    }
+  } catch (e) {
+    log.warn({ err: String(e) }, 'DeepSeek model name migration failed (non-fatal)');
+  }
 
   // P0-7 · 注册虚拟 URI scheme（流式 Diff 渲染左侧原始文档）
   context.subscriptions.push(

@@ -76,6 +76,49 @@ export function normalizeDeepSeekModel(model: string | undefined): string | unde
   return DEEPSEEK_LEGACY_MODEL_MAP[model] ?? model;
 }
 
+/**
+ * 启动时迁移 settings.json 中的旧版 DeepSeek 模型名到 V4。
+ *
+ * 仅当 provider 为 'deepseek' 且 model/reasoningModel 命中旧名映射表时，
+ * 才将用户设置更新为新版名称。空值与非 deepseek provider 不受影响。
+ *
+ * 返回 true 表示至少执行了一次写入（供调用方决定是否重新 initFromConfig）。
+ */
+export async function migrateDeepSeekModelNames(
+  config: {
+    inspect: <T>(key: string) => { globalValue?: T; workspaceValue?: T } | undefined;
+    update: (key: string, value: unknown, target: number) => Thenable<void>;
+  },
+  /** vscode.ConfigurationTarget.Global = 1 */
+  globalTarget = 1,
+): Promise<boolean> {
+  let migrated = false;
+  const tracks = ['llm', 'vllm'] as const;
+  const levels = [1, 2, 3] as const;
+
+  for (const track of tracks) {
+    for (const level of levels) {
+      const prefix = `models.${track}.level${level}`;
+      const providerInfo = config.inspect<string>(`${prefix}.provider`);
+      const provider = providerInfo?.globalValue ?? providerInfo?.workspaceValue;
+      if (provider !== 'deepseek') continue;
+
+      for (const field of ['model', 'reasoningModel'] as const) {
+        const key = `${prefix}.${field}`;
+        const info = config.inspect<string>(key);
+        const current = info?.globalValue ?? info?.workspaceValue;
+        if (!current) continue;
+        const normalized = DEEPSEEK_LEGACY_MODEL_MAP[current];
+        if (normalized && normalized !== current) {
+          await config.update(key, normalized, globalTarget);
+          migrated = true;
+        }
+      }
+    }
+  }
+  return migrated;
+}
+
 /** 模型选项（用于 UI 下拉） */
 export interface ModelOption {
   id: string;

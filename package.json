@@ -285,7 +285,7 @@
         "devSeeker.models.llm.level2.model": {
           "type": "string",
           "default": "",
-          "description": "LLM Level 2 模型名称"
+          "description": "LLM Level 2 模型名称（留空=不配置此级别；配置 Provider 后自动填充默认值）"
         },
         "devSeeker.models.llm.level2.apiKey": {
           "type": "string",
@@ -305,12 +305,12 @@
         "devSeeker.models.llm.level2.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "LLM Level 2 Base URL（留空则使用 Provider 默认值）"
+          "description": "LLM Level 2 Base URL（留空=使用 Provider 默认值；未配置 Level 2 时无效）"
         },
         "devSeeker.models.llm.level2.reasoningModel": {
           "type": "string",
           "default": "",
-          "description": "LLM Level 2 推理模型"
+          "description": "LLM Level 2 推理模型（留空=不配置；配置 Provider 后按需填充）"
         },
         "devSeeker.models.llm.level2.contextWindow": {
           "type": "integer",
@@ -336,7 +336,7 @@
         "devSeeker.models.llm.level3.model": {
           "type": "string",
           "default": "",
-          "description": "LLM Level 3 模型名称"
+          "description": "LLM Level 3 模型名称（留空=不配置此级别；推荐 Ollama 本地部署）"
         },
         "devSeeker.models.llm.level3.apiKey": {
           "type": "string",
@@ -356,12 +356,12 @@
         "devSeeker.models.llm.level3.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "LLM Level 3 Base URL（Ollama 默认 http://localhost:11434/v1）"
+          "description": "LLM Level 3 Base URL（留空=使用 Provider 默认值；Ollama 为 http://localhost:11434/v1）"
         },
         "devSeeker.models.llm.level3.reasoningModel": {
           "type": "string",
           "default": "",
-          "description": "LLM Level 3 推理模型"
+          "description": "LLM Level 3 推理模型（留空=不配置）"
         },
         "devSeeker.models.llm.level3.contextWindow": {
           "type": "integer",
@@ -433,7 +433,7 @@
         "devSeeker.models.vllm.level2.model": {
           "type": "string",
           "default": "",
-          "description": "VLLM Level 2 模型名称"
+          "description": "VLLM Level 2 模型名称（留空=不配置此级别；配置 Provider 后自动填充默认值）"
         },
         "devSeeker.models.vllm.level2.apiKey": {
           "type": "string",
@@ -453,7 +453,7 @@
         "devSeeker.models.vllm.level2.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "VLLM Level 2 Base URL"
+          "description": "VLLM Level 2 Base URL（留空=使用 Provider 默认值；未配置 Level 2 时无效）"
         },
         "devSeeker.models.vllm.level2.contextWindow": {
           "type": "integer",
@@ -479,7 +479,7 @@
         "devSeeker.models.vllm.level3.model": {
           "type": "string",
           "default": "",
-          "description": "VLLM Level 3 模型名称"
+          "description": "VLLM Level 3 模型名称（留空=不配置此级别）"
         },
         "devSeeker.models.vllm.level3.apiKey": {
           "type": "string",
@@ -499,7 +499,7 @@
         "devSeeker.models.vllm.level3.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "VLLM Level 3 Base URL"
+          "description": "VLLM Level 3 Base URL（留空=使用 Provider 默认值；未配置 Level 3 时无效）"
         },
         "devSeeker.models.vllm.level3.contextWindow": {
           "type": "integer",
