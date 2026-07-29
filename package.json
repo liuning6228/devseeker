@@ -232,9 +232,65 @@
           "description": "LLM 主力模型（Level 1）的 Provider 类型"
         },
         "devSeeker.models.llm.level1.model": {
-          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "gpt-4o",
+                "gpt-4o-mini",
+                "gpt-4.1",
+                "gpt-4.1-mini",
+                "o3",
+                "o4-mini",
+                "qwen-plus",
+                "qwen-max",
+                "qwen-turbo",
+                "qwen3-coder-plus",
+                "qwen3-coder-flash",
+                "qwen3-235b-a22b",
+                "qwen3-32b",
+                "qwq-plus",
+                "claude-sonnet-4-6",
+                "claude-opus-4-6",
+                "claude-sonnet-4-5-20250929",
+                "claude-3-5-sonnet-20241022",
+                "deepseek/deepseek-v4-flash:free",
+                "deepseek/deepseek-r1:free",
+                "qwen/qwen3-coder:free",
+                "meta-llama/llama-3.3-70b-instruct:free"
+              ],
+              "enumDescriptions": [
+                "DeepSeek V4 Flash · 高并发低成本，1M 上下文（推荐主力）",
+                "DeepSeek V4 Pro · 复杂推理/编码任务",
+                "OpenAI GPT-4o · 多模态旗舰",
+                "OpenAI GPT-4o-mini · 高性价比",
+                "OpenAI GPT-4.1 · 最新旗舰",
+                "OpenAI GPT-4.1-mini · 最新轻量",
+                "OpenAI o3 · 强推理",
+                "OpenAI o4-mini · 轻量推理",
+                "Qwen Plus · 均衡性能",
+                "Qwen Max · 旗舰",
+                "Qwen Turbo · 快速",
+                "Qwen3 Coder Plus · 1M 上下文编码（免费）",
+                "Qwen3 Coder Flash · 1M 上下文编码（免费）",
+                "Qwen3 235B MoE · 开源旗舰（Thinking）",
+                "Qwen3 32B · 开源强力（Thinking）",
+                "QwQ Plus · 推理模型（免费）",
+                "Claude Sonnet 4.6 · Anthropic 最新",
+                "Claude Opus 4.6 · Anthropic 旗舰",
+                "Claude Sonnet 4.5",
+                "Claude 3.5 Sonnet",
+                "DeepSeek V4 Flash (via OpenRouter, 免费)",
+                "DeepSeek R1 (via OpenRouter, 免费)",
+                "Qwen3 Coder (via OpenRouter, 免费)",
+                "Llama 3.3 70B (via OpenRouter, 免费)"
+              ]
+            },
+            { "type": "string" }
+          ],
           "default": "deepseek-v4-flash",
-          "description": "LLM Level 1 模型名称（DeepSeek 默认使用 V4-Flash；旧名 deepseek-chat 已于 2026-07-24 停服）"
+          "description": "LLM Level 1 模型名称（从下拉选择或输入自定义模型 ID；DeepSeek 默认 V4-Flash）"
         },
         "devSeeker.models.llm.level1.apiKey": {
           "type": "string",
@@ -283,9 +339,35 @@
           "description": "LLM 备选模型（Level 2）的 Provider 类型（留空=不配置）"
         },
         "devSeeker.models.llm.level2.model": {
-          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "deepseek-v4-pro",
+                "deepseek-v4-flash",
+                "gpt-4o",
+                "gpt-4o-mini",
+                "gpt-4.1",
+                "o3",
+                "o4-mini",
+                "qwen-plus",
+                "qwen-max",
+                "qwen3-coder-plus",
+                "qwen3-coder-flash",
+                "qwen3-235b-a22b",
+                "qwen3-32b",
+                "qwq-plus",
+                "claude-sonnet-4-6",
+                "claude-opus-4-6",
+                "claude-3-5-sonnet-20241022",
+                "deepseek/deepseek-r1:free",
+                "deepseek/deepseek-v4-flash:free",
+                "qwen/qwen3-coder:free"
+              ]
+            },
+            { "type": "string" }
+          ],
           "default": "deepseek-v4-pro",
-          "description": "LLM Level 2 模型名称（配置 Provider 后生效；推荐 deepseek-v4-pro 作为备选）"
+          "description": "LLM Level 2 模型名称（从下拉选择或输入自定义；推荐 deepseek-v4-pro 作为备选）"
         },
         "devSeeker.models.llm.level2.apiKey": {
           "type": "string",
@@ -334,9 +416,28 @@
           "description": "LLM 兜底模型（Level 3）的 Provider 类型（留空=不配置，推荐 Ollama）"
         },
         "devSeeker.models.llm.level3.model": {
-          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "llama3",
+                "llama3.1",
+                "llama3.2",
+                "deepseek-r1",
+                "deepseek-v4-flash",
+                "qwen3-8b",
+                "qwen3-14b",
+                "qwen3-32b",
+                "qwen2.5-coder-7b-instruct",
+                "mistral",
+                "codellama",
+                "phi3",
+                "gemma2"
+              ]
+            },
+            { "type": "string" }
+          ],
           "default": "llama3",
-          "description": "LLM Level 3 模型名称（配置 Provider 后生效；推荐 Ollama 本地部署，如 llama3）"
+          "description": "LLM Level 3 模型名称（从下拉选择或输入自定义；推荐 Ollama 本地部署，如 llama3）"
         },
         "devSeeker.models.llm.level3.apiKey": {
           "type": "string",
@@ -385,9 +486,37 @@
           "description": "VLLM 主力视觉模型（Level 1）的 Provider 类型"
         },
         "devSeeker.models.vllm.level1.model": {
-          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "qwen-vl-max-latest",
+                "qwen-vl-max",
+                "qwen-vl-plus-latest",
+                "qwen-vl-plus",
+                "gpt-4o",
+                "gpt-4o-mini",
+                "claude-sonnet-4-6",
+                "claude-3-5-sonnet-20241022",
+                "llava",
+                "bakllava"
+              ],
+              "enumDescriptions": [
+                "Qwen VL Max · 视觉旗舰（推荐）",
+                "Qwen VL Max",
+                "Qwen VL Plus · 视觉均衡",
+                "Qwen VL Plus",
+                "OpenAI GPT-4o · 多模态",
+                "OpenAI GPT-4o-mini · 轻量多模态",
+                "Claude Sonnet 4.6 · 视觉",
+                "Claude 3.5 Sonnet · 视觉",
+                "LLaVA · 开源视觉（Ollama）",
+                "BakLLaVA · 开源视觉（Ollama）"
+              ]
+            },
+            { "type": "string" }
+          ],
           "default": "qwen-vl-max-latest",
-          "description": "VLLM Level 1 模型名称"
+          "description": "VLLM Level 1 视觉模型名称（从下拉选择或输入自定义）"
         },
         "devSeeker.models.vllm.level1.apiKey": {
           "type": "string",
@@ -431,9 +560,23 @@
           "description": "VLLM 备选视觉模型（Level 2）的 Provider 类型"
         },
         "devSeeker.models.vllm.level2.model": {
-          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "qwen-vl-plus",
+                "qwen-vl-plus-latest",
+                "qwen-vl-max",
+                "qwen-vl-max-latest",
+                "gpt-4o-mini",
+                "gpt-4o",
+                "claude-3-5-sonnet-20241022",
+                "llava"
+              ]
+            },
+            { "type": "string" }
+          ],
           "default": "qwen-vl-plus",
-          "description": "VLLM Level 2 模型名称（配置 Provider 后生效；推荐 qwen-vl-plus 作为备选）"
+          "description": "VLLM Level 2 视觉模型名称（从下拉选择或输入自定义；推荐 qwen-vl-plus 作为备选）"
         },
         "devSeeker.models.vllm.level2.apiKey": {
           "type": "string",
@@ -477,9 +620,21 @@
           "description": "VLLM 兜底视觉模型（Level 3）的 Provider 类型"
         },
         "devSeeker.models.vllm.level3.model": {
-          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "llava",
+                "bakllava",
+                "moondream",
+                "minicpm-v",
+                "qwen-vl-plus",
+                "gpt-4o-mini"
+              ]
+            },
+            { "type": "string" }
+          ],
           "default": "llava",
-          "description": "VLLM Level 3 模型名称（配置 Provider 后生效；推荐 Ollama 本地 llava）"
+          "description": "VLLM Level 3 视觉模型名称（从下拉选择或输入自定义；推荐 Ollama 本地 llava）"
         },
         "devSeeker.models.vllm.level3.apiKey": {
           "type": "string",
