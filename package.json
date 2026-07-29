@@ -284,8 +284,8 @@
         },
         "devSeeker.models.llm.level2.model": {
           "type": "string",
-          "default": "",
-          "description": "LLM Level 2 模型名称（留空=不配置此级别；配置 Provider 后自动填充默认值）"
+          "default": "deepseek-v4-pro",
+          "description": "LLM Level 2 模型名称（配置 Provider 后生效；推荐 deepseek-v4-pro 作为备选）"
         },
         "devSeeker.models.llm.level2.apiKey": {
           "type": "string",
@@ -304,13 +304,13 @@
         },
         "devSeeker.models.llm.level2.baseUrl": {
           "type": "string",
-          "default": "",
-          "description": "LLM Level 2 Base URL（留空=使用 Provider 默认值；未配置 Level 2 时无效）"
+          "default": "https://api.deepseek.com/v1",
+          "description": "LLM Level 2 Base URL（配置 Provider 后生效；DeepSeek 默认 https://api.deepseek.com/v1）"
         },
         "devSeeker.models.llm.level2.reasoningModel": {
           "type": "string",
-          "default": "",
-          "description": "LLM Level 2 推理模型（留空=不配置；配置 Provider 后按需填充）"
+          "default": "deepseek-v4-pro",
+          "description": "LLM Level 2 推理模型（配置 Provider 后生效；推荐 deepseek-v4-pro）"
         },
         "devSeeker.models.llm.level2.contextWindow": {
           "type": "integer",
@@ -335,8 +335,8 @@
         },
         "devSeeker.models.llm.level3.model": {
           "type": "string",
-          "default": "",
-          "description": "LLM Level 3 模型名称（留空=不配置此级别；推荐 Ollama 本地部署）"
+          "default": "llama3",
+          "description": "LLM Level 3 模型名称（配置 Provider 后生效；推荐 Ollama 本地部署，如 llama3）"
         },
         "devSeeker.models.llm.level3.apiKey": {
           "type": "string",
@@ -355,13 +355,13 @@
         },
         "devSeeker.models.llm.level3.baseUrl": {
           "type": "string",
-          "default": "",
-          "description": "LLM Level 3 Base URL（留空=使用 Provider 默认值；Ollama 为 http://localhost:11434/v1）"
+          "default": "http://localhost:11434/v1",
+          "description": "LLM Level 3 Base URL（配置 Provider 后生效；Ollama 默认 http://localhost:11434/v1）"
         },
         "devSeeker.models.llm.level3.reasoningModel": {
           "type": "string",
           "default": "",
-          "description": "LLM Level 3 推理模型（留空=不配置）"
+          "description": "LLM Level 3 推理模型（可选，留空表示不使用推理模型）"
         },
         "devSeeker.models.llm.level3.contextWindow": {
           "type": "integer",
@@ -432,8 +432,8 @@
         },
         "devSeeker.models.vllm.level2.model": {
           "type": "string",
-          "default": "",
-          "description": "VLLM Level 2 模型名称（留空=不配置此级别；配置 Provider 后自动填充默认值）"
+          "default": "qwen-vl-plus",
+          "description": "VLLM Level 2 模型名称（配置 Provider 后生效；推荐 qwen-vl-plus 作为备选）"
         },
         "devSeeker.models.vllm.level2.apiKey": {
           "type": "string",
@@ -452,8 +452,8 @@
         },
         "devSeeker.models.vllm.level2.baseUrl": {
           "type": "string",
-          "default": "",
-          "description": "VLLM Level 2 Base URL（留空=使用 Provider 默认值；未配置 Level 2 时无效）"
+          "default": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "description": "VLLM Level 2 Base URL（配置 Provider 后生效；Qwen 默认 https://dashscope.aliyuncs.com/compatible-mode/v1）"
         },
         "devSeeker.models.vllm.level2.contextWindow": {
           "type": "integer",
@@ -478,8 +478,8 @@
         },
         "devSeeker.models.vllm.level3.model": {
           "type": "string",
-          "default": "",
-          "description": "VLLM Level 3 模型名称（留空=不配置此级别）"
+          "default": "llava",
+          "description": "VLLM Level 3 模型名称（配置 Provider 后生效；推荐 Ollama 本地 llava）"
         },
         "devSeeker.models.vllm.level3.apiKey": {
           "type": "string",
@@ -498,8 +498,8 @@
         },
         "devSeeker.models.vllm.level3.baseUrl": {
           "type": "string",
-          "default": "",
-          "description": "VLLM Level 3 Base URL（留空=使用 Provider 默认值；未配置 Level 3 时无效）"
+          "default": "http://localhost:11434/v1",
+          "description": "VLLM Level 3 Base URL（配置 Provider 后生效；Ollama 默认 http://localhost:11434/v1）"
         },
         "devSeeker.models.vllm.level3.contextWindow": {
           "type": "integer",
