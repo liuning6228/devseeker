@@ -551,3 +551,107 @@ describe('TaskLoop · modelOverride 透传（W15.5）', () => {
     expect(provider.calls[1].modelOverride).toBe('deepseek-reasoner');
   });
 });
+
+// ─────────── P0-8 · 中止语义回归 ───────────
+// 背景：用户主动中止曾以 `ok:false, errorCode:undefined` 返回，被 Panel 的
+// classifyErrorCode('') 兜底判成 timeout(next_level) → 自动 fallback 起新 TaskLoop，
+// 表现为"第一次点停止无效，要点第二次"。以下用例锁死修复后的语义。
+describe('TaskLoop abort 语义（P0-8 回归）', () => {
+  /** 永不自行结束的 provider，只在收到 abort 后吐一个 done */
+  function makeHangingProvider(): IProvider {
+    return {
+      id: 'hanging',
+      capabilities: ['text'],
+      contextWindow: 1000,
+      pricing: { inputPerMillion: 0, outputPerMillion: 0, currency: 'CNY' },
+      countTokens: async () => 0,
+      probe: async () => ({ ok: true, latencyMs: 0 }),
+      createMessage: ({ signal }) =>
+        (async function* (): AsyncGenerator<StreamEvent> {
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) return resolve();
+            signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+          yield { type: 'done', reason: 'aborted' };
+        })(),
+    };
+  }
+
+  it('abort 后 send() 必须返回 TASK_LOOP_ABORTED（而非 undefined errorCode）', async () => {
+    const loop = new TaskLoop({
+      provider: makeHangingProvider(),
+      toolRegistry: new ToolRegistry(),
+      systemPrompt: 'x',
+    });
+
+    const done = loop.send('hi');
+    setTimeout(() => loop.abort(), 10);
+    const result = await done;
+
+    expect(result.ok).toBe(false);
+    // 关键断言：errorCode 不能为空，否则 Panel 会把它当可重试错误自动重启任务
+    expect(result.errorCode).toBe(ErrorCodes.TASK_LOOP_ABORTED);
+  });
+
+  it('send() 之前调用 abort() 也生效，不被静默丢弃', async () => {
+    const provider = new ScriptedProvider();
+    // 若中止失效，这段脚本会被消费并以 completed 结束
+    provider.push([
+      { type: 'text_delta', text: 'should never run' },
+      { type: 'done', reason: 'stop' },
+    ]);
+
+    const events: TaskEvent[] = [];
+    const loop = new TaskLoop({
+      provider,
+      toolRegistry: new ToolRegistry(),
+      systemPrompt: 'x',
+      onEvent: (e) => events.push(e),
+    });
+
+    // 模拟 Panel 启动窗口期：taskLoop 已就绪但 send() 尚未开跑时用户点了 Stop
+    loop.abort();
+    const result = await loop.send('go');
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe(ErrorCodes.TASK_LOOP_ABORTED);
+    // provider 完全没被调用，任务真的没有开跑
+    expect(provider.calls.length).toBe(0);
+    expect(events[events.length - 1]).toMatchObject({ type: 'task_end', reason: 'aborted' });
+  });
+
+  it('isAbortedByUser() 在 send() 返回后仍为 true（Panel 据此跳过 fallback）', async () => {
+    const loop = new TaskLoop({
+      provider: makeHangingProvider(),
+      toolRegistry: new ToolRegistry(),
+      systemPrompt: 'x',
+    });
+
+    expect(loop.isAbortedByUser()).toBe(false);
+
+    const done = loop.send('hi');
+    setTimeout(() => loop.abort(), 10);
+    await done;
+
+    // send() 的 finally 会把 abortController 置 null，标志位必须独立留存
+    expect(loop.isAbortedByUser()).toBe(true);
+  });
+
+  it('未中止的正常任务 isAbortedByUser() 保持 false', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([
+      { type: 'text_delta', text: 'ok' },
+      { type: 'done', reason: 'stop' },
+    ]);
+    const loop = new TaskLoop({
+      provider,
+      toolRegistry: new ToolRegistry(),
+      systemPrompt: 'x',
+    });
+
+    const result = await loop.send('go');
+
+    expect(result.ok).toBe(true);
+    expect(loop.isAbortedByUser()).toBe(false);
+  });
+});

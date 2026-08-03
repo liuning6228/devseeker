@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `runOneTurn` 入口缺少 `signal.aborted` 检查：预处理阶段（特别是 `compactWithSummary` LLM 回环调用，最长 10s）忽略用户停止信号
 - `buildEditContextForTurn` 调用前缺少 `signal.aborted` 检查：CodebaseIndex 查询期间无法响应停止
 - `compactWithSummary` 流消费循环缺少 `signal.aborted` 检查：Provider yield 的 abort 事件被忽略，不立即退出
+- 中断任务需点击两次才生效：用户主动中止被误判为可重试错误后触发 fallback 自动重启任务。`TaskLoop` 的 abort 返回路径原本不带 `errorCode`，Panel 侧 `classifyErrorCode('')` 兜底判为 `timeout`（`next_level`），进而轮换 API Key 或降级到下一 Level 并创建新 `TaskLoop` 重跑同一任务
+- 新增 `aborted` FailoverReason 及 `no_fallback` 策略，`classifyErrorCode` 优先识别 `TASK.LOOP.ABORTED`（精确匹配 `LOOP.ABORTED` 以避免误伤 socket 的 `ECONNABORTED`）
+- `TaskLoop` 三处 abort 返回路径补齐 `errorCode: TASK_LOOP_ABORTED`；新增 `isAbortedByUser()` 供 Panel 在 `send()` 返回后判定用户中止（`abortController` 在 finally 中被置 null，故用独立标志位留存）
+- Panel 的 try / catch 两处 fallback 入口新增用户中止守卫，中止后不再重启任务
+- 任务启动窗口期（`send_user_input` 到 `this.taskLoop = loop` 之间的多次 await）收到的 abort 不再被静默丢弃：新增 `pendingAbort` 预约标志，`TaskLoop` 就绪后立即兑现；`abortController` 提前至构造时创建，`abort()` 去掉 `running` 守卫，`send()` 入口检查预约中止
 
 ## [0.2.2] - 2026-07-28
 

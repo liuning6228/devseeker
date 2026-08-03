@@ -203,9 +203,18 @@ export class TaskLoop {
   /** §8.15.1 · 编辑上下文检索 */
   private readonly codebaseIndex?: TaskLoopConfig['codebaseIndex'];
 
-  /** 当前任务的 AbortController —— UI Stop 按钮触发 */
-  private abortController: AbortController | null = null;
+  /**
+   * 当前任务的 AbortController —— UI Stop 按钮触发。
+   * 构造即创建（而非等到 send()），使 Panel 在 `taskLoop = loop` 之后、
+   * `loop.send()` 真正开跑之前收到的 abort 也能被记录，不被静默丢弃。
+   */
+  private abortController: AbortController | null = new AbortController();
   private running = false;
+  /**
+   * 用户是否点过 Stop。独立于 abortController（后者在 send() 的 finally 中被置 null），
+   * 供 Panel 在 send() 返回后判定"这是用户主动中止"从而跳过 fallback 重启。
+   */
+  private userAborted = false;
   /** 工具侧自愈计数器（W7b5a）—— TaskLoop 生命周期复用，send() 结束 clear */
   private readonly healingTracker = new HealingTracker();
   /** W15.3 · 动态 prompt 修正器 —— 重复错误模式触发 system prompt 约束注入 */
@@ -263,10 +272,25 @@ export class TaskLoop {
 
   /** UI Stop 按钮调用 */
   abort(): void {
-    if (this.abortController && this.running) {
+    // 不再要求 running=true：send() 尚未开跑时也要能"预约"中止，
+    // 由 send() 入口检查 signal.aborted 后立即终止，避免第一次点击被吞掉。
+    if (this.abortController) {
+      if (this.abortController.signal.aborted) {
+        log.info({ taskId: this.taskId }, 'TaskLoop already aborted; ignoring duplicate abort');
+        return;
+      }
       this.abortController.abort(new Error('user_abort'));
-      log.info({ taskId: this.taskId }, 'TaskLoop aborted by user');
+      this.userAborted = true;
+      log.info({ taskId: this.taskId, running: this.running }, 'TaskLoop aborted by user');
+    } else {
+      // abortController 为 null 只发生在 send() 已完成之后，此时任务本就不在运行
+      log.info({ taskId: this.taskId }, 'TaskLoop abort ignored: task already finished');
     }
+  }
+
+  /** 用户是否主动中止过本任务（Panel 用于判定是否跳过 fallback 重启） */
+  isAbortedByUser(): boolean {
+    return this.userAborted;
   }
 
   /**
@@ -289,7 +313,18 @@ export class TaskLoop {
       });
     }
     this.running = true;
-    this.abortController = new AbortController();
+    // 复用构造时创建的 controller（可能已被 abort() 预约中止），仅在被 finally
+    // 置空后的复用场景才新建。绝不无条件 new——否则会丢掉 send() 前收到的 abort。
+    this.abortController ??= new AbortController();
+    // 预约中止：用户在 loop.send() 真正开跑之前就点了 Stop
+    if (this.abortController.signal.aborted) {
+      log.info({ taskId: this.taskId }, 'TaskLoop: aborted before send() started');
+      this.emit({ type: 'task_start', taskId: this.taskId, userInput });
+      this.emit({ type: 'task_end', taskId: this.taskId, reason: 'aborted' });
+      this.running = false;
+      this.abortController = null;
+      return { ok: false, errorCode: ErrorCodes.TASK_LOOP_ABORTED, errorMessage: '用户已中止任务' };
+    }
     // W15.3 · 新任务开始时重置动态 prompt 修正器
     this.promptModifier.clearAll();
     // DebugModeGate · 新任务开始时重置取证状态
@@ -459,7 +494,7 @@ export class TaskLoop {
       // Abort 检查：每轮开始前检查用户是否已点击停止
       if (this.abortController?.signal.aborted) {
         this.emit({ type: 'task_end', taskId: this.taskId, reason: 'aborted' });
-        return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false };
+        return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false, errorCode: ErrorCodes.TASK_LOOP_ABORTED, errorMessage: '用户已中止任务' };
       }
       this.emit({ type: 'turn_start', taskId: this.taskId, turn });
 
@@ -467,7 +502,7 @@ export class TaskLoop {
 
       if (outcome === 'aborted') {
         this.emit({ type: 'task_end', taskId: this.taskId, reason: 'aborted' });
-        return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false };
+        return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false, errorCode: ErrorCodes.TASK_LOOP_ABORTED, errorMessage: '用户已中止任务' };
       }
       if ('assistantText' in outcome && typeof outcome.assistantText === 'string') {
         lastAssistantText = outcome.assistantText;
@@ -499,7 +534,7 @@ export class TaskLoop {
           } catch {
             // 用户在退避期间点击了停止
             this.emit({ type: 'task_end', taskId: this.taskId, reason: 'aborted' });
-            return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false };
+            return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false, errorCode: ErrorCodes.TASK_LOOP_ABORTED, errorMessage: '用户已中止任务' };
           }
           // 清除本轮不完整的 assistant 消息（历史尾部如果有 assistant，移除它）
           this.history.cleanupTrailingIncompleteToolCalls();

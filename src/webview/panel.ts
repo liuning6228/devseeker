@@ -217,6 +217,14 @@ export class DualMindChatPanel {
   private readonly terminalManager: VscodeTerminalManager;
 
   private taskLoop: TaskLoop | null = null;
+  /**
+   * P0-8 · 启动窗口期收到的 abort 预约。
+   * 从 send_user_input 到 `this.taskLoop = loop` 之间有大量 await（构建 prompt、
+   * 加载 hook/policy、Vision SubAgent 等），此期间 taskLoop 为 null，
+   * `this.taskLoop?.abort()` 是空操作 —— 第一次点击会被静默丢弃。
+   * 用该标志记住请求，待 TaskLoop 就绪后立即兑现。
+   */
+  private pendingAbort = false;
   /** 当前 session：未开始时 undefined；第一次 send 时创建 */
   private currentSession: StoredSession | undefined;
   /** 暂停上下文：暂停时保存，继续时消费 */
@@ -904,7 +912,13 @@ export class DualMindChatPanel {
         break;
 
       case 'abort':
-        this.taskLoop?.abort();
+        if (this.taskLoop) {
+          this.taskLoop.abort();
+        } else {
+          // TaskLoop 尚未就绪（仍在异步准备阶段）→ 预约中止，避免第一次点击被丢弃
+          this.pendingAbort = true;
+          log.info({}, 'abort requested before TaskLoop ready; queued as pendingAbort');
+        }
         // W7b4a: Stop 按钮同时 kill 所有后台 session
         try {
           this.terminalManager.killAll();
@@ -1332,6 +1346,10 @@ export class DualMindChatPanel {
   }
 
   private async startTask(userInput: string, images?: readonly string[]): Promise<void> {
+    // P0-8 · 用户发了新消息 = 明确要求执行，清除任何陈旧的 abort 预约，
+    // 避免上一轮遗留的 pendingAbort 误杀本次任务。
+    this.pendingAbort = false;
+
     const registry = getProviderRegistry();
     if (registry.list().length === 0) {
       this.post({
@@ -1779,6 +1797,15 @@ export class DualMindChatPanel {
     this.taskLoop = loop;
     log.info({ providerId: provider.id, reason: routeReason }, 'TaskLoop started');
 
+    // P0-8 · 兑现启动窗口期内收到的 abort 预约。
+    // loop.abort() 在 send() 之前调用也有效（abortController 构造即创建），
+    // send() 入口检查到 signal.aborted 会立即以 TASK_LOOP_ABORTED 返回。
+    if (this.pendingAbort) {
+      this.pendingAbort = false;
+      log.info({ providerId: provider.id }, 'applying queued pendingAbort to fresh TaskLoop');
+      loop.abort();
+    }
+
     let fellBack = false;
     /** 本轮失败的 terminal reason（finally 中用于弹窗通知） */
     let terminalReason: FailoverReason | undefined;
@@ -1800,6 +1827,15 @@ export class DualMindChatPanel {
         // P1-1: 成功请求后重置 Key 轮换状态
         getProviderRegistry().resetKeyRotation(provider.id);
       } else {
+        // P0-8 · 用户主动中止绝不触发 fallback。
+        // 否则 abort 结束 TaskLoop 后 panel 立刻用 fallback/Key 轮换起一个新 TaskLoop，
+        // 用户看到的现象就是"点了停止但任务还在跑，要点第二次才停"。
+        const reason = classifyErrorCode(result.errorCode ?? '');
+        if (reason === 'aborted' || loop.isAbortedByUser()) {
+          log.info({ providerId: provider.id }, 'task aborted by user; skipping fallback');
+          return;
+        }
+
         // 错误终止：记录失败，尝试 fallback
         this.router.recordFailure(provider.id);
         log.warn(
@@ -1808,7 +1844,6 @@ export class DualMindChatPanel {
         );
 
         // P0-5: 使用 FailoverReason 分类替代 hardcoded retryableCodes
-        const reason = classifyErrorCode(result.errorCode ?? '');
         terminalReason = reason;
         const strategy = FAILOVER_STRATEGY[reason];
 
@@ -1961,6 +1996,12 @@ export class DualMindChatPanel {
       // 记录 terminal reason（catch 后续没有 fallback 时在 finally 中弹通知）
       if (err.code) {
         terminalReason = classifyErrorCode(err.code);
+      }
+
+      // P0-8 · 用户主动中止绝不触发 fallback（与 try 分支同源守卫，覆盖异常穿透路径）
+      if (terminalReason === 'aborted' || loop.isAbortedByUser()) {
+        log.info({ providerId: provider.id }, 'task aborted by user (catch); skipping fallback');
+        return;
       }
 
       // 可重试错误 → P1-1 先轮换 Key，再 3 级降级链 fallback

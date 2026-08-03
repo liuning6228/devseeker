@@ -13,6 +13,7 @@
  * - billing / auth → 不降级（跨级大概率也失败）
  * - stream_broken → 同级重推
  * - format → 不降级（消息格式错误，换模型也没用）
+ * - aborted → 不降级（用户主动中止，重启任务违背用户意图）
  *
  * 来源：6 项目 8 维度对比分析 +   failover-error.ts 9 种分类
  */
@@ -27,7 +28,8 @@ export type FailoverReason =
   | 'format'           // 400 / bad request (消息格式错误)
   | 'stream_broken'    // SSE 中间断连
   | 'context_overflow' // context length exceeded
-  | 'model_not_found'; // 404 / model not found
+  | 'model_not_found'  // 404 / model not found
+  | 'aborted';         // 用户主动中止（Stop 按钮）——绝不可 fallback 重启
 
 /** FailoverReason → 降级策略映射 */
 export type FallbackStrategy =
@@ -47,10 +49,14 @@ export const FAILOVER_STRATEGY: Record<FailoverReason, FallbackStrategy> = {
   stream_broken: 'same_level_retry',
   context_overflow: 'same_level_retry',
   model_not_found: 'next_level',
+  aborted: 'no_fallback',       // 用户主动中止：任何重启都是错误行为
 };
 
 /** 从 ErrorCode 字符串推断 FailoverReason */
 export function classifyErrorCode(code: string): FailoverReason {
+  // 用户主动中止优先判定：绝不可落到下面的兜底 timeout 分支导致 fallback 重启任务。
+  // 精确匹配 'LOOP.ABORTED' 而非 'ABORTED'，避免误伤 socket 错误 ECONNABORTED。
+  if (code.includes('LOOP.ABORTED')) return 'aborted';
   if (code.includes('DAILY_QUOTA_EXCEEDED')) return 'daily_quota';
   if (code.includes('RATE_LIMITED')) return 'rate_limit';
   if (code.includes('NET.TIMEOUT') || code.includes('NET.UNREACHABLE')) return 'timeout';
