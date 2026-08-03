@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-02
+
+### Fixed
+
+- 推理过程中点击停止/暂停按键无响应：`runUntilTerminal` 的 STREAM_BROKEN 退避等待从不可取消的 `setTimeout` 改为可取消的 `sleepWithAbort`，用户点 Stop 后立即中断退避
+- `runUntilTerminal` 循环每轮入口缺少 `signal.aborted` 检查：工具执行完成后进入下一轮前不检查用户是否已停止
+- `runOneTurn` 入口缺少 `signal.aborted` 检查：预处理阶段（特别是 `compactWithSummary` LLM 回环调用，最长 10s）忽略用户停止信号
+- `buildEditContextForTurn` 调用前缺少 `signal.aborted` 检查：CodebaseIndex 查询期间无法响应停止
+- `compactWithSummary` 流消费循环缺少 `signal.aborted` 检查：Provider yield 的 abort 事件被忽略，不立即退出
+
 ## [0.2.2] - 2026-07-28
 
 ### Changed

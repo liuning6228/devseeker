@@ -48,6 +48,7 @@ import type {
 } from '../hooks/index.js';
 import { getLogger } from '../../infra/logger.js';
 import { StreamingFileWriter } from '../tools/streaming-file-writer.js';
+import { sleepWithAbort } from '../retry/backoff.js';
 import { StreamingDiffViewProvider } from '../../ui/streaming-diff-view.js';
 
 const log = getLogger('task.loop');
@@ -455,6 +456,11 @@ export class TaskLoop {
     let streamBrokenRetries = 0;
 
     for (let turn = 1; turn <= this.maxTurns; turn++) {
+      // Abort 检查：每轮开始前检查用户是否已点击停止
+      if (this.abortController?.signal.aborted) {
+        this.emit({ type: 'task_end', taskId: this.taskId, reason: 'aborted' });
+        return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false };
+      }
       this.emit({ type: 'turn_start', taskId: this.taskId, turn });
 
       const outcome = await this.runOneTurn();
@@ -487,8 +493,14 @@ export class TaskLoop {
             taskId: this.taskId,
             text: `\n\n⚠️ [流中断重试 ${streamBrokenRetries}/${TaskLoop.MAX_STREAM_BROKEN_RETRIES}]\n`,
           });
-          // 退避等待
-          await new Promise((r) => setTimeout(r, delay));
+          // 退避等待（可取消：用户点 Stop 会立即中断）
+          try {
+            await sleepWithAbort(delay, this.abortController?.signal);
+          } catch {
+            // 用户在退避期间点击了停止
+            this.emit({ type: 'task_end', taskId: this.taskId, reason: 'aborted' });
+            return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false };
+          }
           // 清除本轮不完整的 assistant 消息（历史尾部如果有 assistant，移除它）
           this.history.cleanupTrailingIncompleteToolCalls();
           this.history.removeTrailingAssistant();
@@ -536,6 +548,9 @@ export class TaskLoop {
     | { kind: 'error'; code: string; message: string; assistantText?: string; toolCallCount?: number }
   > {
     const signal = this.abortController!.signal;
+
+    // Abort 检查：进入 runOneTurn 前立即检查（避免预处理阶段忽略用户停止）
+    if (signal.aborted) return 'aborted';
 
     // 累积本轮 assistant 文本与工具调用
     let assistantText = '';
@@ -805,6 +820,8 @@ export class TaskLoop {
     // §8.15.1 · 编辑上下文注入：检测本轮是否包含编辑工具，若是则从 CodebaseIndex
     // 检索目标文件的符号信息和相邻导出，追加到 system prompt 末尾。
     // 将上下文写入 history 的首条 system 消息，供后续 LLM 轮次看见。
+    // Abort 检查：在可能耗时的 CodebaseIndex 查询前检查用户是否已停止
+    if (signal.aborted) return 'aborted';
     const editContextXml = await buildEditContextForTurn(rawCalls, this.workspaceRoot, this.codebaseIndex);
     if (editContextXml) {
       this.history.addSystemSuffix(editContextXml);

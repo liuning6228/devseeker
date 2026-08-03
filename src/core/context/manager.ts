@@ -448,6 +448,8 @@ export async function compactWithSummary(
       messages: summaryMessages,
       signal: combinedSignal,
     })) {
+      // Abort 检查：用户点 Stop 后立即退出，不继续消费摘要流
+      if (combinedSignal.aborted) break;
       if (ev.type === 'text_delta' && ev.text) {
         fullResponse += ev.text;
       }
