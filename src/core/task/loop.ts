@@ -294,6 +294,25 @@ export class TaskLoop {
   }
 
   /**
+   * 运行期替换 system prompt（模式切换用）。
+   *
+   * 工具白名单是每轮从 `toolFilter` 动态重算的，模式一切换立即生效；
+   * 但 system prompt 是构造时的快照。二者不同步时模型会在同一轮里
+   * 同时看到「Plan 模式禁止写文件」和一份可写工具清单，只能保守地
+   * 停下来再问用户一遍。此方法让 Panel 在切模式后把 prompt 补齐。
+   */
+  replaceSystemPrompt(prompt: string): void {
+    this.history.addSystem(prompt);
+    log.info({ taskId: this.taskId }, 'TaskLoop system prompt replaced (mode sync)');
+  }
+
+  /** 在现有 system prompt 末尾追加一段运行期说明（不覆盖原文） */
+  appendSystemNote(note: string): void {
+    if (!note) return;
+    this.history.addSystemSuffix(note);
+  }
+
+  /**
    * 用户发起一次请求。
    * 可能触发多轮（工具调用后继续）。
    * @param userInput 用户文本（Hook/emit/history 文本字段使用）

@@ -205,8 +205,11 @@ export class ToolRunner {
     if (needsApproval && this.approvalGate) {
       const allowRemember = approvalResult.reason.startsWith('按 ToolSafetyLevel.');
       let approvedResult: { approved: boolean; remember?: boolean; redirected?: boolean };
+      // 审批门必须与 ctx.signal 竞速：否则用户在审批卡片挂起期间点 Stop，
+      // 这个 await 会永远挂着，TaskLoop 既不推进也不结束（UI 卡在"运行中"）。
+      let onAbort: (() => void) | undefined;
       try {
-        approvedResult = await this.approvalGate({
+        const gate = this.approvalGate({
           tool,
           args: opts.args,
           ctx,
@@ -215,11 +218,39 @@ export class ToolRunner {
           commandSafety,
           allowRemember,
         });
+        approvedResult = ctx.signal
+          ? await Promise.race([
+              gate,
+              new Promise<{ approved: boolean }>((resolve) => {
+                if (ctx.signal.aborted) {
+                  resolve({ approved: false });
+                  return;
+                }
+                onAbort = () => resolve({ approved: false });
+                ctx.signal.addEventListener('abort', onAbort, { once: true });
+              }),
+            ])
+          : await gate;
       } catch (e) {
         log.warn({ tool: tool.name, err: String(e) }, 'approval gate threw; denying');
         return {
           ok: false,
           content: `Error: 审批门异常 - ${String(e)}`,
+          errorCode: ErrorCodes.TOOL_EXEC_UNSAFE_BLOCKED,
+        };
+      } finally {
+        if (onAbort) {
+          try {
+            ctx.signal.removeEventListener('abort', onAbort);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      if (ctx.signal?.aborted) {
+        return {
+          ok: false,
+          content: `Error: 工具 "${tool.name}" 审批期间任务被用户中止`,
           errorCode: ErrorCodes.TOOL_EXEC_UNSAFE_BLOCKED,
         };
       }

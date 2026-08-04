@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-05
+
+### Fixed
+
+- 用户在审批卡片挂起期间点 Stop 导致任务永久挂死：`ToolRunner` 的 `approvalGate` 裸 `await` 未与 `ctx.signal` 竞速，`approvalPending` 也未监听 abort。`ToolRunner` 改为 `Promise.race` + `ctx.signal`，Panel 的 `approvalPending` 登记时挂 `abort` 监听，`abort` 分支同时调 `cancelAllPendingApprovals` + `cancelAllPendingAsk` 兜底清理一切挂起的用户交互
+- Plan 模式弹窗"批准并切回 Agent"后模型仍输出确认文本、不直接执行：`create_plan` 的 `onPlanWritten` 钩子返回 `void` 把用户决策丢弃，`tool_result` 硬编码为"下一步建议：用户批准后切回 Agent 执行"。改为返回 `PlanWrittenOutcome`，根据用户是否批准生成不同 `tool_result`（批准→"用户已批准，请立即执行，不要再询问"；未批准→"用户选择继续打磨"）
+- 模式切换后模型在同一轮里看到互相矛盾的信号（工具清单已按新模式放开，system prompt 还写着旧模式约束）：`TaskLoop` 新增 `replaceSystemPrompt` / `appendSystemNote`，Panel 新增 `syncModeToActiveLoop`，在 `promptApprovePlan` 批准路径、`handleSwitchToAgentAfterPlan`、`approveSwitchMode`、`handleSetModeFromUser` 四个切模式入口同步重建 prompt 并追加模式切换说明
+- Plan 模式 prompt 要求 Interview Phase 分阶段需求收集，但 `ask_user_question`（`safetyLevel='external'`）不在 Plan 白名单，模型根本调不到提问工具：`PLAN_EXTRA_ALLOW_TOOLS` 加入 `ask_user_question`
+- Plan 批准切回 Agent 后 plan 路径要等下一轮才注入：批准时立即通过 `syncModeToActiveLoop` 的 note 把 plan 路径 + 立即执行指令写入 system prompt 末尾，模型当轮即可开始执行第一步
+
 ## [0.2.3] - 2026-08-02
 
 ### Fixed

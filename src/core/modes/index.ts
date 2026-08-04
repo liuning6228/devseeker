@@ -59,10 +59,17 @@ export const MODE_INFO: Record<Mode, ModeInfo> = {
 };
 
 /**
- * 仅 Plan 模式允许的额外工具白名单（当前为空）。
- * W6b2 加入 `create_plan`；若将来加 `ask_user_question`（W6b2/W7）也放这里。
+ * 仅 Plan 模式允许的额外工具白名单。
+ * - `create_plan` / `update_plan`：Plan 模式的核心产出工具（W6b2）。
+ * - `ask_user_question`：Interview Phase 需要它向用户提问（P1-D 修复）。
+ *   该工具 safetyLevel='external'，不在 read_only/network 里，
+ *   不加白名单的话 Plan 模式 prompt 要求"分阶段需求收集"却根本调不到它。
  */
-const PLAN_EXTRA_ALLOW_TOOLS = new Set<string>(['create_plan', 'update_plan']);
+const PLAN_EXTRA_ALLOW_TOOLS = new Set<string>([
+  'create_plan',
+  'update_plan',
+  'ask_user_question',
+]);
 
 /**
  * 跨所有受限模式都允许的工具（目前仅 switch_mode，供 Agent 侧主动请求切 Plan）。

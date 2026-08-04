@@ -47,13 +47,27 @@ export interface CreatePlanNotifyArgs {
 
 export type CreatePlanArgs = CreatePlanWriteArgs | CreatePlanNotifyArgs;
 
+/**
+ * `onPlanWritten` 回传的用户决策。
+ *
+ * 写盘后 Panel 会弹窗让用户选择"批准并切回 Agent"或"继续打磨"。
+ * 该结果必须回流到 tool_result，否则 LLM 无从知晓用户已经批准，
+ * 只能保守地再问一遍"是否切换到 Agent 模式"——用户会以为第一次点击没生效。
+ */
+export interface PlanWrittenOutcome {
+  /** 用户是否已批准按计划执行 */
+  approved: boolean;
+  /** 批准后 Panel 实际切到的模式（如 'agent'）；未发生切换则 undefined */
+  switchedTo?: string;
+}
+
 export interface CreatePlanToolDeps {
   /** 返回当前工作区绝对路径；null/undefined 表示未打开 workspace → 工具返回失败 */
   getWorkspaceRoot: () => string | undefined;
   /** 当前已记录的 planDoc（用于 notify_update 校验）；未有则返回 undefined */
   getPlanDoc?: () => string | undefined;
-  /** 写盘成功后通知 Panel，由 Panel 更新 ModeManager.planDoc */
-  onPlanWritten?: (absPath: string) => Promise<void>;
+  /** 写盘成功后通知 Panel，由 Panel 更新 ModeManager.planDoc，并回传用户审批决策 */
+  onPlanWritten?: (absPath: string) => Promise<PlanWrittenOutcome | void>;
   /** 重写 plans 目录（默认 'docs/plans'），方便测试 */
   plansDirRel?: string;
 }
@@ -192,16 +206,30 @@ export class CreatePlanTool implements ITool<CreatePlanArgs, ToolResult> {
       };
     }
 
+    let outcome: PlanWrittenOutcome | undefined;
     try {
-      await this.deps.onPlanWritten?.(absPath);
+      outcome = (await this.deps.onPlanWritten?.(absPath)) ?? undefined;
     } catch {
       // 钩子失败不影响工具返回（已写盘成功）
     }
 
     const relFromWs = relative(wsRoot, absPath).split(sep).join('/');
+    // 用户决策必须显式写进 tool_result：模型只能看到这里的文字
+    const nextStep = !outcome
+      ? '下一步建议：用户批准后切回 Agent 执行，或继续在 Plan 模式完善。'
+      : outcome.approved
+        ? [
+            `用户已批准该计划${outcome.switchedTo ? `，当前模式已切换为 ${outcome.switchedTo}` : ''}。`,
+            '请立即按计划开始执行第一步，直接调用工具。',
+            '不要再询问用户是否确认、不要再请求切换模式、也不要重复陈述计划内容。',
+          ].join('\n')
+        : [
+            '用户尚未批准执行，选择继续在 Plan 模式完善计划。',
+            '请等待用户的修订意见，不要开始执行，也不要请求切换模式。',
+          ].join('\n');
     return {
       ok: true,
-      content: `Plan 已写入：${relFromWs}\n摘要：${args.overview}\n\n下一步建议：用户批准后切回 Agent 执行，或继续在 Plan 模式完善。`,
+      content: `Plan 已写入：${relFromWs}\n摘要：${args.overview}\n\n${nextStep}`,
       display: { mode: 'write', planFilePath: absPath, planFileRel: relFromWs },
     };
   }

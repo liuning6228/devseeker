@@ -135,6 +135,7 @@ import { formatApprovedPlanXml, appendPlanToSystemPrompt } from '../core/task/pl
 import { SendMessageTool } from '../core/tools/send_message.js';
 import { continuableRegistry } from '../core/subagent/index.js';
 import { doesTaskNeedPlanning } from '../core/modes/decision-tree.js';
+import type { PlanWrittenOutcome } from '../core/tools/create_plan.js';
 import type { MemoryRecord } from '../core/memory/index.js';
 import { RuleLoader, selectForPrompt } from '../core/rules/index.js';
 import type { Rule } from '../core/rules/index.js';
@@ -307,8 +308,18 @@ export class DualMindChatPanel {
       toolName: string;
       command?: string;
       cwd?: string;
+      /** 用户点 Stop 时解除挂起（与 askPending 同构，避免 TaskLoop 永久挂死） */
+      onAbort?: () => void;
+      signal?: AbortSignal;
     }
   >();
+  /**
+   * 最近一次 startTask 构造 system prompt 时用的参数。
+   * 运行期切换模式后要用同样的参数重建 prompt 交给活跃 TaskLoop。
+   */
+  private lastPromptContext:
+    | { hasVision?: boolean; userQuery?: string; modelId?: string; extraConstraint?: string }
+    | undefined;
   /** 用户终端：用于「终端运行」/「↪终端」，整个会话只创建一个，复用 sendText */
   // 用户终端管理已移至 VscodeTerminalManager.runCommandOnUserTerminal
   /** W7b4b · 写类工具 diff 生成：toolCallId → { relPath, before, checkpoint promise } */
@@ -919,6 +930,11 @@ export class DualMindChatPanel {
           this.pendingAbort = true;
           log.info({}, 'abort requested before TaskLoop ready; queued as pendingAbort');
         }
+        // 解除一切挂起的用户交互：审批卡片 / 提问弹窗。
+        // 两者虽已监听 signal，但 TaskLoop 未就绪时 signal 尚不存在，
+        // 这里兜底一次，确保 Stop 后不会有 await 永远挂着。
+        this.cancelAllPendingApprovals('user abort');
+        this.cancelAllPendingAsk('user abort');
         // W7b4a: Stop 按钮同时 kill 所有后台 session
         try {
           this.terminalManager.killAll();
@@ -1620,6 +1636,13 @@ export class DualMindChatPanel {
     const effectiveSystemPrompt = isInlineEdit
       ? systemPrompt + '\n\n' + INLINE_EDIT_CONSTRAINT
       : systemPrompt;
+    // 记下构造参数：运行期切模式时需要用同样的参数重建 system prompt
+    this.lastPromptContext = {
+      hasVision,
+      userQuery: userInput,
+      modelId,
+      ...(isInlineEdit ? { extraConstraint: INLINE_EDIT_CONSTRAINT } : {}),
+    };
     const hookManager = await this.getHookManager();
     const coordinator = this.getCheckpointCoordinator();
     coordinator?.beginTurn();
@@ -2503,6 +2526,9 @@ export class DualMindChatPanel {
     const memoryKey = `approval:${tool.name}`;
     if (this.approvedExternalTools.has(memoryKey)) return { approved: true };
 
+    // 任务已被中止 → 不弹卡片，直接拒绝
+    if (ctx.signal.aborted) return { approved: false };
+
     // 参数预览（截断，避免卡片过长）
     let argsPreview = '';
     try {
@@ -2532,14 +2558,23 @@ export class DualMindChatPanel {
     };
     this.post({ type: 'approval_request', payload });
 
-    // 等待用户在 Webview 中点击
+    // 等待用户在 Webview 中点击（Stop 时由 signal 解除挂起）
     return new Promise<{ approved: boolean; remember?: boolean }>((resolve) => {
+      const onAbort = () => {
+        const entry = this.approvalPending.get(requestId);
+        if (!entry) return;
+        this.approvalPending.delete(requestId);
+        resolve({ approved: false });
+      };
       this.approvalPending.set(requestId, {
         resolve,
         toolName: tool.name,
         command: command ?? undefined,
         cwd: (args as Record<string, unknown>)?.cwd as string | undefined,
+        onAbort,
+        signal: ctx.signal,
       });
+      ctx.signal.addEventListener('abort', onAbort, { once: true });
     });
   };
 
@@ -2955,6 +2990,10 @@ export class DualMindChatPanel {
     if (changed) {
       log.info({ mode }, 'mode switched by user');
       this.planReadyForSwitch = false;
+      // 任务运行期切换必须同步：否则 toolFilter 已放开，prompt 还锁着旧模式
+      void this.syncModeToActiveLoop('user_selected').catch((e) =>
+        log.warn({ err: String(e) }, 'syncModeToActiveLoop(user_selected) failed'),
+      );
     }
     this.pushModeStatus(changed ? 'user_selected' : undefined);
   }
@@ -2972,6 +3011,8 @@ export class DualMindChatPanel {
     this.modeManager.setMode(targetMode, 'switch_mode_tool_approved');
     this.pushModeStatus('switch_mode_tool_approved');
     log.info({ targetMode }, 'mode auto-switched by switch_mode tool');
+    // 同一轮内工具白名单已按新模式生效，prompt 必须一起更新
+    await this.syncModeToActiveLoop('switch_mode_tool_approved');
     return true;
   }
 
@@ -2980,21 +3021,22 @@ export class DualMindChatPanel {
    * 记录 planDoc 到 ModeManager；下一轮 user 消息会自动注入该路径。
    * 同时弹出模态"审阅并批准"，批准时自动切回 Agent 模式。
    * v1.6.0 · 改为 await 等待用户决策，防止 Agent 在用户未审批前继续执行。
+   * P0-9 · 决策结果回传给工具，写入 tool_result，避免模型重复确认。
    */
-  private async onPlanWritten(absPath: string): Promise<void> {
+  private async onPlanWritten(absPath: string): Promise<PlanWrittenOutcome> {
     this.modeManager.setPlanDoc(absPath);
     this.pushModeStatus('plan_written');
     // v1.6.0 · 阻塞等待用户审批决策，防止未审批就继续执行
-    await this.promptApprovePlan(absPath);
+    return this.promptApprovePlan(absPath);
   }
 
   /**
    * 向用户弹窗"审阅并批准 Plan"。
-   * - 选中"批准并切回 Agent" → 立即切回 Agent，planDoc 等下一轮注入
+   * - 选中"批准并切回 Agent" → 立即切回 Agent，并把决策回传给 create_plan
    * - 选中"继续在 Plan 模式打磨" → 保持在 Plan 模式，在 UI 头部展示"切换到 Agent"按钮
    *   用户点击按钮后才切回 Agent（参见 handleSwitchToAgentAfterPlan）
    */
-  private async promptApprovePlan(absPath: string): Promise<void> {
+  private async promptApprovePlan(absPath: string): Promise<PlanWrittenOutcome> {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const rel = wsRoot ? vscode.workspace.asRelativePath(absPath) : absPath;
     const picked = await vscode.window.showInformationMessage(
@@ -3007,10 +3049,56 @@ export class DualMindChatPanel {
       const changed = this.modeManager.setMode('agent', 'plan_approved');
       if (changed) log.info({ planDoc: absPath }, 'plan approved, switched back to agent');
       this.pushModeStatus('plan_approved');
-    } else {
-      // 保持在 Plan 模式，在 UI 头部展示"切换到 Agent 执行"按钮
-      this.planReadyForSwitch = true;
-      this.pushModeStatus('plan_ready_waiting');
+      // 模式已放开工具白名单，但当前 TaskLoop 的 system prompt 还写着 Plan 的
+      // READ-ONLY 约束 —— 不同步会让模型在同一轮里看到互相矛盾的信号。
+      // 同时把 plan 路径显式写进 prompt：`consumePlanDocPrefix` 只在下一轮 startTask 注入，
+      // 当前轮 model 必须立刻看到路径才能开始执行第一步。
+      const relPath = vscode.workspace.asRelativePath(absPath);
+      await this.syncModeToActiveLoop(
+        'plan_approved',
+        [
+          `[Plan Approved] 用户已批准计划，当前模式已切回 agent。`,
+          `计划文件：${relPath}`,
+          `请立即按计划开始执行第一步。直接调用工具，不要再次询问确认。`,
+        ].join('\n'),
+      );
+      return { approved: true, switchedTo: 'agent' };
+    }
+    // 保持在 Plan 模式，在 UI 头部展示"切换到 Agent 执行"按钮
+    this.planReadyForSwitch = true;
+    this.pushModeStatus('plan_ready_waiting');
+    return { approved: false };
+  }
+
+  /**
+   * 模式在任务运行期间被切换后，把新模式的约束同步给活跃 TaskLoop。
+   *
+   * 不同步会导致模型在同一轮里看到互相矛盾的信号：工具清单已按新模式放开
+   * （`toolFilter` 每轮重算），system prompt 却还是旧模式的快照。模型面对
+   * 矛盾只会停下来再问一遍用户，表现为"弹窗选了却没生效"。
+   *
+   * @param reason 切换原因，写入日志与运行期说明
+   * @param note   可选的额外指令，追加在 prompt 末尾
+   */
+  private async syncModeToActiveLoop(reason: string, note?: string): Promise<void> {
+    const loop = this.taskLoop;
+    if (!loop) return;
+    const mode = this.modeManager.getCurrent();
+    try {
+      const rebuilt = await this.buildSystemPrompt({ ...(this.lastPromptContext ?? {}) });
+      const extra = this.lastPromptContext?.extraConstraint;
+      loop.replaceSystemPrompt(extra ? rebuilt + '\n\n' + extra : rebuilt);
+      loop.appendSystemNote(
+        note ??
+          `[Mode Switched] 当前模式已切换为 ${mode}（${reason}）。上文中属于此前模式的限制作废，请按 ${mode} 模式的规则继续当前任务，不要为此再次征求用户确认。`,
+      );
+      log.info({ mode, reason }, 'active TaskLoop system prompt resynced after mode change');
+    } catch (e) {
+      // 重建失败时退化为只追加说明：至少让模型知道模式变了
+      log.warn({ err: String(e), mode, reason }, 'resync system prompt failed; append note only');
+      loop.appendSystemNote(
+        `[Mode Switched] 当前模式已切换为 ${mode}（${reason}）。请按 ${mode} 模式的规则继续当前任务。`,
+      );
     }
   }
 
@@ -3021,6 +3109,8 @@ export class DualMindChatPanel {
     const changed = this.modeManager.setMode('agent', 'plan_approved');
     if (changed) log.info({ planDoc: this.modeManager.snapshot().planDoc }, 'user clicked switch to agent after plan');
     this.pushModeStatus('plan_approved');
+    // 任务仍在运行时（模型还在等 create_plan 的后续轮次）同步放开 prompt 约束
+    void this.syncModeToActiveLoop('plan_approved');
   }
 
   /**
@@ -3603,6 +3693,7 @@ export class DualMindChatPanel {
       return;
     }
     this.approvalPending.delete(requestId);
+    this.detachApprovalAbort(entry);
     if (decision === 'remember') {
       const memoryKey = `approval:${entry.toolName}`;
       this.approvedExternalTools.add(memoryKey);
@@ -3618,11 +3709,22 @@ export class DualMindChatPanel {
     }
   }
 
-  /** 取消所有 pending approval（session 切换 / panel dispose） */
+  /** 摘掉审批挂起项上的 abort 监听，避免 listener 泄漏 */
+  private detachApprovalAbort(entry: { onAbort?: () => void; signal?: AbortSignal }): void {
+    if (!entry.onAbort || !entry.signal) return;
+    try {
+      entry.signal.removeEventListener('abort', entry.onAbort);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** 取消所有 pending approval（session 切换 / panel dispose / 用户中止） */
   private cancelAllPendingApprovals(reason: string): void {
     if (this.approvalPending.size === 0) return;
     log.info({ count: this.approvalPending.size, reason }, 'cancel all pending approvals');
     for (const [, entry] of this.approvalPending) {
+      this.detachApprovalAbort(entry);
       entry.resolve({ approved: false });
     }
     this.approvalPending.clear();

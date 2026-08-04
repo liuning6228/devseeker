@@ -112,6 +112,17 @@ describe('isToolAllowedInMode', () => {
     expect(isToolAllowedInMode(fakeTool('skill', 'external'), 'plan')).toBe(false);
   });
 
+  // P1-D · ask_user_question 加入 Plan 白名单（Interview Phase 需要它提问）
+  it('Plan allows ask_user_question (safetyLevel=external) for Interview Phase', () => {
+    expect(
+      isToolAllowedInMode(fakeTool('ask_user_question', 'external'), 'plan'),
+    ).toBe(true);
+    // 但 Ask 模式仍然不放（用户已经直接提问，不需要反问）
+    expect(
+      isToolAllowedInMode(fakeTool('ask_user_question', 'external'), 'ask'),
+    ).toBe(false);
+  });
+
   it('Ask allows read_only + network (no create_plan, no switch_mode)', () => {
     expect(isToolAllowedInMode(fakeTool('read_file', 'read_only'), 'ask')).toBe(true);
     // W6b3：联网工具在 Ask 允许（需要查资料才能回答）

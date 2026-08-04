@@ -228,4 +228,49 @@ describe('CreatePlanTool', () => {
     expect(tool.name).toBe('create_plan');
     expect(tool.safetyLevel).toBe('workspace_write');
   });
+
+  // P0-B · 用户审批决策必须回流到 tool_result，避免模型重复确认
+  it('onPlanWritten returning {approved:true,switchedTo:"agent"} → tool_result instructs immediate execution', async () => {
+    const tool = new CreatePlanTool({
+      getWorkspaceRoot: () => wsDir,
+      onPlanWritten: async () => ({ approved: true, switchedTo: 'agent' }),
+    });
+    const r = await tool.execute(
+      { mode: 'write', name: 'P', overview: 'o', plan: '# P' },
+      mkCtx(),
+    );
+    expect(r.ok).toBe(true);
+    expect(typeof r.content).toBe('string');
+    expect(r.content).toContain('用户已批准');
+    expect(r.content).toContain('agent');
+    // 明确禁止模型再问一遍
+    expect(r.content).toContain('不要再询问');
+  });
+
+  it('onPlanWritten returning {approved:false} → tool_result tells model to wait', async () => {
+    const tool = new CreatePlanTool({
+      getWorkspaceRoot: () => wsDir,
+      onPlanWritten: async () => ({ approved: false }),
+    });
+    const r = await tool.execute(
+      { mode: 'write', name: 'P', overview: 'o', plan: '# P' },
+      mkCtx(),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('尚未批准');
+    expect(r.content).toContain('不要开始执行');
+  });
+
+  it('onPlanWritten returning undefined → falls back to legacy hint', async () => {
+    const tool = new CreatePlanTool({
+      getWorkspaceRoot: () => wsDir,
+      onPlanWritten: async () => undefined,
+    });
+    const r = await tool.execute(
+      { mode: 'write', name: 'P', overview: 'o', plan: '# P' },
+      mkCtx(),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('下一步建议');
+  });
 });
