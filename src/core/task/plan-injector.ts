@@ -5,18 +5,21 @@
  */
 
 /**
- * Plan 注入器（Phase 5 Phase B Step 6）
+ * Plan 注入器（Phase 5 Phase B Step 6 + P1 Spec 扩展）
  *
  * 读取 plan 文件 → 格式化为 `<approved_plan>` XML 块 → 追加到 system prompt L2 后。
+ * 读取 spec 文件 → 格式化为 `<spec>` XML 块 → 追加到 system prompt。
  * 块约束 ≤ 2000 tokens，超限裁剪 files 列表。
  *
  * 注入位置：system prompt 的 L2（workspace context）之后，不破坏现有 layers。
  *
  * DESIGN-1.md §4.1 · ROADMAP.md 方案二 Phase B Step 6
+ * spec-workflow-and-knowledge-engine.md §五
  */
 
 import { promises as fs } from 'node:fs';
 import { resolve } from 'node:path';
+import type { SpecDocument } from './spec-manager.js';
 
 const MAX_CHARS = 2000; // 约 500 tokens，留余量
 
@@ -106,6 +109,98 @@ export function appendPlanToSystemPrompt(
 ): string {
   if (!planXml) return systemPrompt;
   return systemPrompt.replace(/(\n*)$/, `\n${planXml}\n`);
+}
+
+// ─────────── Spec XML 格式化（P1） ───────────
+
+/**
+ * 将 SpecDocument 格式化为 `<spec>` XML 块，用于注入 system prompt。
+ *
+ * 格式：
+ * ```xml
+ * <spec feature="xxx" status="draft">
+ *   <requirement>需求原文（截断至 800 字符）</requirement>
+ *   <design>方案原文（截断至 800 字符）</design>
+ *   <tasks>任务列表（截断至 400 字符）</tasks>
+ * </spec>
+ * ```
+ */
+export function formatSpecXml(doc: SpecDocument): string {
+  const MAX_SECTION = 800;
+  const MAX_TASKS = 400;
+
+  const req = truncate(doc.requirement, MAX_SECTION);
+  const design = truncate(doc.design, MAX_SECTION);
+  const tasks = truncate(doc.tasks, MAX_TASKS);
+
+  const parts: string[] = [];
+  parts.push(
+    `<spec feature="${escapeXml(doc.meta.feature)}" status="${escapeXml(doc.meta.status)}">`,
+  );
+
+  if (req) {
+    parts.push(`  <requirement>${escapeXml(req)}</requirement>`);
+  }
+  if (design) {
+    parts.push(`  <design>${escapeXml(design)}</design>`);
+  }
+  if (tasks) {
+    parts.push(`  <tasks>${escapeXml(tasks)}</tasks>`);
+  }
+
+  parts.push('</spec>');
+
+  const xml = parts.join('\n');
+
+  // 整体超限裁剪
+  if (xml.length > MAX_CHARS) {
+    return xml.slice(0, MAX_CHARS - 22) + '\n...truncated\n</spec>';
+  }
+  return xml;
+}
+
+/**
+ * 将 Spec 的任务列表格式化为精简的 checklist XML。
+ * 用于注入 system prompt 让 Agent 知道当前进度。
+ */
+export function formatSpecTasksXml(doc: SpecDocument): string {
+  if (!doc.tasks) return '';
+
+  const lines = doc.tasks.split('\n');
+  const taskItems: string[] = [];
+
+  for (const line of lines) {
+    // 匹配 `- [ ] 1. xxx` 或 `- [x] 1. xxx` 格式
+    const m = line.match(/^\s*-\s*\[([ xX])\]\s*(?:\d+\.\s*)?(.+)$/);
+    if (m) {
+      const done = m[1] !== ' ';
+      taskItems.push(
+        `  <task done="${done}">${escapeXml(m[2].trim())}</task>`,
+      );
+    }
+  }
+
+  if (taskItems.length === 0) return '';
+
+  return [
+    `<spec_tasks feature="${escapeXml(doc.meta.feature)}">`,
+    ...taskItems,
+    '</spec_tasks>',
+  ].join('\n');
+}
+
+/** 拼接 Spec XML 到 system prompt 末尾 */
+export function appendSpecToSystemPrompt(
+  systemPrompt: string,
+  specXml: string,
+): string {
+  if (!specXml) return systemPrompt;
+  return systemPrompt.replace(/(\n*)$/, `\n${specXml}\n`);
+}
+
+function truncate(s: string, max: number): string {
+  if (!s || s.length <= max) return s;
+  return s.slice(0, max) + '...';
 }
 
 function escapeXml(s: string): string {

@@ -97,6 +97,44 @@ const VISION_PROMPT = [
   '- Keep the description concise but complete.',
 ].join('\n');
 
+const REQUIREMENT_ANALYZER_PROMPT = [
+  'You are the **Requirement Analyzer** subagent of DevSeeker — a requirements elicitation specialist.',
+  '',
+  'Scope: analyze the codebase and the user\'s stated goal to produce a structured requirements analysis.',
+  'You do NOT interact with the user directly. Instead, you produce a list of clarifying questions',
+  'that the main agent will ask the user via `AskUserQuestion`.',
+  '',
+  'Workflow:',
+  '1. Understand the goal: read the task description and identify what the user wants to achieve.',
+  '2. Explore the codebase: use `search_codebase` / `read_file` / `lsp` to understand affected modules.',
+  '3. Identify gaps: what information is missing? What constraints exist? What edge cases matter?',
+  '4. Produce a structured output with the following sections:',
+  '',
+  '```markdown',
+  '## \u7406\u89e3（Understanding）',
+  '- \u76ee\u6807: ...',
+  '- \u53d7\u5f71\u54cd\u6a21\u5757: ...',
+  '',
+  '## \u9700\u8981\u7528\u6237\u786e\u8ba4\u7684\u95ee\u9898（Questions for User）',
+  '1. \u95ee\u98981\uff1a...\uff08\u80cc\u666f: ...\uff09',
+  '2. \u95ee\u98982\uff1a...',
+  '',
+  '## \u521d\u6b65\u9700\u6c42\uff08Preliminary Requirements）',
+  '- FR-1: ...',
+  '- FR-2: ...',
+  '',
+  '## \u8fb9\u754c\u60c5\u51b5\uff08Edge Cases）',
+  '- EC-1: ...',
+  '```',
+  '',
+  'Rules:',
+  '- Never modify files. You are READ-ONLY.',
+  '- Focus on WHAT needs to be done, not HOW to implement it.',
+  '- Questions should be specific and actionable, not vague.',
+  '- Include technical constraints discovered from codebase analysis.',
+  '- Keep the output concise — the main agent will refine it.',
+].join('\n');
+
 const BROWSER_TOOLS = new Set<string>(['search_web', 'fetch_content', 'read_url']);
 const RESEARCH_TOOLS = new Set<string>([
   'search_web',
@@ -164,12 +202,32 @@ export const VISION_DEFINITION: SubagentDefinition = {
   isBuiltin: true,
 };
 
-const BY_TYPE: Record<'Browser' | 'Research' | 'Guide' | 'Verify' | 'Vision', SubagentDefinition> = {
+// ─────────── P1：Spec 工作流子代理 ───────────
+
+/**
+ * Requirement Analyzer 定义。
+ * 用于 Spec 工作流的 Stage 1（需求梳理）。
+ *
+ * 工具白名单：search toolset（只读探索代码库）。
+ * 注意：子代理不能直接调用 ask_user_question（DELEGATE_BLOCKED_TOOLS），
+ * 因此产出的是“问题清单”而非直接与用户交互。
+ */
+export const REQUIREMENT_ANALYZER_DEFINITION: SubagentDefinition = {
+  type: 'RequirementAnalyzer',
+  allowedTools: new Set<string>(TOOLSETS.search),
+  systemPrompt: REQUIREMENT_ANALYZER_PROMPT,
+  maxTurns: 15,
+  description: 'Analyze codebase and produce structured requirements analysis for Spec workflow.',
+  isBuiltin: true,
+};
+
+const BY_TYPE: Record<'Browser' | 'Research' | 'Guide' | 'Verify' | 'Vision' | 'RequirementAnalyzer', SubagentDefinition> = {
   Browser: BROWSER_DEFINITION,
   Research: RESEARCH_DEFINITION,
   Guide: GUIDE_DEFINITION,
   Verify: VERIFY_DEFINITION,
   Vision: VISION_DEFINITION,
+  RequirementAnalyzer: REQUIREMENT_ANALYZER_DEFINITION,
 };
 
 const BUILTIN_DEFS: readonly SubagentDefinition[] = [
@@ -178,10 +236,11 @@ const BUILTIN_DEFS: readonly SubagentDefinition[] = [
   GUIDE_DEFINITION,
   VERIFY_DEFINITION,
   VISION_DEFINITION,
+  REQUIREMENT_ANALYZER_DEFINITION,
 ];
 
 export function getSubagentDefinition(type: SubagentType): SubagentDefinition | undefined {
-  if (type === 'Browser' || type === 'Research' || type === 'Guide' || type === 'Verify' || type === 'Vision') {
+  if (type === 'Browser' || type === 'Research' || type === 'Guide' || type === 'Verify' || type === 'Vision' || type === 'RequirementAnalyzer') {
     return BY_TYPE[type];
   }
   return undefined;

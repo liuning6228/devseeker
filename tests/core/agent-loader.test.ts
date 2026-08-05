@@ -266,10 +266,10 @@ describe('W14.4 · AgentLoader', () => {
 });
 
 describe('W14.4 · createSubagentRegistry', () => {
-  it('空 customs → 只暴露内置 5 种', () => {
+  it('空 customs → 只暴露内置 6 种', () => {
     const reg = createSubagentRegistry([]);
     const types = reg.list().map((d) => d.type);
-    expect(types).toEqual(['Browser', 'Research', 'Guide', 'Verify', 'Vision']);
+    expect(types).toEqual(['Browser', 'Research', 'Guide', 'Verify', 'Vision', 'RequirementAnalyzer']);
     expect(reg.resolve('Browser')).toBeDefined();
     expect(reg.resolve('NotExist')).toBeUndefined();
   });
@@ -284,7 +284,7 @@ describe('W14.4 · createSubagentRegistry', () => {
     };
     const reg = createSubagentRegistry([custom]);
     expect(reg.resolve('devseeker')?.maxTurns).toBe(5);
-    expect(reg.list()).toHaveLength(6);
+    expect(reg.list()).toHaveLength(7);
   });
 
   it('自定义 agent 不允许覆盖内置 Browser', () => {

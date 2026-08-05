@@ -21,7 +21,7 @@
 import type { Message } from '../../providers/types.js';
 
 /** 内置子代理 type（常量与类型窄化） */
-export type BuiltinSubagentType = 'Browser' | 'Research' | 'Guide' | 'Verify' | 'Vision';
+export type BuiltinSubagentType = 'Browser' | 'Research' | 'Guide' | 'Verify' | 'Vision' | 'RequirementAnalyzer';
 
 /**
  * 子代理类型放宽为字符串：
@@ -36,6 +36,7 @@ export const ALL_BUILTIN_SUBAGENT_TYPES: readonly BuiltinSubagentType[] = [
   'Guide',
   'Verify',
   'Vision',
+  'RequirementAnalyzer',
 ] as const;
 
 /** @deprecated 兼容旧名；语义等同 ALL_BUILTIN_SUBAGENT_TYPES */
