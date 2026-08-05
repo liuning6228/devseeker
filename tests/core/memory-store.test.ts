@@ -210,3 +210,63 @@ describe('MemoryStore', () => {
     expect((await store.list({ scope: 'global' })).length).toBe(1);
   });
 });
+
+describe('MemoryStore.createSystem', () => {
+  it('允许写入 SYSTEM_CATEGORIES（create 不允许的）', async () => {
+    const store = makeStore();
+    const rec = await store.createSystem({
+      title: '任务总结',
+      content: '完成了 XX 功能的开发，涉及 5 个文件',
+      category: 'task_summary_experience',
+      keywords: ['task', 'summary'],
+    });
+    expect(rec.id).toMatch(/^mem_/);
+    expect(rec.category).toBe('task_summary_experience');
+    expect(rec.scope).toBe('workspace');
+  });
+
+  it('拒绝非法类别（与 create 一致）', async () => {
+    const store = makeStore();
+    await expect(
+      store.createSystem({
+        title: 'x',
+        content: 'x',
+        category: 'not_a_real_category',
+        keywords: [],
+      }),
+    ).rejects.toMatchObject({ code: ErrorCodes.MEMORY_CATEGORY_INVALID });
+  });
+
+  it('拒绝空 title / content', async () => {
+    const store = makeStore();
+    await expect(
+      store.createSystem({ title: '', content: 'x', category: 'task_summary_experience', keywords: [] }),
+    ).rejects.toMatchObject({ code: ErrorCodes.TOOL_ARGS_INVALID });
+  });
+
+  it('持久化到 JSONL 且可重新加载', async () => {
+    const s1 = makeStore();
+    await s1.createSystem({
+      title: 'session-summary',
+      content: '本次会话完成了 P0 功能开发',
+      category: 'task_summary_experience',
+      keywords: ['p0', 'session'],
+    });
+
+    const s2 = makeStore();
+    const list = await s2.list({ category: 'task_summary_experience' });
+    expect(list.length).toBe(1);
+    expect(list[0].title).toBe('session-summary');
+  });
+
+  it('也允许写入 WRITABLE_CATEGORIES（不限制）', async () => {
+    const store = makeStore();
+    const rec = await store.createSystem({
+      title: 'common pitfall',
+      content: '注意 search_replace 要去掉行号前缀',
+      category: 'common_pitfalls_experience',
+      keywords: ['search_replace', 'prefix'],
+    });
+    expect(rec.category).toBe('common_pitfalls_experience');
+  });
+});

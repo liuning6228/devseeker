@@ -142,6 +142,63 @@ export class MemoryStore {
     return rec;
   }
 
+  /**
+   * 系统沉淀写入（P0 自动提炼专用）。
+   * 与 create() 的区别：跳过 isWritableCategory 检查，允许写入 SYSTEM_CATEGORIES。
+   * 仅供 BuiltinMemoryProvider 内部提炼逻辑使用，工具层不允许调用。
+   */
+  async createSystem(input: {
+    title: string;
+    content: string;
+    category: string;
+    keywords: string[];
+    scope?: MemoryScope;
+  }): Promise<MemoryRecord> {
+    await this.load();
+    // 仅校验类别合法性，不校验是否可写（系统沉淀类别允许写入）
+    if (!isValidCategory(input.category)) {
+      throw new AgentError({
+        code: ErrorCodes.MEMORY_CATEGORY_INVALID,
+        message: `非法类别 "${input.category}"。合法类别：${ALL_CATEGORIES.join(', ')}`,
+      });
+    }
+    this.assertField('title', input.title);
+    this.assertField('content', input.content);
+    const now = Date.now();
+    const rec: MemoryRecord = {
+      id: generateId(),
+      title: input.title.trim(),
+      content: input.content,
+      category: input.category as MemoryCategory,
+      keywords: normalizeKeywords(input.keywords),
+      scope: input.scope ?? 'workspace',
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (rec.scope === 'workspace' && !this.workspacePath) {
+      throw new AgentError({
+        code: ErrorCodes.MEMORY_CATEGORY_NOT_WRITABLE,
+        message: '未打开工作区，无法写入 workspace 作用域的记忆',
+      });
+    }
+    // 自动计算 embedding（非阻塞）
+    await this.computeEmbedding(rec).catch(() => {});
+    // keywords 不足时自动补充
+    if (rec.keywords.length <= 3) {
+      const extracted = extractKeywords(rec.content);
+      const merged = [...rec.keywords];
+      for (const kw of extracted) {
+        if (!merged.some((k) => k.toLowerCase() === kw.toLowerCase())) {
+          merged.push(kw);
+        }
+      }
+      rec.keywords = merged;
+    }
+    this.records.set(rec.id, rec);
+    await this.persist(rec.scope);
+    return rec;
+  }
+
   /** 更新已有记忆（按 id） */
   async update(
     id: string,

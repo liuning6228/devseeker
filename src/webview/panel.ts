@@ -131,6 +131,7 @@ import { KnowledgeIndex } from '../core/knowledge/index.js';
 import { VSCodeLspBridge, type LspBridge } from '../core/lsp/index.js';
 import { VSCodeProblemsBridge, type ProblemsBridge } from '../core/problems/index.js';
 import { MemoryManager, BuiltinMemoryProvider, enhanceWithVectorMatch, renderTaskContextSection, buildFrozenSnapshot, PrefetchEngine } from '../core/memory/index.js';
+import type { MemoryExtractorFn } from '../core/memory/index.js';
 import { formatApprovedPlanXml, appendPlanToSystemPrompt } from '../core/task/plan-injector.js';
 import { SendMessageTool } from '../core/tools/send_message.js';
 import { continuableRegistry } from '../core/subagent/index.js';
@@ -1200,6 +1201,14 @@ export class DualMindChatPanel {
   }
 
   private handleNewSession(): void {
+    // P0 · 记忆自动提炼：旧会话结束前触发 onSessionEnd
+    const memManager = this.memoryManager;
+    const oldSessionMessages = this.currentSession?.messages;
+    if (memManager && oldSessionMessages && oldSessionMessages.length > 0) {
+      void memManager.onSessionEnd(oldSessionMessages).catch((e) => {
+        log.warn({ err: String(e) }, 'onSessionEnd failed on new session');
+      });
+    }
     this.taskLoop?.abort();
     this.taskLoop = null;
     this.currentSession = undefined;
@@ -1219,6 +1228,14 @@ export class DualMindChatPanel {
   private async handleLoadSession(sessionId: string): Promise<void> {
     const s = this.sessionStore.getSession(sessionId);
     if (!s) return;
+    // P0 · 记忆自动提炼：切换会话前对旧会话触发 onSessionEnd
+    const memManager = this.memoryManager;
+    const oldSessionMessages = this.currentSession?.messages;
+    if (memManager && oldSessionMessages && oldSessionMessages.length > 0) {
+      void memManager.onSessionEnd(oldSessionMessages).catch((e) => {
+        log.warn({ err: String(e) }, 'onSessionEnd failed on session switch');
+      });
+    }
     this.taskLoop?.abort();
     this.taskLoop = null;
     this.currentSession = s;
@@ -1844,6 +1861,32 @@ export class DualMindChatPanel {
       if (this.prefetchEngine && userInput) {
         this.prefetchEngine.queuePrefetch(userInput);
       }
+      // P0 · 记忆自动提炼：send() 完成后异步触发 syncTurn（不阻断主流程）
+      if (result.ok) {
+        const memManager = this.getMemoryManager();
+        if (memManager) {
+          // 从 history 中提取最后一轮 user→assistant 配对
+          // 从后往前遍历，先找 assistant，再找它之前的 user，确保是同一轮对话
+          const history = loop.getHistorySnapshot();
+          let syncUserText = '';
+          let syncAssistantText = '';
+          for (let i = history.length - 1; i >= 0; i--) {
+            const m = history[i];
+            if (!syncAssistantText && m.role === 'assistant' && typeof m.content === 'string' && m.content) {
+              syncAssistantText = m.content;
+            } else if (syncAssistantText && !syncUserText && m.role === 'user' && typeof m.content === 'string' && m.content) {
+              syncUserText = m.content;
+              break; // 找到配对，退出
+            }
+          }
+          if (syncUserText || syncAssistantText) {
+            // 异步触发，不 await（提炼失败不影响用户体验）
+            void memManager.syncTurn(syncUserText, syncAssistantText).catch((e) => {
+              log.warn({ err: String(e) }, 'syncTurn failed');
+            });
+          }
+        }
+      }
       // W15.7 · 任务正常返回但以 error 终止 → 检查是否可 fallback
       if (result.ok) {
         this.router.recordSuccess(provider.id);
@@ -2285,10 +2328,37 @@ export class DualMindChatPanel {
   private getMemoryManager(): MemoryManager | undefined {
     if (this.memoryManager) return this.memoryManager;
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const builtin = new BuiltinMemoryProvider({
-      workspaceRoot,
-      embedder: this.getCachedEmbedder(),
-    });
+    // P0 · 记忆自动提炼：创建 LLM 提炼器，复用当前 activeProvider 做轻量调用
+    const extractor: MemoryExtractorFn = async (prompt: string, maxTokens: number): Promise<string> => {
+      const providerId = this.activeProviderId;
+      if (!providerId) return '';
+      const registry = getProviderRegistry();
+      const provider = registry.get(providerId);
+      if (!provider) return '';
+      try {
+        const stream = provider.createMessage({
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens,
+          temperature: 0,
+          toolChoice: 'none',
+        });
+        let text = '';
+        for await (const event of stream) {
+          if (event.type === 'text_delta') {
+            text += event.text;
+          }
+          if (event.type === 'error' || event.type === 'done') break;
+        }
+        return text;
+      } catch (e) {
+        log.warn({ err: String(e) }, 'memory extractor: LLM call failed');
+        return '';
+      }
+    };
+    const builtin = new BuiltinMemoryProvider(
+      { workspaceRoot, embedder: this.getCachedEmbedder() },
+      { extractor },
+    );
     this.memoryManager = new MemoryManager({ builtin });
     // M4 · 后台预取引擎：下次 send 结束后 queuePrefetch，下次 buildSystemPrompt 时 consumeHit
     this.prefetchEngine = new PrefetchEngine(() => {
@@ -4171,6 +4241,14 @@ export class DualMindChatPanel {
   dispose(): void {
     DualMindChatPanel.current = undefined;
     this.taskLoop?.abort();
+    // P0 · 记忆自动提炼：panel 关闭前对当前会话触发 onSessionEnd（异步，不阻塞 dispose）
+    const memManager = this.memoryManager;
+    const sessionMessages = this.currentSession?.messages;
+    if (memManager && sessionMessages && sessionMessages.length > 0) {
+      void memManager.onSessionEnd(sessionMessages).catch((e) => {
+        log.warn({ err: String(e) }, 'onSessionEnd failed on dispose');
+      });
+    }
     // W7b4b · 取消所有 pending ask
     this.cancelAllPendingAsk('panel disposed');
     this.cancelAllPendingApprovals('panel disposed');

@@ -27,7 +27,7 @@ export type {
 } from './types.js';
 export { MemoryStore, extractKeywords, type MemoryStoreOptions } from './store.js';
 export { MemoryManager, type IMemoryProvider, type MemoryManagerOptions, type ProviderToolSchema, type MemoryWriteAction, type MemoryQueryFilter } from './provider.js';
-export { BuiltinMemoryProvider } from './builtin-provider.js';
+export { BuiltinMemoryProvider, type BuiltinProviderExtractionOptions } from './builtin-provider.js';
 export { buildFrozenSnapshot } from './snapshot.js';
 export { scanMemoryContent } from './scan.js';
 export { migrateJsonlToMd, type MigrationResult } from './migrate-jsonl-to-md.js';
@@ -47,3 +47,14 @@ export {
   type EnsureSeedOptions,
   type EnsureSeedResult,
 } from './seeds.js';
+export {
+  buildSyncTurnExtractionPrompt,
+  buildSessionEndExtractionPrompt,
+  parseExtractionResult,
+  shouldExtractFromTurn,
+  summarizeSessionMessages,
+  SYNC_TURN_MAX_MEMORIES,
+  SESSION_END_MAX_MEMORIES,
+  type ExtractedMemory,
+  type MemoryExtractorFn,
+} from './extraction-prompt.js';
