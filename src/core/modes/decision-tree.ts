@@ -17,8 +17,10 @@
  * DESIGN-1.md §4.2 · ROADMAP.md 方案二 Phase A Step 1
  */
 
+import { evaluateTaskComplexity } from '../task/task-complexity.js';
+
 /** 决策结果 */
-export type PlanDecision = 'auto_plan' | 'suggest_plan' | 'no_plan';
+export type PlanDecision = 'auto_plan' | 'suggest_plan' | 'no_plan' | 'auto_spec' | 'suggest_spec';
 
 /** 特征提取结果 */
 export interface MessageFeatures {
@@ -117,14 +119,28 @@ export function extractFeatures(msg: string): MessageFeatures {
  *   - 用户说"能开始 X 吗"（直接开工）
  */
 export function doesTaskNeedPlanning(msg: string): PlanDecision {
+  // ── P1 补齐：先走三级复杂度评估 ──
+  const complexity = evaluateTaskComplexity(msg);
+
+  if (complexity.level === 'spec') {
+    // 高置信度 → auto_spec；否则 → suggest_spec（需用户确认）
+    return complexity.confidence >= 0.75 ? 'auto_spec' : 'suggest_spec';
+  }
+
+  if (complexity.level === 'plan') {
+    // 高置信度 → auto_plan；否则 → suggest_plan
+    return complexity.confidence >= 0.70 ? 'auto_plan' : 'suggest_plan';
+  }
+
+  // ── 原有规则兜底（vibe 级别但可能命中 plan 规则） ──
   const features = extractFeatures(msg);
 
-  // ── auto_plan ──
+  // auto_plan（原有规则保留）
   if (features.hasExplicitPlanIntent) return 'auto_plan';
   if (features.keywordHits >= 3) return 'auto_plan';
   if (features.fileRefCount >= 5 && features.keywordHits >= 1) return 'auto_plan';
 
-  // ── suggest_plan ──
+  // suggest_plan（原有规则保留）
   if (
     features.fileRefCount >= 3 &&
     features.tokenCount >= 100 &&

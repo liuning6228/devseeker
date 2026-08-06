@@ -55,3 +55,26 @@ export {
   type Bm25Snapshot,
   type Bm25IndexOptions,
 } from './bm25-index.js';
+export {
+  FusionSearcher,
+  reciprocalRankFusion,
+  routeQuery,
+  type SearchSource,
+  type FusionHit,
+  type FusionSearchResult,
+  type FusionSearcherOptions,
+  type RouteDecision,
+} from './fusion-searcher.js';
+export {
+  GraphIndex,
+  GraphSearchSource,
+  type SymbolRef,
+  type SymbolKind,
+  type CallChainNode,
+  type GraphIndexOptions,
+  type FileExtractionResult,
+  type ExtractedSymbol,
+  type ExtractedCall,
+  type ExtractedImport,
+} from './graph-index.js';
+export { extractGraphData, extractGraphDataBatch } from './graph-extractor.js';

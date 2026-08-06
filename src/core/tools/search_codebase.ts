@@ -25,6 +25,7 @@
 
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';
 import type { IndexReader, SearchResult } from '../index/codebase-index.js';
+import type { FusionSearcher, FusionHit } from '../index/fusion-searcher.js';
 import { ErrorCodes } from '../errors/index.js';
 import { collectEnvironment } from '../prompts/environment-probe.js';
 import { detectShellKind, renderFallbackBlock, type ShellKind } from './shell-hint.js';
@@ -70,6 +71,11 @@ export interface SearchCodebaseDeps {
    * 单测可直接注入，避免依赖 process / SHELL 环境变量。
    */
   getShellKind?(): ShellKind;
+  /**
+   * P3 · 可选融合搜索器；传入后底层切换到多路融合搜索。
+   * 未传或就绪源为 0 时降级到原有单路语义搜索。
+   */
+  getFusionSearcher?(): FusionSearcher | undefined;
 }
 
 export class SearchCodebaseTool implements ITool<SearchCodebaseArgs, ToolResult> {
@@ -98,6 +104,13 @@ export class SearchCodebaseTool implements ITool<SearchCodebaseArgs, ToolResult>
     }
 
     try {
+      // P3 · 优先走融合搜索
+      const fusion = this.deps.getFusionSearcher?.();
+      if (fusion && fusion.getReadySourceCount() > 0) {
+        return await this.executeFusion(fusion, args.query, topK, ctx);
+      }
+
+      // 降级路径：原有单路语义搜索
       // C1 · 并行查询代码索引和资产索引
       const assetIndex = this.deps.getAssetIndex?.();
       const [codeHits, assetHits] = await Promise.all([
@@ -166,6 +179,76 @@ export class SearchCodebaseTool implements ITool<SearchCodebaseArgs, ToolResult>
       }
       return fail(ErrorCodes.TOOL_EXEC_FAILED, `搜索失败：${err.message ?? String(e)}`);
     }
+  }
+
+  /**
+   * P3 · 融合搜索路径：通过 FusionSearcher 多路并行 + RRF 融合
+   */
+  private async executeFusion(
+    fusion: FusionSearcher,
+    query: string,
+    topK: number,
+    ctx: ToolContext,
+  ): Promise<ToolResult> {
+    const result = await fusion.search(query, topK);
+    const { hits, activeSources, sourceCounts } = result;
+
+    if (!hits.length) {
+      const sourceSummary = activeSources.join('+') || 'none';
+      return ok(`Query: "${query}"\nResults: 0 matches (fused from: ${sourceSummary})\n`, {
+        query,
+        count: 0,
+        activeSources,
+        sourceCounts,
+      });
+    }
+
+    // 从磁盘读取原文填充 text
+    const workspaceRoot = ctx.workspaceRoot;
+    const filledHits: Array<FusionHit & { text: string }> = await Promise.all(
+      hits.map(async (h) => {
+        let text: string;
+        if (h.text && h.text.length > 80) {
+          text = h.text;
+        } else if (workspaceRoot) {
+          text = await readFileLines(join(workspaceRoot, h.filePath), h.startLine, h.endLine);
+        } else {
+          text = `[file not accessible: no workspace root]`;
+        }
+        return { ...h, text };
+      }),
+    );
+
+    const sourceSummary = activeSources.join('+');
+    const parts: string[] = [];
+    parts.push(`Query: "${query}"`);
+    parts.push(`Results: ${filledHits.length} matches (fused from: ${sourceSummary})`);
+    parts.push('');
+    filledHits.forEach((h, i) => {
+      const label = h.filePath.endsWith('.pdf') ? '📄' : '';
+      const srcTag = h.sources.length > 1 ? ` [${h.sources.join('+')}]` : '';
+      parts.push(
+        `## ${i + 1}. ${label} score=${h.rrfScore.toFixed(4)}${srcTag} [${h.filePath}:${h.startLine}-${h.endLine}]`,
+      );
+      parts.push('```');
+      parts.push(h.text);
+      parts.push('```');
+      parts.push('');
+    });
+
+    return ok(parts.join('\n'), {
+      query,
+      count: filledHits.length,
+      activeSources,
+      sourceCounts,
+      hits: filledHits.map((h) => ({
+        filePath: h.filePath,
+        startLine: h.startLine,
+        endLine: h.endLine,
+        rrfScore: h.rrfScore,
+        sources: h.sources,
+      })),
+    });
   }
 
   /** 优先使用注入的 kind；未注入时现场探测环境 */

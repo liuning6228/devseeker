@@ -59,7 +59,7 @@ export const AST_SUPPORTED_EXTS = new Set(Object.keys(EXT_TO_LANG));
 
 interface Point { row: number; column: number; }
 
-interface SyntaxNode {
+export interface SyntaxNode {
   type: string;
   startPosition: Point;
   endPosition: Point;
@@ -102,13 +102,19 @@ const TYPE_LABEL: Record<string, string> = {
 let parserInitialized = false;
 const parserCache = new Map<string, Parser>();
 
+/** Parser 接口（供 graph-extractor 复用） */
+export interface TreeSitterParser {
+  parse(content: string): { rootNode: SyntaxNode };
+  delete(): void;
+}
+
 interface Parser {
   parse(content: string): { rootNode: SyntaxNode };
   delete(): void;
 }
 
 /** 加载 tree-sitter WASM 基础设施 */
-async function ensureWasmModule(): Promise<void> {
+export async function ensureWasmModule(): Promise<void> {
   if (parserInitialized) return;
   try {
     const Parser = require('web-tree-sitter');
@@ -121,7 +127,7 @@ async function ensureWasmModule(): Promise<void> {
 }
 
 /** 获取指定语言的 parser（懒加载 WASM 语法文件） */
-async function getParser(langId: string): Promise<Parser | null> {
+export async function getParser(langId: string): Promise<Parser | null> {
   if (!parserInitialized) return null;
   const cached = parserCache.get(langId);
   if (cached) return cached;

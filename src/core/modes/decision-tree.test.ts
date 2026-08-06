@@ -37,6 +37,28 @@ describe('doesTaskNeedPlanning', () => {
     const result = doesTaskNeedPlanning('Database has N+1 problem, what approach should I take?');
     expect(result).toBe('auto_plan');
   });
+
+  // ── P1 补齐 · Spec 级别决策 ──
+
+  it('显式 Spec 意图 → auto_spec', () => {
+    expect(doesTaskNeedPlanning('走 spec 流程来实现用户管理')).toBe('auto_spec');
+    expect(doesTaskNeedPlanning('写个 spec，先梳理需求')).toBe('auto_spec');
+  });
+
+  it('Feature 级任务 → auto_spec', () => {
+    const result = doesTaskNeedPlanning('实现一个全新的支付模块，搭建完整的系统');
+    expect(result).toBe('auto_spec');
+  });
+
+  it('Feature + 跨模块 → auto_spec', () => {
+    const result = doesTaskNeedPlanning('实现新功能，需要跨多个服务集成');
+    expect(result).toBe('auto_spec');
+  });
+
+  it('需求梳理请求 → auto_spec', () => {
+    const result = doesTaskNeedPlanning('先梳理需求，我们需要实现一个全新的支付模块');
+    expect(result).toBe('auto_spec');
+  });
 });
 
 describe('extractFeatures', () => {

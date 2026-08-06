@@ -127,15 +127,20 @@ import {
   type Embedder,
   type IndexProgress,
 } from '../core/index/index.js';
+import { FusionSearcher, type SearchSource } from '../core/index/fusion-searcher.js';
+import { GraphIndex, GraphSearchSource } from '../core/index/graph-index.js';
+import { defaultIndexSqlitePath } from '../core/storage/sqlite-db.js';
 import { KnowledgeIndex } from '../core/knowledge/index.js';
 import { VSCodeLspBridge, type LspBridge } from '../core/lsp/index.js';
 import { VSCodeProblemsBridge, type ProblemsBridge } from '../core/problems/index.js';
 import { MemoryManager, BuiltinMemoryProvider, enhanceWithVectorMatch, renderTaskContextSection, buildFrozenSnapshot, PrefetchEngine } from '../core/memory/index.js';
 import type { MemoryExtractorFn } from '../core/memory/index.js';
-import { formatApprovedPlanXml, appendPlanToSystemPrompt } from '../core/task/plan-injector.js';
+import { formatApprovedPlanXml, appendPlanToSystemPrompt, formatSpecXml, formatSpecTasksXml } from '../core/task/plan-injector.js';
+import { SpecManager, type SpecDocument } from '../core/task/spec-manager.js';
+import { createOrchestratorState, advancePhase, type OrchestratorState } from '../core/task/plan-orchestrator.js';
 import { SendMessageTool } from '../core/tools/send_message.js';
 import { continuableRegistry } from '../core/subagent/index.js';
-import { doesTaskNeedPlanning } from '../core/modes/decision-tree.js';
+import { doesTaskNeedPlanning, type PlanDecision } from '../core/modes/decision-tree.js';
 import type { PlanWrittenOutcome } from '../core/tools/create_plan.js';
 import type { MemoryRecord } from '../core/memory/index.js';
 import { RuleLoader, selectForPrompt } from '../core/rules/index.js';
@@ -254,6 +259,9 @@ export class DualMindChatPanel {
   /** W14.1 · 私有知识库索引（懒加载；与 codebase 分库） */
   private knowledgeIndex: KnowledgeIndex | undefined;
   private knowledgeIndexPromise: Promise<KnowledgeIndex> | undefined;
+  /** P3 补齐 · GraphIndex 实例（懒加载，与 codebase 共用同一 SQLite 文件） */
+  private graphIndex: GraphIndex | undefined;
+  private graphIndexPromise: Promise<GraphIndex> | undefined;
   /** LSP 桥接器（依赖 VSCode 工作区；未打开工作区时为 undefined） */
   private lspBridge: LspBridge | undefined;
   /** Problems 桥接器（依赖 VSCode workspaceRoot；未打开工作区时为 undefined） */
@@ -282,6 +290,15 @@ export class DualMindChatPanel {
   private inlineEditHistory: InlineEditHistory | undefined;
   /** Mode 管理器（W6b1） */
   private readonly modeManager = new ModeManager();
+  /** P1 · Spec 工作流状态跟踪 */
+  private specState: {
+    orchestrator: OrchestratorState;
+    feature: string;
+    /** 缓存的 Spec XML（每轮刷新） */
+    cachedXml: string;
+  } | undefined;
+  /** P1 · SpecManager 实例（懒初始化） */
+  private specManager: SpecManager | undefined;
   /** Debug Mode 强制取证门禁：本轮是否有取证操作记录 */
   private debugModeEvidence = false;
   /** Tavily 多 Key 池（单例，首次搜索时创建，配置变更时重建） */
@@ -377,9 +394,47 @@ export class DualMindChatPanel {
       new GetTerminalOutputTool({ terminalManager: this.terminalManager }),
     );
     // search_codebase 工具注入闭包，以便动态获取当前索引
+    // P3 · 融合搜索：优先走 FusionSearcher，降级到单路语义搜索
+    const fusionSearcher = new FusionSearcher();
+    // 注册 codebase 搜索源（语义向量）
+    fusionSearcher.registerSource({
+      name: 'codebase',
+      search: async (query, topK) => {
+        const idx = this.codebaseIndex;
+        if (!idx || idx.size() === 0) return [];
+        try { return await idx.search(query, topK); } catch { return []; }
+      },
+      size: () => this.codebaseIndex?.size() ?? 0,
+    });
+    // P3 补齐 · 注册 graph 搜索源（代码调用关系图）
+    fusionSearcher.registerSource({
+      name: 'graph',
+      search: async (query, topK) => {
+        const gIdx = await this.getGraphIndex();
+        if (!gIdx || gIdx.size() === 0) return [];
+        try {
+          const src = new GraphSearchSource(gIdx);
+          return await src.search(query, topK);
+        } catch { return []; }
+      },
+      size: () => this.graphIndex?.size() ?? 0,
+    });
+    // P3 补齐 · 注册 knowledge 搜索源（私有知识库 BM25）
+    fusionSearcher.registerSource({
+      name: 'knowledge',
+      search: async (query, topK) => {
+        try {
+          const kIdx = await this.getKnowledgeIndex();
+          if (!kIdx || kIdx.size() === 0) return [];
+          return await kIdx.search(query, topK);
+        } catch { return []; }
+      },
+      size: () => this.knowledgeIndex?.size() ?? 0,
+    });
     this.toolRegistry.register(
       new SearchCodebaseTool({
         getIndex: () => this.codebaseIndex,
+        getFusionSearcher: () => fusionSearcher.getReadySourceCount() > 0 ? fusionSearcher : undefined,
       }),
     );
     // W14.2 · search_knowledge 工具：懒加载私有知识库（.devseeker/knowledge/**/*.md）
@@ -1583,18 +1638,11 @@ export class DualMindChatPanel {
       effectiveImages = images;
     }
 
-    // ── Phase 5 Phase D C3 · 自动 Plan 决策树 ──
+    // ── Phase 5 Phase D C3 + P1 补齐 · 自动 Plan/Spec 决策树 ──
     // 只在非 Plan 模式下触发，避免递归
     if (this.modeManager.getCurrent() !== 'plan') {
       const planDecision = doesTaskNeedPlanning(userInput);
-      if (planDecision === 'auto_plan') {
-        log.info({ decision: planDecision, userInput: userInput.slice(0, 80) }, 'auto_plan triggered by decision tree');
-        this.modeManager.setMode('plan', 'auto_plan');
-        this.pushModeStatus('auto_plan');
-      } else if (planDecision === 'suggest_plan') {
-        // suggest_plan 暂不弹出 UI 提示，未来可以加浮动按钮
-        log.info({ decision: planDecision, userInput: userInput.slice(0, 80) }, 'suggest_plan detected');
-      }
+      await this.handlePlanDecision(planDecision, userInput);
     }
 
     // 传给 runWithProvider 的是剥离了 image_url 的 priorMessages 和纯文本 content
@@ -1863,6 +1911,10 @@ export class DualMindChatPanel {
       }
       // P0 · 记忆自动提炼：send() 完成后异步触发 syncTurn（不阻断主流程）
       if (result.ok) {
+        // P1 补齐 · Spec 阶段推进：任务成功完成后推进到下一阶段
+        if (this.specState && this.specState.orchestrator.phase !== 'complete') {
+          this.advanceSpecPhase();
+        }
         const memManager = this.getMemoryManager();
         if (memManager) {
           // 从 history 中提取最后一轮 user→assistant 配对
@@ -2855,7 +2907,18 @@ export class DualMindChatPanel {
           : {}),
       },
     });
-    return full;
+
+    // ── P1 补齐 · Spec 上下文注入 ──
+    // 当 Spec 工作流激活时，将 spec XML + 阶段提示追加到 system prompt 末尾
+    let result = full;
+    if (this.specState) {
+      const specContext = await this.refreshSpecContext();
+      if (specContext) {
+        result = result + '\n\n' + specContext;
+      }
+    }
+
+    return result;
   }
 
   /** 懒加载 / 初始化 CodebaseIndex（复用已有实例或创建新实例） */
@@ -2907,6 +2970,36 @@ export class DualMindChatPanel {
       }
     }
     return idx;
+  }
+
+  /**
+   * P3 补齐 · 懒加载 GraphIndex。
+   * 与 CodebaseIndex 共用同一 SQLite 文件（devseeker-index.sqlite），
+   * 但打开独立连接（sql.js 为内存数据库，每次 open 独立加载）。
+   * 目录不存在或打开失败时返回 undefined（图索引为可选增强）。
+   */
+  async getGraphIndex(): Promise<GraphIndex | undefined> {
+    if (this.graphIndex) return this.graphIndex;
+    if (this.graphIndexPromise) return this.graphIndexPromise;
+
+    this.graphIndexPromise = this.initGraphIndex().catch((e) => {
+      this.graphIndexPromise = undefined;
+      log.warn({ err: String(e) }, '[P3] GraphIndex init failed; graph source disabled');
+      return undefined as unknown as GraphIndex;
+    });
+    this.graphIndex = await this.graphIndexPromise;
+    this.graphIndexPromise = undefined;
+    return this.graphIndex;
+  }
+
+  private async initGraphIndex(): Promise<GraphIndex> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      throw new Error('未打开工作区，无法创建图索引');
+    }
+    const dbPath = defaultIndexSqlitePath(workspaceRoot);
+    const db = await openSqliteDatabase({ dbPath });
+    return GraphIndex.create(db);
   }
 
   private async initCodebaseIndex(): Promise<CodebaseIndexLike> {
@@ -3172,7 +3265,7 @@ export class DualMindChatPanel {
     }
   }
 
-  /** Plan 模式下用户在 UI 点击"切换到 Agent 执行"按钮 */
+  /** Plan 模式下用户在 UI 点击“切换到 Agent 执行”按钮 */
   private handleSwitchToAgentAfterPlan(): void {
     if (!this.planReadyForSwitch) return;
     this.planReadyForSwitch = false;
@@ -3181,6 +3274,130 @@ export class DualMindChatPanel {
     this.pushModeStatus('plan_approved');
     // 任务仍在运行时（模型还在等 create_plan 的后续轮次）同步放开 prompt 约束
     void this.syncModeToActiveLoop('plan_approved');
+  }
+  
+  // ─────────── P1 · Spec 工作流决策与状态管理 ───────────
+  
+  /**
+   * 处理 Plan/Spec 决策结果。
+   * - auto_plan → 切到 plan 模式
+   * - auto_spec → 切到 plan 模式 + 激活 Spec 工作流
+   * - suggest_plan / suggest_spec → 日志记录（未来加 UI 提示）
+   */
+  private async handlePlanDecision(decision: PlanDecision, userInput: string): Promise<void> {
+    const shortInput = userInput.slice(0, 80);
+  
+    switch (decision) {
+      case 'auto_spec':
+        log.info({ decision, userInput: shortInput }, 'auto_spec triggered — entering Spec workflow');
+        this.modeManager.setMode('plan', 'auto_spec');
+        this.pushModeStatus('auto_plan');
+        await this.activateSpecWorkflow(userInput);
+        break;
+  
+      case 'auto_plan':
+        log.info({ decision, userInput: shortInput }, 'auto_plan triggered by decision tree');
+        this.modeManager.setMode('plan', 'auto_plan');
+        this.pushModeStatus('auto_plan');
+        break;
+  
+      case 'suggest_spec':
+        log.info({ decision, userInput: shortInput }, 'suggest_spec detected (spec-level complexity)');
+        // 未来可弹出浮动按钮让用户选择是否走 Spec 流程
+        break;
+  
+      case 'suggest_plan':
+        log.info({ decision, userInput: shortInput }, 'suggest_plan detected');
+        // 未来可弹出浮动按钮
+        break;
+  
+      case 'no_plan':
+        // 简单任务，直接执行
+        break;
+    }
+  }
+  
+  /**
+   * 激活 Spec 工作流。
+   * 初始化 SpecManager + OrchestratorState，从用户输入推断 feature 名称，
+   * 并创建初始 spec 文件（包含用户原始需求作为 requirement 种子）。
+   */
+  private async activateSpecWorkflow(userInput: string): Promise<void> {
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!wsRoot) return;
+  
+    // 懒初始化 SpecManager
+    if (!this.specManager) {
+      this.specManager = new SpecManager(wsRoot);
+    }
+  
+    // 从用户输入推断 feature 名称（取前 30 字符，去除特殊字符）
+    const feature = userInput
+      .slice(0, 30)
+      .replace(/[^\w\u4e00-\u9fff\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .toLowerCase() || 'unnamed-feature';
+  
+    // 初始化 Spec 编排状态
+    this.specState = {
+      orchestrator: createOrchestratorState('spec'),
+      feature,
+      cachedXml: '',
+    };
+  
+    // 创建初始 spec 文件（若已存在则跳过，不阻断流程）
+    try {
+      await this.specManager.create({
+        feature,
+        requirement: userInput,
+      });
+      log.info({ feature }, 'P1: Spec workflow activated, initial spec file created');
+    } catch (e) {
+      // SPEC_ALREADY_EXISTS 或其他错误 → 仅记录日志，不阻断工作流
+      log.warn({ feature, err: (e as Error).message }, 'P1: spec file create skipped');
+    }
+  }
+  
+  /**
+   * 刷新 Spec 上下文：读取 spec 文件 → 格式化 XML → 缓存。
+   * 在 buildSystemPrompt 时调用，确保 system prompt 包含最新 spec 状态。
+   */
+  private async refreshSpecContext(): Promise<string> {
+    if (!this.specState || !this.specManager) return '';
+  
+    try {
+      const doc = await this.specManager.read(this.specState.feature);
+      const specXml = formatSpecXml(doc);
+      const tasksXml = formatSpecTasksXml(doc);
+      this.specState.cachedXml = specXml;
+  
+      // 拼接 spec XML + tasks checklist
+      const parts = [specXml];
+      if (tasksXml) parts.push(tasksXml);
+  
+      // 注入当前阶段提示
+      const phaseHint = buildSpecPhaseHint(this.specState.orchestrator.phase);
+      if (phaseHint) parts.push(phaseHint);
+  
+      return parts.filter(Boolean).join('\n');
+    } catch {
+      // spec 文件不存在或读取失败，返回空
+      return '';
+    }
+  }
+  
+  /**
+   * Spec 任务完成后推进阶段。
+   * 在 post_task 钩子或任务结束时调用。
+   */
+  private advanceSpecPhase(): void {
+    if (!this.specState) return;
+    this.specState.orchestrator = advancePhase(this.specState.orchestrator);
+    log.info(
+      { feature: this.specState.feature, phase: this.specState.orchestrator.phase },
+      'P1: Spec phase advanced',
+    );
   }
 
   /**
@@ -4352,4 +4569,20 @@ function stripImagesFromMessages(messages: Message[]): Message[] {
     if (!hasImage) return m;
     return { ...m, content: stripImagesFromContent(m.content) };
   });
+}
+
+/**
+ * P1 · 根据 Spec 编排阶段生成提示文本。
+ * 告诉 LLM 当前处于 Spec 工作流的哪个阶段，下一步应该做什么。
+ */
+function buildSpecPhaseHint(phase: import('../core/task/plan-orchestrator.js').PlanPhase): string {
+  const hints: Record<string, string> = {
+    requirement: '[Spec Stage 1/5] 当前阶段：需求梳理。请使用 AskUserQuestion 收集需求细节，然后写入 spec.md 的「需求」部分。',
+    explore: '[Spec Stage 2/5] 当前阶段：代码探索。请使用 Agent(preset:"explorer") 探索代码库，了解受影响模块和接口。',
+    plan: '[Spec Stage 3/5] 当前阶段：方案设计。请综合探索结果，设计实现方案，更新 spec.md 的「方案」部分。',
+    task_split: '[Spec Stage 4/5] 当前阶段：任务拆分。请将方案拆解为离散任务列表，更新 spec.md 的「任务」部分。',
+    verify: '[Spec Stage 5/5] 当前阶段：校验。请使用 Agent(preset:"verifier") 验证 spec 中引用的文件/符号是否存在。',
+    complete: '[Spec] 所有阶段已完成。可以开始按任务列表执行实现。',
+  };
+  return hints[phase] ?? '';
 }
