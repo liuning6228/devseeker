@@ -19,7 +19,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectReasoningNeed } from '../../src/core/router/reasoning-probe.js';
+import { detectReasoningNeed, detectDebugNeed } from '../../src/core/router/reasoning-probe.js';
+
+// ── 原有测试用例见下方 ──
 
 describe('reasoning-probe · detectReasoningNeed', () => {
   it('empty input → needed=false, score=0, no signals', () => {
@@ -160,5 +162,100 @@ def c(): pass
     expect(idx('multi-code-blocks')).toBeLessThan(idx('long-input'));
     expect(r.needed).toBe(true);
     expect(r.score).toBe(5);
+  });
+});
+
+// ── T1 · BUG 分析信号回归测试 ──
+
+describe('reasoning-probe · BUG analysis signals', () => {
+  it('error log with stack trace → needed (high-quality error-log signal)', () => {
+    const r = detectReasoningNeed(
+      'TypeError: Cannot read property "foo" of undefined\n  at processData (src/handler.ts:42:15)',
+    );
+    expect(r.signals).toContain('error-log');
+    expect(r.needed).toBe(true);
+  });
+
+  it('Chinese bug description "报错了" + long input → needed (keyword + long-input)', () => {
+    // 注意：1 对 ``` 只有 1 个代码块，不触发 multi-code-blocks（阈值 ≥3 对）
+    // 改为用 keyword + long-input 叠加触发
+    const longCtx = 'x'.repeat(1600);
+    const r = detectReasoningNeed(
+      `这段代码报错了：\n\`\`\`\nconst x = null;\nx.foo();\n\`\`\`\n${longCtx}`,
+    );
+    expect(r.signals).toContain('keyword'); // "报错了" 命中新增关键词
+    expect(r.signals).toContain('long-input'); // 长文本叠加
+    expect(r.needed).toBe(true);
+  });
+
+  it('simple "fix typo" → NOT needed (avoid false positive)', () => {
+    const r = detectReasoningNeed('fix the typo in README.md line 5');
+    expect(r.needed).toBe(false);
+  });
+
+  it('FAIL in test output → needed', () => {
+    const r = detectReasoningNeed(
+      'Test suite failed:\nFAIL tests/auth.test.ts\nExpected 200 but received 500',
+    );
+    expect(r.signals).toContain('error-log');
+    expect(r.needed).toBe(true);
+  });
+
+  it('Python traceback → needed', () => {
+    const r = detectReasoningNeed(
+      'Traceback (most recent call last):\n  File "main.py", line 10\nKeyError: "user_id"',
+    );
+    expect(r.signals).toContain('error-log');
+    expect(r.needed).toBe(true);
+  });
+
+  it('crash keyword + long input → needed', () => {
+    const longCtx = 'x'.repeat(1600);
+    const r = detectReasoningNeed(`程序崩溃了，${longCtx}`);
+    expect(r.signals).toContain('keyword');
+    expect(r.signals).toContain('long-input');
+    expect(r.needed).toBe(true);
+  });
+});
+
+// ── T6 · detectDebugNeed 回归测试 ──
+
+describe('detectDebugNeed', () => {
+  it('empty input → needed=false', () => {
+    expect(detectDebugNeed('').needed).toBe(false);
+  });
+
+  it('stack trace → needed=true, high confidence', () => {
+    const r = detectDebugNeed(
+      'TypeError: Cannot read property "x" of undefined\n  at foo (src/a.ts:10:5)',
+    );
+    expect(r.needed).toBe(true);
+    expect(r.signals).toContain('error-log');
+    expect(r.confidence).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('Chinese bug report → needed=true', () => {
+    const r = detectDebugNeed('这个功能报错了，点击提交后页面崩溃');
+    expect(r.needed).toBe(true);
+    expect(r.signals).toContain('bug-keyword');
+  });
+
+  it('simple feature request → needed=false', () => {
+    const r = detectDebugNeed('帮我添加一个暗色模式切换按钮');
+    expect(r.needed).toBe(false);
+  });
+
+  it('error code → needed=true', () => {
+    const r = detectDebugNeed('API returns HTTP 500 when calling /users');
+    expect(r.needed).toBe(true);
+    expect(r.signals).toContain('error-code');
+  });
+
+  it('multiple signals → high confidence (auto_debug)', () => {
+    const r = detectDebugNeed(
+      '程序崩溃了\nError: something went wrong\n  at handler (src/x.ts:5:3)',
+    );
+    expect(r.signals.length).toBeGreaterThanOrEqual(2);
+    expect(r.confidence).toBeGreaterThanOrEqual(0.8);
   });
 });

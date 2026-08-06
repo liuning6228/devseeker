@@ -67,7 +67,7 @@ const parameters = {
       type: 'string',
       minLength: 1,
       description:
-        'Which subagent to spawn. Built-in: Browser (pure web), Research (codebase + web), Guide (how to configure DevSeeker), Verify (run tests / type-check / build). Also accepts any custom agent name defined under `.devseeker/agents/<name>/AGENT.md`. When `toolsets` or `preset` is provided (new path), this field maps to the corresponding preset.',
+        'Which subagent to spawn. Built-in: Browser (pure web), Research (codebase + web), Guide (how to configure DevSeeker), Verify (run tests / type-check / build), Debug (systematic bug diagnosis). Also accepts any custom agent name defined under `.devseeker/agents/<name>/AGENT.md`. When `toolsets` or `preset` is provided (new path), this field maps to the corresponding preset.',
     },
     description: {
       type: 'string',

@@ -137,10 +137,10 @@ const FIX_BUG_BODY = `
 
 1. **理解症状**：读取 \`$ARGS\` 中的 bug 描述 / 错误日志 / 复现步骤。如信息不足，用 \`ask_user_question\` 问清楚**最小复现**。
 2. **定位根因**：
+   - **第一步**：用 \`trace_error\` 追踪错误传播链（传入错误信息/堆栈），这是最高效的定位手段；
    - 用 \`search_codebase\` 语义搜索相关逻辑；
-   - 用 \`search_codebase\` 找精确字符串（错误信息、函数名）；
    - 用 \`read_file\` / \`goto_definition\` / \`find_references\` 追踪调用链；
-   - 必要时用 \`get_problems\` 读取编译器/Linter 诊断。
+   - 用 \`get_problems\` 读取编译器/Linter 诊断。
 3. **形成假设**：在回复中简短写出"我认为 bug 在 X 文件的 Y 函数，因为 Z"，给用户一次纠偏机会（一两句即可，无需拖长）。
 4. **最小修复**：
    - 用 \`search_replace\` 做最小 diff，不做无关重构；
@@ -166,6 +166,7 @@ const FIX_BUG_BODY = `
    ## 风险
    - 影响范围 / 回归可能
    \`\`\`
+7. **记忆沉淀**：修复完成后，用 \`update_memory\` 将此 BUG 模式记录为 \`common_pitfalls_experience\`，方便未来快速定位类似问题。
 
 ## 约束
 

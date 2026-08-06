@@ -47,7 +47,7 @@ import {
   PROVIDER_REASONING_MODELS,
 } from '../providers/model-config.js';
 import { ModelRouter, shouldKeepVisionPolicy, hasVisionContent } from '../core/router/router.js';
-import { detectReasoningNeed } from '../core/router/reasoning-probe.js';
+import { detectReasoningNeed, detectDebugNeed } from '../core/router/reasoning-probe.js';
 import { CostTracker } from '../core/cost/tracker.js';
 import { UsageJsonlStore } from '../core/cost/usage-store.js';
 import {
@@ -1594,9 +1594,42 @@ export class DualMindChatPanel {
       defaultProvider = registry.getDefaultProvider(track);
     }
 
+    // ── T6 · Debug 模式自动决策（必须在 reasoning probe 之前执行！）──
+    // 仅在 agent 模式下触发（debug 模式已激活则不重复判断）
+    if (this.modeManager.getCurrent() === 'agent') {
+      const debugProbe = detectDebugNeed(userInput);
+      if (debugProbe.needed) {
+        if (debugProbe.confidence >= 0.8) {
+          // 高置信度 → 自动切换 debug 模式（在 reasoning probe 之前，确保 T2 强制 reasoning 生效）
+          this.modeManager.setMode('debug', `auto-debug: ${debugProbe.signals.join(',')}`);
+          this.post({
+            type: 'task_event',
+            event: { type: 'text_delta', taskId: 'debug-auto-switch', text: '🔍 检测到 BUG 描述，已自动切换到调试模式。\n\n' },
+          });
+          log.info(
+            { signals: debugProbe.signals, confidence: debugProbe.confidence },
+            '[debug-probe] auto-switching to debug mode',
+          );
+        } else {
+          // 低置信度 → 在 userInput 前注入提示（在 effectiveUserInput 计算之前修改）
+          userInput = `\n<system_hint>The user's message appears to describe a bug. Consider calling switch_mode(target_mode_id="debug") for structured troubleshooting.</system_hint>\n` + userInput;
+          log.info(
+            { signals: debugProbe.signals, confidence: debugProbe.confidence },
+            '[debug-probe] injected debug hint (low confidence)',
+          );
+        }
+      }
+    }
+
     // W15.5 · Auto-Thinking-Router：探测 userInput 复杂度，决定是否需 reasoning 模型。
     const probe = detectReasoningNeed(userInput);
-    if (probe.needed) {
+    // T2 · Debug 模式强制使用 reasoning 模型（BUG 分析场景推理需求高）
+    const isDebugMode = this.modeManager.getCurrent() === 'debug';
+    if (isDebugMode && !probe.needed) {
+      probe.needed = true;
+      probe.signals.push('debug-mode');
+      log.info('[W15.5] debug mode: forcing needsReasoning=true');
+    } else if (probe.needed) {
       log.info(
         { score: probe.score, signals: probe.signals },
         '[W15.5] reasoning probe: needsReasoning=true',
@@ -2886,6 +2919,27 @@ export class DualMindChatPanel {
       }
     }
 
+    // T7 · Debug 上下文自动采集（诊断信息/堆栈/错误日志）
+    let debugContext: string | undefined;
+    if (this.modeManager.getCurrent() === 'debug') {
+      try {
+        const bridge = this.getProblemsBridge();
+        if (bridge) {
+          const diagnostics = await bridge.getDiagnostics({ minSeverity: 'error' });
+          if (diagnostics.length > 0) {
+            const lines = ['<debug_context>', 'Current diagnostics:'];
+            for (const d of diagnostics.slice(0, 10)) {
+              lines.push(`- ${d.filePath}:${d.line} [${d.source || 'unknown'}] ${d.message}`);
+            }
+            lines.push('</debug_context>');
+            debugContext = lines.join('\n');
+          }
+        }
+      } catch (e) {
+        log.warn({ err: String(e) }, 'buildSystemPrompt(debugContext) failed; continue');
+      }
+    }
+
     // B-P1-13 · M10.1 框架自动注入 4 块（current_open_file / open_tabs /
     //   workspace_tree / git_status / git_diff_staged）
     let frameworkContext: string | undefined;
@@ -2995,6 +3049,10 @@ export class DualMindChatPanel {
         // B-P1-11 · git 上下文（优先 pending，其次自动采集）
         ...(gitContext
           ? { gitContext }
+          : {}),
+        // T7 · Debug 上下文（诊断信息/堆栈/错误日志）
+        ...(debugContext
+          ? { debugContext }
           : {}),
       },
     });

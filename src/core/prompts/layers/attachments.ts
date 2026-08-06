@@ -58,6 +58,11 @@ export interface L3AttachmentsInput {
    */
   gitContext?: string;
   /**
+   * T7 · Debug 上下文（诊断信息/堆栈/错误日志）。
+   * 由 panel.ts 在 debug 模式下自动采集后传入。
+   */
+  debugContext?: string;
+  /**
    * B-P1-9 · M10.4 5 种用户显式附件（file / image / selection / git_commits / code_change）。
    * 由 ContextAssembler.listAttachments() 产出，或调用方手动构造。
    */
@@ -117,6 +122,11 @@ export function buildL3Attachments(input: L3AttachmentsInput = {}): string {
   // B-P1-11 · git 上下文（已格式化的完整块）
   if (input.gitContext && input.gitContext.length > 0) {
     parts.push(input.gitContext);
+  }
+
+  // T7 · Debug 上下文（诊断信息/堆栈/错误日志，debug 模式下自动采集）
+  if (input.debugContext && input.debugContext.length > 0) {
+    parts.push(input.debugContext);
   }
 
   // attachments 留为后续（当前由 messages 正文承载）。

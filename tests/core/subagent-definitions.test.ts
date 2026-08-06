@@ -28,8 +28,8 @@ import {
 } from '../../src/core/subagent/index.js';
 
 describe('SubagentDefinition', () => {
-  it('exposes all six subagent types', () => {
-    expect(ALL_SUBAGENT_TYPES).toEqual(['Browser', 'Research', 'Guide', 'Verify', 'Vision', 'RequirementAnalyzer']);
+  it('exposes all seven subagent types', () => {
+    expect(ALL_SUBAGENT_TYPES).toEqual(['Browser', 'Research', 'Guide', 'Verify', 'Vision', 'RequirementAnalyzer', 'Debug']);
   });
 
   it('Browser def: only web tools, no codebase / read_file', () => {

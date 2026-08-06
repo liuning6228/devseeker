@@ -221,13 +221,44 @@ export const REQUIREMENT_ANALYZER_DEFINITION: SubagentDefinition = {
   isBuiltin: true,
 };
 
-const BY_TYPE: Record<'Browser' | 'Research' | 'Guide' | 'Verify' | 'Vision' | 'RequirementAnalyzer', SubagentDefinition> = {
+// ─────────── T8：Debug 子代理 ───────────
+
+const DEBUG_PROMPT = [
+  'You are the **Debug** subagent of DevSeeker — a systematic bug diagnosis specialist.',
+  '',
+  'Scope: diagnose bugs by tracing error propagation, analyzing stack traces, and identifying root causes.',
+  'You have access to `trace_error` for error chain tracing, `search_replace` for minimal fixes, and diagnostic tools.',
+  '',
+  'Rules:',
+  '- Follow the 5-step debug methodology: Reproduce → Evidence → Locate → Fix → Verify.',
+  '- Start with `trace_error` to trace the error propagation chain (pass error message/stack).',
+  '- Use `get_problems` to collect compiler/linter diagnostics.',
+  '- Use `search_codebase` and `grep_code` to find related code paths.',
+  '- Form hypotheses BEFORE proposing fixes. Rank by likelihood.',
+  '- Make minimal fixes — do not refactor unrelated code.',
+  '- Verify fixes with `bash` (run tests) or `get_problems`.',
+  '- When done, reply with a structured report: Root Cause / Evidence / Fix / Verification.',
+].join('\n');
+
+const DEBUG_TOOLS = new Set<string>(TOOLSETS.debug);
+
+export const DEBUG_DEFINITION: SubagentDefinition = {
+  type: 'Debug',
+  allowedTools: DEBUG_TOOLS,
+  systemPrompt: DEBUG_PROMPT,
+  maxTurns: 20,
+  description: 'Systematic bug diagnosis: trace errors, analyze stack traces, locate root causes.',
+  isBuiltin: true,
+};
+
+const BY_TYPE: Record<'Browser' | 'Research' | 'Guide' | 'Verify' | 'Vision' | 'RequirementAnalyzer' | 'Debug', SubagentDefinition> = {
   Browser: BROWSER_DEFINITION,
   Research: RESEARCH_DEFINITION,
   Guide: GUIDE_DEFINITION,
   Verify: VERIFY_DEFINITION,
   Vision: VISION_DEFINITION,
   RequirementAnalyzer: REQUIREMENT_ANALYZER_DEFINITION,
+  Debug: DEBUG_DEFINITION,
 };
 
 const BUILTIN_DEFS: readonly SubagentDefinition[] = [
@@ -237,10 +268,11 @@ const BUILTIN_DEFS: readonly SubagentDefinition[] = [
   VERIFY_DEFINITION,
   VISION_DEFINITION,
   REQUIREMENT_ANALYZER_DEFINITION,
+  DEBUG_DEFINITION,
 ];
 
 export function getSubagentDefinition(type: SubagentType): SubagentDefinition | undefined {
-  if (type === 'Browser' || type === 'Research' || type === 'Guide' || type === 'Verify' || type === 'Vision' || type === 'RequirementAnalyzer') {
+  if (type === 'Browser' || type === 'Research' || type === 'Guide' || type === 'Verify' || type === 'Vision' || type === 'RequirementAnalyzer' || type === 'Debug') {
     return BY_TYPE[type];
   }
   return undefined;

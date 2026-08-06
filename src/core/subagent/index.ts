@@ -14,6 +14,7 @@ export {
   GUIDE_DEFINITION,
   VERIFY_DEFINITION,
   VISION_DEFINITION,
+  DEBUG_DEFINITION,
   getSubagentDefinition,
   createBuiltinSubagentRegistry,
   createSubagentRegistry,
