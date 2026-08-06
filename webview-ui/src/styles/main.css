@@ -2534,3 +2534,69 @@ body {
 .session-drawer__confirm-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .session-drawer__confirm-desc { font-size: 12px; color: var(--vscode-descriptionForeground); margin-bottom: 16px; }
 .session-drawer__confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ─── 任务错误横幅 ─── */
+.task-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.08));
+  border-bottom: 1px solid var(--vscode-inputValidation-errorBorder, rgba(255, 80, 80, 0.3));
+  font-size: 12px;
+  color: var(--vscode-errorForeground, #f44747);
+  flex-shrink: 0;
+  animation: banner-slide-in 0.25s ease;
+}
+.task-error-banner__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.task-error-banner__body {
+  flex: 1;
+  min-width: 0;
+}
+.task-error-banner__msg {
+  word-break: break-word;
+  line-height: 1.5;
+}
+.task-error-banner__hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.task-error-banner__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.task-error-banner__btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+}
+.task-error-banner__btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.task-error-banner__btn--primary {
+  background: var(--vscode-button-background, rgba(0, 120, 212, 0.8));
+  color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
+}
+.task-error-banner__btn--primary:hover {
+  background: var(--vscode-button-hoverBackground, rgba(0, 120, 212, 1));
+}
+.task-error-banner__close {
+  font-size: 14px;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  flex-shrink: 0;
+}

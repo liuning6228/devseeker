@@ -15,13 +15,14 @@ import type {
   ApprovalRequestPayload,
   ToolDiffPayload,
   TodoListPayload,
+  SearchConfigPayload,
 } from './protocol';
 import { MessageList } from './components/MessageList';
 import { Composer } from './components/Composer';
 import { StatusBar, ContextBadge } from './components/StatusBar';
 import { SessionDrawer } from './components/SessionDrawer';
 import { QuestionCard } from './components/QuestionCard';
-// import { ApprovalCard } from './components/ApprovalCard';
+import { ApprovalCard } from './components/ApprovalCard';
 import { PreviewBanner } from './components/PreviewBanner';
 import { TaskHeader } from './components/chat/TaskHeader.js';
 import { ChangeSummary, aggregateChangedFiles } from './components/ChangeSummary';
@@ -52,28 +53,35 @@ export function App(): JSX.Element {
     return !localStorage.getItem(FIRST_RUN_KEY);
   });
 
-  const handleOnboardingComplete = (apiKey: string, model: string) => {
-    // 配置通过 postMessage 写入 VSCode 设置
+  const handleOnboardingComplete = (apiKey: string, model: string, provider: string) => {
+    // 先写 provider（触发 extension host 自动联动 model + baseUrl）
     postToHost({
       type: 'update_model_config',
       track: 'llm',
       level: 1,
-      field: 'apiKey',
-      value: apiKey,
+      field: 'provider',
+      value: provider,
     });
-    // 更新 model（不带 apiKey 不会触发 provider 切换的自动 model 更新）
-    postToHost({
-      type: 'update_model_config',
-      track: 'llm',
-      level: 1,
-      field: 'model',
-      value: model,
-    });
-    localStorage.setItem(FIRST_RUN_KEY, '1');
-    setShowOnboarding(false);
-  };
-
-  const handleOnboardingSkip = () => {
+    // 写 API Key
+    if (apiKey.trim()) {
+      postToHost({
+        type: 'update_model_config',
+        track: 'llm',
+        level: 1,
+        field: 'apiKey',
+        value: apiKey,
+      });
+    }
+    // 写 model（provider 切换时 extension host 已自动设为默认值，此处仅在用户选了非默认模型时覆盖）
+    if (model) {
+      postToHost({
+        type: 'update_model_config',
+        track: 'llm',
+        level: 1,
+        field: 'model',
+        value: model,
+      });
+    }
     localStorage.setItem(FIRST_RUN_KEY, '1');
     setShowOnboarding(false);
   };
@@ -81,7 +89,7 @@ export function App(): JSX.Element {
   if (showOnboarding) {
     return (
       <div className="flex flex-col h-screen">
-        <OnboardingView onComplete={handleOnboardingSkip} />
+        <OnboardingView onComplete={handleOnboardingComplete} />
       </div>
     );
   }
@@ -96,6 +104,73 @@ function AppWithNav(): JSX.Element {
   // showNavbar 不再使用（导航已合并到 StatusBar）
   const [localView, setLocalView] = useState<View>('chat');
   const currentView = state.currentView !== 'chat' && state.currentView !== 'welcome' ? state.currentView : localView;
+  // SettingsView 需要的 modelConfig（从 extension host 推送获取）
+  const [settingsModelConfig, setSettingsModelConfig] = useState<ModelConfigPayload | null>(null);
+  // SettingsView 需要的联网搜索配置
+  const [settingsSearchConfig, setSettingsSearchConfig] = useState<SearchConfigPayload | null>(null);
+  // ask_user_question 弹窗状态（提升到 AppWithNav 层级，确保所有视图下都能弹窗）
+  const [askQuestion, setAskQuestion] = useState<AskQuestionPayload | null>(null);
+  // approval_request 审批弹窗状态（非聊天视图时展示独立覆盖层）
+  const [approvalRequest, setApprovalRequest] = useState<ApprovalRequestPayload | null>(null);
+
+  // 监听 extension host 推送的 model_config + ask_question + approval_request + history
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      const msg = ev.data;
+      if (msg?.type === 'model_config') {
+        setSettingsModelConfig(msg.payload as ModelConfigPayload);
+      }
+      if (msg?.type === 'search_config') {
+        setSettingsSearchConfig(msg.payload as SearchConfigPayload);
+      }
+      if (msg?.type === 'ask_question') {
+        setAskQuestion(msg.payload as AskQuestionPayload);
+      }
+      if (msg?.type === 'approval_request') {
+        setApprovalRequest(msg.payload as ApprovalRequestPayload);
+      }
+      // 会话切换/清空历史时清除残留弹窗状态，避免用户看到已取消的弹窗
+      if (msg?.type === 'history') {
+        setAskQuestion(null);
+        setApprovalRequest(null);
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // ask_user_question 提交 / 取消
+  const handleAnswerAsk = useCallback(
+    (
+      requestId: string,
+      answers: Array<{ question: string; selected: string[]; other?: string }>,
+    ) => {
+      postToHost({ type: 'ask_question_response', requestId, answers });
+      setAskQuestion(null);
+    },
+    [],
+  );
+  const handleCancelAsk = useCallback((requestId: string) => {
+    postToHost({ type: 'ask_question_response', requestId, answers: [], cancelled: true });
+    setAskQuestion(null);
+  }, []);
+
+  // 审批响应（非聊天视图时的独立覆盖层使用）
+  const handleApprovalRespond = useCallback(
+    (requestId: string, decision: 'allow_once' | 'remember' | 'deny') => {
+      postToHost({ type: 'approval_response', requestId, decision });
+      setApprovalRequest(null);
+    },
+    [],
+  );
+
+  // 进入 settings 视图时主动请求一次当前配置
+  useEffect(() => {
+    if (currentView === 'settings') {
+      postToHost({ type: 'open_model_config' });
+      // 同时请求联网搜索配置（复用 open_model_config 触发 pushModelConfig + pushSearchConfig）
+    }
+  }, [currentView]);
 
   const handleNavigate = (view: View) => {
     navigateTo(view);
@@ -132,7 +207,7 @@ function AppWithNav(): JSX.Element {
             <AppInner onNavigate={handleNavigate} currentView={currentView} />
           )}
           {currentView === 'settings' && (
-            <SettingsView onBack={() => handleNavigate('chat')} />
+            <SettingsView config={settingsModelConfig} searchConfig={settingsSearchConfig} onBack={() => handleNavigate('chat')} />
           )}
           {currentView === 'history' && (
             <HistoryView
@@ -161,6 +236,23 @@ function AppWithNav(): JSX.Element {
         {/* 导航按钮已合并到 StatusBar（聊天视图内 StatusBar 含首页/历史按钮） */}
         {/* 不再使用底部 Navbar */}
       </div>
+      {/* ask_user_question 弹窗：在 AppWithNav 层级渲染，确保所有视图下都能弹出 */}
+      {askQuestion && (
+        <QuestionCard
+          payload={askQuestion}
+          onSubmit={handleAnswerAsk}
+          onCancel={handleCancelAsk}
+        />
+      )}
+      {/* approval_request 审批覆盖层：非聊天视图时展示（聊天视图内由 ToolCard 内联处理） */}
+      {approvalRequest && currentView !== 'chat' && (
+        <div className="ask-modal-overlay">
+          <ApprovalCard
+            payload={approvalRequest}
+            onRespond={handleApprovalRespond}
+          />
+        </div>
+      )}
     </PlatformProvider>
   );
 }
@@ -179,6 +271,13 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
   const [modelConfig, setModelConfig] = useState<ModelConfigPayload | null>(null);
   // Step 6: 模式切换通知 banner
   const [modeSwitchBanner, setModeSwitchBanner] = useState<{ from: string; to: string; reason: string; suggestion?: string } | null>(null);
+  const modeSwitchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 组件卸载时清除 banner 定时器
+  useEffect(() => {
+    return () => {
+      if (modeSwitchTimerRef.current) clearTimeout(modeSwitchTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (readyPostedRef.current) return;
@@ -275,7 +374,9 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
           const sd = (msg.payload as ModeStatusPayload).switchDetail;
           if (sd) {
             setModeSwitchBanner({ from: sd.from, to: sd.to, reason: sd.reason, suggestion: sd.suggestion });
-            setTimeout(() => setModeSwitchBanner(null), 8000);
+            // 清除上一次的定时器，避免组件卸载后仍触发 setState
+            if (modeSwitchTimerRef.current) clearTimeout(modeSwitchTimerRef.current);
+            modeSwitchTimerRef.current = setTimeout(() => setModeSwitchBanner(null), 8000);
           }
           break;
         case 'ask_question':
@@ -363,8 +464,8 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
   }, []);
 
   const handleOpenSettings = useCallback(() => {
-    postToHost({ type: 'open_settings' });
-  }, []);
+    onNavigate('settings');
+  }, [onNavigate]);
 
   const handleOpenModelConfig = useCallback(() => {
     setShowModelConfig(true);
@@ -403,21 +504,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
     postToHost({ type: 'switch_to_agent_after_plan' });
   }, []);
 
-  const handleAnswerAsk = useCallback(
-    (
-      requestId: string,
-      answers: Array<{ question: string; selected: string[]; other?: string }>,
-    ) => {
-      postToHost({ type: 'ask_question_response', requestId, answers });
-      dispatch({ type: 'ASK_CLEAR' });
-    },
-    [],
-  );
-
-  const handleCancelAsk = useCallback((requestId: string) => {
-    postToHost({ type: 'ask_question_response', requestId, answers: [], cancelled: true });
-    dispatch({ type: 'ASK_CLEAR' });
-  }, []);
+  // QuestionCard 已提升到 AppWithNav 层级，AppInner 不再处理 ask_question 弹窗
 
   const handleApprovalResponse = useCallback(
     (requestId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => {
@@ -475,6 +562,17 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
   const handleDismissPreview = useCallback((toolCallId: string) => {
     dispatch({ type: 'PREVIEW_DISMISS', toolCallId });
   }, []);
+
+  /** 关闭错误横幅 */
+  const handleDismissError = useCallback(() => {
+    dispatch({ type: 'CLEAR_ERROR' });
+  }, []);
+
+  /** 错误横幅 → 跳转到设置页修复 */
+  const handleGoToSettingsFromError = useCallback(() => {
+    dispatch({ type: 'CLEAR_ERROR' });
+    onNavigate('settings');
+  }, [onNavigate]);
 
   const isRunning = state.taskStatus === 'running';
 
@@ -871,6 +969,37 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             visible={planReadyVisible}
             onSwitchToAgent={handleSwitchToAgent}
           />
+          {/* 任务错误横幅：LLM 调用失败时可见提示用户 */}
+          {state.taskStatus === 'error' && state.lastError?.message && (
+            <div className="task-error-banner" role="alert">
+              <span className="task-error-banner__icon">⚠️</span>
+              <div className="task-error-banner__body">
+                <div className="task-error-banner__msg">{state.lastError.message}</div>
+                {state.lastError.code?.includes('AUTH') || state.lastError.code?.includes('MODEL_NOT_FOUND') ? (
+                  <>
+                    <div className="task-error-banner__hint">
+                      请检查 API Key 是否正确，或模型名称是否有效。
+                    </div>
+                    <div className="task-error-banner__actions">
+                      <button className="task-error-banner__btn task-error-banner__btn--primary" onClick={handleGoToSettingsFromError}>
+                        打开设置
+                      </button>
+                      <button className="task-error-banner__btn" onClick={handleDismissError}>
+                        忽略
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="task-error-banner__actions">
+                    <button className="task-error-banner__btn" onClick={handleDismissError}>
+                      关闭
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button className="task-error-banner__close" onClick={handleDismissError} title="关闭">✕</button>
+            </div>
+          )}
           <ChangeSummary
             todos={state.todoList}
             changedFiles={changedFiles}
@@ -907,13 +1036,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
         usedTokens={state.lastUsage?.promptTokens ?? 0}
         totalTokens={1048576}
       />
-      {state.askQuestion && (
-        <QuestionCard
-          payload={state.askQuestion}
-          onSubmit={handleAnswerAsk}
-          onCancel={handleCancelAsk}
-        />
-      )}
+      {/* QuestionCard 已提升到 AppWithNav 层级，AppInner 不再渲染 */}
     </div>
   );
 }

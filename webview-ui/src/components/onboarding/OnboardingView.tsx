@@ -5,7 +5,7 @@ import { Button } from '../ui/button.js';
 import { DebouncedTextField } from '../common/DebouncedTextField.js';
 
 interface OnboardingViewProps {
-  onComplete: (apiKey: string, model: string) => void;
+  onComplete: (apiKey: string, model: string, provider: string) => void;
   className?: string;
 }
 
@@ -15,21 +15,42 @@ const PROVIDERS = [
     id: 'deepseek',
     label: 'DeepSeek',
     models: [
-      { id: 'deepseek-chat', label: 'DeepSeek Chat', description: '推荐 · 性价比最高' },
+      { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', description: '推荐 · 高并发低成本' },
     ],
   },
   {
     id: 'openai',
     label: 'OpenAI',
     models: [
-      { id: 'gpt-4o', label: 'GPT-4o', description: '性能强劲' },
+      { id: 'gpt-4o-mini', label: 'GPT-4o-mini', description: '高性价比' },
     ],
   },
   {
     id: 'qwen',
     label: '通义千问',
     models: [
-      { id: 'qwen-vl-max', label: 'Qwen-VL-Max', description: '多模态 · 截图能力' },
+      { id: 'qwen-plus', label: 'Qwen Plus', description: '均衡性能' },
+    ],
+  },
+  {
+    id: 'anthropic',
+    label: 'Claude',
+    models: [
+      { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', description: 'Anthropic 旗舰' },
+    ],
+  },
+  {
+    id: 'minimax',
+    label: 'MiniMax',
+    models: [
+      { id: 'MiniMax-M3', label: 'MiniMax M3', description: '1M 上下文旗舰' },
+    ],
+  },
+  {
+    id: 'kimi',
+    label: 'Kimi',
+    models: [
+      { id: 'kimi-k3', label: 'Kimi K3', description: '2.8T 参数旗舰' },
     ],
   },
 ];
@@ -37,7 +58,7 @@ const PROVIDERS = [
 export function OnboardingView({ onComplete, className }: OnboardingViewProps) {
   const [selectedProvider, setSelectedProvider] = useState('deepseek');
   const [apiKey, setApiKey] = useState('');
-  const [selectedModel, setSelectedModel] = useState('deepseek-chat');
+  const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash');
 
   const currentProvider = PROVIDERS.find((p) => p.id === selectedProvider)!;
   const currentModels = currentProvider.models;
@@ -132,12 +153,12 @@ export function OnboardingView({ onComplete, className }: OnboardingViewProps) {
       <div className="flex justify-between items-center w-full mt-8">
         <button
           type="button"
-          onClick={() => onComplete('', '')}
+          onClick={() => onComplete('', '', selectedProvider)}
           className="text-sm text-vscode-fg/50 hover:text-vscode-fg/80 transition-colors cursor-pointer"
         >
           跳过，先逛逛
         </button>
-        <Button onClick={() => onComplete(apiKey, selectedModel)} disabled={!canComplete}>
+        <Button onClick={() => onComplete(apiKey, selectedModel, selectedProvider)} disabled={!canComplete}>
           开始使用
         </Button>
       </div>

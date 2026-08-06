@@ -13,6 +13,8 @@ export type ProviderType =
   | 'anthropic'
   | 'openrouter'
   | 'ollama'
+  | 'minimax'
+  | 'kimi'
   | 'custom-openai';
 
 /** 所有 Provider 列表（UI 下拉用） */
@@ -24,6 +26,8 @@ export const PROVIDER_TYPES: readonly ProviderType[] = [
   'anthropic',
   'openrouter',
   'ollama',
+  'minimax',
+  'kimi',
   'custom-openai',
 ] as const;
 
@@ -36,6 +40,8 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderType, string> = {
   anthropic: 'Anthropic Claude',
   openrouter: 'OpenRouter',
   ollama: 'Ollama（本地）',
+  minimax: 'MiniMax',
+  kimi: 'Kimi（Moonshot）',
   'custom-openai': '自定义 OpenAI 兼容',
 };
 
@@ -97,6 +103,18 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
     { id: 'openrouter/free', label: 'Free Router (随机免费)', free: true },
   ],
+  minimax: [
+    { id: 'MiniMax-M3', label: 'MiniMax-M3 (1M ctx, 最新旗舰)' },
+    { id: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
+    { id: 'MiniMax-M2.5', label: 'MiniMax-M2.5' },
+    { id: 'MiniMax-M2', label: 'MiniMax-M2 (Coding & Agent)' },
+  ],
+  kimi: [
+    { id: 'kimi-k3', label: 'kimi-k3 (2.8T, 1M ctx, 旗舰)' },
+    { id: 'kimi-k2', label: 'kimi-k2' },
+    { id: 'moonshot-v1-128k', label: 'moonshot-v1-128k' },
+    { id: 'moonshot-v1-32k', label: 'moonshot-v1-32k' },
+  ],
   ollama: [
     { id: 'qwen3:8b', label: 'qwen3:8b' },
     { id: 'llava:13b', label: 'llava:13b (Vision)' },
@@ -148,6 +166,14 @@ export const PROVIDER_DEFAULTS: Record<ProviderType, ProviderDefaults> = {
   ollama: {
     baseUrl: 'http://localhost:11434/v1',
     model: 'qwen3:8b',
+  },
+  minimax: {
+    baseUrl: 'https://api.minimaxi.com/v1',
+    model: 'MiniMax-M3',
+  },
+  kimi: {
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'kimi-k3',
   },
   'custom-openai': {
     baseUrl: '',

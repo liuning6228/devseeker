@@ -874,6 +874,20 @@ export class DualMindChatPanel {
         this.pushModelConfig();
         return;
       }
+      // 防御：过滤非 ASCII 字符（HTTP 头部仅允许 ByteString，含中文会导致请求崩溃）
+      const asciiOnly = trimmed.replace(/[^\x00-\xFF]/g, '');
+      if (asciiOnly.length !== trimmed.length) {
+        log.warn(
+          { removedChars: trimmed.length - asciiOnly.length },
+          'API Key contains non-ASCII characters, they have been stripped',
+        );
+        if (!asciiOnly) {
+          // 过滤后为空（全是非法字符），不写入
+          this.pushModelConfig();
+          return;
+        }
+        value = asciiOnly;
+      }
     }
 
     config.update(key, value || undefined, vscode.ConfigurationTarget.Global).then(
@@ -882,6 +896,61 @@ export class DualMindChatPanel {
       },
       (err) => {
         log.error({ err: String(err), key }, 'Failed to update model config');
+      },
+    );
+  }
+
+  // ─── 联网搜索配置：推送 & 更新 ───
+
+  /** 推送当前联网搜索配置到 webview */
+  private pushSearchConfig(): void {
+    const cfg = vscode.workspace.getConfiguration('devSeeker.webResearch');
+    const tavilyKeys = cfg.get<string[]>('tavily.apiKeys') ?? [];
+    const bochaKeys = cfg.get<string[]>('bocha.apiKeys') ?? [];
+    const defaultProvider = cfg.get<string>('defaultProvider')?.trim() ?? 'auto';
+    this.post({
+      type: 'search_config',
+      payload: { tavilyKeys, bochaKeys, defaultProvider },
+    });
+  }
+
+  /** 处理 webview 发来的联网搜索配置单字段变更 */
+  private handleUpdateSearchConfig(
+    field: 'tavilyKeys' | 'bochaKeys' | 'defaultProvider',
+    value: string | string[],
+  ): void {
+    const cfg = vscode.workspace.getConfiguration('devSeeker.webResearch');
+    let configKey: string;
+    let writeValue: unknown;
+
+    switch (field) {
+      case 'tavilyKeys':
+        configKey = 'tavily.apiKeys';
+        writeValue = Array.isArray(value)
+          ? value.flatMap((v) => v.split('\n')).map((k) => k.trim()).filter(Boolean)
+          : String(value).split('\n').map((k) => k.trim()).filter(Boolean);
+        break;
+      case 'bochaKeys':
+        configKey = 'bocha.apiKeys';
+        writeValue = Array.isArray(value)
+          ? value.flatMap((v) => v.split('\n')).map((k) => k.trim()).filter(Boolean)
+          : String(value).split('\n').map((k) => k.trim()).filter(Boolean);
+        break;
+      case 'defaultProvider':
+        configKey = 'defaultProvider';
+        writeValue = String(value).trim() || 'auto';
+        break;
+      default:
+        return;
+    }
+
+    log.info({ field, configKey }, 'Updating search config');
+    cfg.update(configKey, writeValue, vscode.ConfigurationTarget.Global).then(
+      () => {
+        this.pushSearchConfig();
+      },
+      (err: unknown) => {
+        log.error({ err: String(err), configKey }, 'Failed to update search config');
       },
     );
   }
@@ -961,6 +1030,7 @@ export class DualMindChatPanel {
         perfProbe.markWebviewReady();
         this.pushProviderStatus();
         this.pushModelConfig(); // 首次就绪即推送模型配置，避免 ModelConfigPanel 显示空白
+        this.pushSearchConfig(); // 推送联网搜索配置，避免设置页 API Key 显示空白
         this.pushCostSummary();
         this.pushSessionList();
         this.pushIndexStatus();
@@ -1005,10 +1075,15 @@ export class DualMindChatPanel {
 
       case 'open_model_config':
         this.pushModelConfig();
+        this.pushSearchConfig();
         break;
 
       case 'update_model_config':
         this.handleUpdateModelConfig(msg.track, msg.level, msg.field, msg.value);
+        break;
+
+      case 'update_search_config':
+        this.handleUpdateSearchConfig(msg.field, msg.value);
         break;
 
       case 'new_session':
@@ -1566,6 +1641,22 @@ export class DualMindChatPanel {
           reason: 'error',
           errorCode: ErrorCodes.PROVIDER_AUTH_INVALID_API_KEY,
           errorMessage: `Provider ${provider.id} 未配置 API Key。请打开模型配置面板，在对应 Level 的 "API Key" 输入框填入有效的 Key（注意不要只填在备注/其他 Level）。`,
+        },
+      });
+      return;
+    }
+
+    // API Key 非 ASCII 字符检查：HTTP 头部仅允许 ByteString，含中文等字符会导致请求崩溃
+    const nonAscii = registry.findNonAsciiInApiKey(provider.id);
+    if (nonAscii) {
+      this.post({
+        type: 'task_event',
+        event: {
+          type: 'task_end',
+          taskId: 'nil',
+          reason: 'error',
+          errorCode: ErrorCodes.PROVIDER_AUTH_INVALID_API_KEY,
+          errorMessage: `API Key 包含非法字符「${nonAscii.char}」（位置 ${nonAscii.index + 1}）。HTTP 请求头仅支持 ASCII 字符，请检查 API Key 是否误粘贴了中文或其他非英文字符。`,
         },
       });
       return;

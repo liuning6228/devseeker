@@ -25,6 +25,8 @@ export type ProviderType =
   | 'anthropic'
   | 'openrouter'
   | 'ollama'
+  | 'minimax'
+  | 'kimi'
   | 'custom-openai'; // 通用 OpenAI 兼容端点（如 one-api / new-api / router 等）
 
 /** 所有 ProviderType 值的数组，用于 UI 遍历 */
@@ -36,6 +38,8 @@ export const PROVIDER_TYPES: readonly ProviderType[] = [
   'anthropic',
   'openrouter',
   'ollama',
+  'minimax',
+  'kimi',
   'custom-openai',
 ];
 
@@ -48,6 +52,8 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderType, string> = {
   anthropic: 'Anthropic Claude',
   openrouter: 'OpenRouter',
   ollama: 'Ollama（本地）',
+  minimax: 'MiniMax',
+  kimi: 'Kimi（Moonshot）',
   'custom-openai': '自定义 OpenAI 兼容',
 };
 
@@ -274,7 +280,24 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'qwen/qwen3-235b-a22b', label: 'Qwen3 235B (paid)' },
     { id: 'qwen/qwen3-coder', label: 'Qwen3 Coder (paid)' },
     // Moonshot
+    { id: 'moonshotai/kimi-k3', label: 'Kimi K3 (paid)' },
     { id: 'moonshotai/kimi-k2', label: 'Kimi K2 (paid)' },
+  ],
+  minimax: [
+    { id: 'MiniMax-M3', label: 'MiniMax-M3 (1M ctx, 最新旗舰)' },
+    { id: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
+    { id: 'MiniMax-M2.7-highspeed', label: 'MiniMax-M2.7-highspeed (100 tps)' },
+    { id: 'MiniMax-M2.5', label: 'MiniMax-M2.5' },
+    { id: 'MiniMax-M2.5-highspeed', label: 'MiniMax-M2.5-highspeed (100 tps)' },
+    { id: 'MiniMax-M2.1', label: 'MiniMax-M2.1' },
+    { id: 'MiniMax-M2', label: 'MiniMax-M2 (Coding & Agent)' },
+  ],
+  kimi: [
+    { id: 'kimi-k3', label: 'kimi-k3 (2.8T, 1M ctx, 旗舰)' },
+    { id: 'kimi-k2', label: 'kimi-k2' },
+    { id: 'moonshot-v1-128k', label: 'moonshot-v1-128k' },
+    { id: 'moonshot-v1-32k', label: 'moonshot-v1-32k' },
+    { id: 'moonshot-v1-8k', label: 'moonshot-v1-8k' },
   ],
   ollama: [
     { id: 'qwen3:8b', label: 'qwen3:8b' },
@@ -317,6 +340,13 @@ export const PROVIDER_REASONING_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'openai/o4-mini:free', label: 'OpenAI o4-mini (免费)' },
     { id: 'qwen/qwq-32b:free', label: 'QwQ 32B (免费)' },
     { id: 'qwen/qwen3-235b-a22b:free', label: 'Qwen3 235B (免费)' },
+  ],
+  minimax: [
+    { id: 'MiniMax-M3', label: 'MiniMax-M3 (1M ctx, 强推理)' },
+    { id: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
+  ],
+  kimi: [
+    { id: 'kimi-k3', label: 'kimi-k3 (2.8T, 强推理)' },
   ],
   ollama: [
     { id: 'deepseek-r1', label: 'deepseek-r1 (本地)' },
@@ -438,6 +468,16 @@ export const PROVIDER_DEFAULTS: Record<ProviderType, ProviderDefaults> = {
     baseUrl: 'http://localhost:11434/v1',
     model: 'qwen3:8b',
     hasVision: false,
+  },
+  minimax: {
+    baseUrl: 'https://api.minimaxi.com/v1',
+    model: 'MiniMax-M3',
+    hasVision: false,
+  },
+  kimi: {
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'kimi-k3',
+    hasVision: true,
   },
   'custom-openai': {
     baseUrl: '',

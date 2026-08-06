@@ -180,6 +180,7 @@ export type Action =
   | { type: 'PREVIEW_REQUEST'; payload: PendingPreview }
   | { type: 'PREVIEW_DISMISS'; toolCallId: string }
   | { type: 'PREFILL_INPUT'; text: string; nonce: number; isInlineEdit?: boolean }
+  | { type: 'CLEAR_ERROR' }
   /** 方案 B：流结束，将最终文本注入 reducer，触发 MarkdownRenderer 切换 */
   | { type: 'TEXT_FINISH'; text: string };
 
@@ -194,6 +195,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         taskStatus: 'running',
+        // 用户发送新消息时清除上一次的错误状态，避免旧错误横幅残留
+        lastError: undefined,
         messages: [
           ...state.messages,
           {
@@ -220,6 +223,9 @@ export function reducer(state: AppState, action: Action): AppState {
         pendingApprovalToolIds: new Set(),
         revertedHunks: new Set(),
         toolCallIndex: new Map(),
+        // 清除残留的弹窗状态，避免会话切换后显示已取消的弹窗
+        askQuestion: undefined,
+        approvalRequest: undefined,
         messages: action.messages.map((m, i) => ({
           id: `hist-${i}`,
           role: (m.role as MessageRole) ?? 'assistant',
@@ -344,6 +350,9 @@ export function reducer(state: AppState, action: Action): AppState {
         pendingPrefill: { text: action.text, nonce: action.nonce, isInlineEdit: action.isInlineEdit },
       };
 
+    case 'CLEAR_ERROR':
+      return { ...state, taskStatus: 'idle', lastError: undefined };
+
     case 'TASK_EVENT':
       return reduceTaskEvent(state, action.event);
 
@@ -437,6 +446,7 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
           compressedTokens: ev.compressedTokens,
           savingsPercent: ev.savingsPercent,
           inputBudget: ev.inputBudget,
+          items: ev.items,
         },
       };
 

@@ -37,7 +37,8 @@ import type { AssetMeta } from './types.js';
 export async function extractPdf(absPath: string, relPath: string): Promise<AssetMeta | null> {
   try {
     // 动态导入 pdfjs-dist（延迟加载，避免冷启动开销）
-    const pdfjs = await import('pdfjs-dist');
+    // Node.js 环境必须用 legacy 构建，否则 DOMMatrix is not defined
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
     // 设置 worker 路径（如果未配置，pdfjs 会自动 fallback 到同线程）
     if (!pdfjs.GlobalWorkerOptions.workerSrc) {
       pdfjs.GlobalWorkerOptions.workerSrc = '';

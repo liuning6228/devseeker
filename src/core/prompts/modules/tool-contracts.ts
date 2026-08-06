@@ -27,7 +27,7 @@ export const TOOL_CONTRACTS_MODULE = [
   '- `fetch_rules(rule_names)` — load model_decision rules by name',
   '- `skill(skill, args?)` — invoke a project skill from `.devseeker/skills/<name>/SKILL.md`',
   '- `get_problems(file_paths?, min_severity?, limit?)` — read VSCode Problems panel diagnostics',
-  '- `ask_user_question(questions)` — show a multiple-choice card to the user when you need their decision or clarification; each question can have 2-4 options with allowOther (default true), supports multiSelect',
+  '- `ask_user_question(questions)` — **USE THIS** when facing a meaningful decision with multiple valid approaches. Shows a multiple-choice card (1-4 questions, each 2-4 options). Each question supports `allowOther` (default true) and `multiSelect`. Typical triggers: implementation choice, destructive action confirmation, ambiguous requirement clarification. Do NOT use for trivial choices.',
   '- `switch_mode(target_mode_id)` — request switching to plan/debug/agent mode; use this when the task is large/ambiguous (→plan), needs debugging (→debug), or is done (→agent)',
   '',
   '**Editing strategy**: Prefer `search_replace` for small changes, `write_file` for new files or large rewrites.',

@@ -264,7 +264,13 @@ export type WebviewInboundMessage =
   /** 检查更新 */
   | { type: 'check_updates' }
   /** 关于 */
-  | { type: 'about' };
+  | { type: 'about' }
+  /** 联网搜索配置：Webview 提交单字段变更 */
+  | {
+      type: 'update_search_config';
+      field: 'tavilyKeys' | 'bochaKeys' | 'defaultProvider';
+      value: string | string[];
+    };
 
 // ─────────── Todo（W7e4 ·   todo_write 对齐） ───────────
 
@@ -315,6 +321,16 @@ export interface ModelConfigPayload {
   /** 当前生效的 Provider ID（状态指示） */
   activeProviderId?: string;
   activeProviderOk?: boolean;
+}
+
+/** 联网搜索配置推送 payload */
+export interface SearchConfigPayload {
+  /** Tavily API Keys（多个，每行一个） */
+  tavilyKeys: string[];
+  /** Bocha API Keys（多个，每行一个） */
+  bochaKeys: string[];
+  /** 默认搜索 Provider */
+  defaultProvider: string;
 }
 
 // ─────────── Extension → Webview ───────────
@@ -586,4 +602,6 @@ export type WebviewOutboundMessage =
   /** Step 22: 记忆列表结果 */
   | { type: 'memory_result'; items: MemoryEntry[] }
   /** Step 22: 记忆已删除 */
-  | { type: 'memory_deleted'; memoryId: string };
+  | { type: 'memory_deleted'; memoryId: string }
+  /** 联网搜索配置推送（Extension → Webview） */
+  | { type: 'search_config'; payload: SearchConfigPayload };

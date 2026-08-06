@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -226,6 +226,8 @@
             "anthropic",
             "openrouter",
             "ollama",
+            "minimax",
+            "kimi",
             "custom-openai"
           ],
           "default": "deepseek",
@@ -257,7 +259,12 @@
             "deepseek/deepseek-v4-flash:free",
             "deepseek/deepseek-r1:free",
             "qwen/qwen3-coder:free",
-            "meta-llama/llama-3.3-70b-instruct:free"
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "MiniMax-M3",
+            "MiniMax-M2.7",
+            "MiniMax-M2.5",
+            "kimi-k3",
+            "kimi-k2"
           ],
           "enumDescriptions": [
             "DeepSeek V4 Flash · 高并发低成本，1M 上下文（推荐主力）",
@@ -283,7 +290,12 @@
             "DeepSeek V4 Flash (via OpenRouter, 免费)",
             "DeepSeek R1 (via OpenRouter, 免费)",
             "Qwen3 Coder (via OpenRouter, 免费)",
-            "Llama 3.3 70B (via OpenRouter, 免费)"
+            "Llama 3.3 70B (via OpenRouter, 免费)",
+            "MiniMax M3 · 1M 上下文最新旗舰",
+            "MiniMax M2.7 · 自我迭代",
+            "MiniMax M2.5 · 高性价比",
+            "Kimi K3 · 2.8T 参数 1M 上下文旗舰",
+            "Kimi K2"
           ],
           "default": "deepseek-v4-flash",
           "description": "LLM Level 1 模型名称（DeepSeek 默认 V4-Flash；如需自定义模型请通过 Webview 面板输入）"
@@ -320,7 +332,9 @@
             "qwen3-32b",
             "deepseek/deepseek-r1:free",
             "openai/o3:free",
-            "qwen/qwq-32b:free"
+            "qwen/qwq-32b:free",
+            "MiniMax-M3",
+            "kimi-k3"
           ],
           "enumDescriptions": [
             "（不使用推理模型）",
@@ -332,7 +346,9 @@
             "Qwen3 32B · 开源 Thinking",
             "DeepSeek R1 (via OpenRouter, 免费)",
             "OpenAI o3 (via OpenRouter, 免费)",
-            "QwQ 32B (via OpenRouter, 免费)"
+            "QwQ 32B (via OpenRouter, 免费)",
+            "MiniMax M3 · 1M 上下文强推理",
+            "Kimi K3 · 2.8T 强推理"
           ],
           "default": "deepseek-v4-pro",
           "description": "LLM Level 1 推理模型（DeepSeek 默认 V4-Pro；选择空值表示不使用推理模型）"
@@ -353,6 +369,8 @@
             "anthropic",
             "openrouter",
             "ollama",
+            "minimax",
+            "kimi",
             "custom-openai"
           ],
           "default": "",
@@ -380,7 +398,11 @@
             "claude-3-5-sonnet-20241022",
             "deepseek/deepseek-r1:free",
             "deepseek/deepseek-v4-flash:free",
-            "qwen/qwen3-coder:free"
+            "qwen/qwen3-coder:free",
+            "MiniMax-M3",
+            "MiniMax-M2.7",
+            "kimi-k3",
+            "kimi-k2"
           ],
           "default": "deepseek-v4-pro",
           "description": "LLM Level 2 模型名称（推荐 deepseek-v4-pro 作为备选）"
@@ -415,7 +437,9 @@
             "qwq-plus",
             "qwen3-235b-a22b",
             "qwen3-32b",
-            "deepseek/deepseek-r1:free"
+            "deepseek/deepseek-r1:free",
+            "MiniMax-M3",
+            "kimi-k3"
           ],
           "enumDescriptions": [
             "（不使用推理模型）",
@@ -425,7 +449,9 @@
             "QwQ Plus · Qwen 推理（免费）",
             "Qwen3 235B · 开源旗舰 Thinking",
             "Qwen3 32B · 开源 Thinking",
-            "DeepSeek R1 (via OpenRouter, 免费)"
+            "DeepSeek R1 (via OpenRouter, 免费)",
+            "MiniMax M3 · 1M 上下文强推理",
+            "Kimi K3 · 2.8T 强推理"
           ],
           "default": "deepseek-v4-pro",
           "description": "LLM Level 2 推理模型（推荐 deepseek-v4-pro）"
@@ -446,6 +472,8 @@
             "anthropic",
             "openrouter",
             "ollama",
+            "minimax",
+            "kimi",
             "custom-openai"
           ],
           "default": "",
@@ -524,6 +552,8 @@
             "anthropic",
             "openrouter",
             "ollama",
+            "minimax",
+            "kimi",
             "custom-openai"
           ],
           "default": "qwen",
@@ -541,7 +571,8 @@
             "claude-sonnet-4-6",
             "claude-3-5-sonnet-20241022",
             "llava",
-            "bakllava"
+            "bakllava",
+            "kimi-k3"
           ],
           "enumDescriptions": [
             "Qwen VL Max · 视觉旗舰（推荐）",
@@ -553,7 +584,8 @@
             "Claude Sonnet 4.6 · 视觉",
             "Claude 3.5 Sonnet · 视觉",
             "LLaVA · 开源视觉（Ollama）",
-            "BakLLaVA · 开源视觉（Ollama）"
+            "BakLLaVA · 开源视觉（Ollama）",
+            "Kimi K3 · 2.8T 原生多模态"
           ],
           "default": "qwen-vl-max-latest",
           "description": "VLLM Level 1 视觉模型名称"
@@ -594,6 +626,8 @@
             "anthropic",
             "openrouter",
             "ollama",
+            "minimax",
+            "kimi",
             "custom-openai"
           ],
           "default": "",
@@ -650,6 +684,8 @@
             "anthropic",
             "openrouter",
             "ollama",
+            "minimax",
+            "kimi",
             "custom-openai"
           ],
           "default": "",

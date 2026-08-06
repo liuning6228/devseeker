@@ -18,6 +18,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic Claude',
   openrouter: 'OpenRouter',
   ollama: 'Ollama（本地）',
+  minimax: 'MiniMax',
+  kimi: 'Kimi（Moonshot）',
   'custom-openai': '自定义 OpenAI 兼容',
 };
 

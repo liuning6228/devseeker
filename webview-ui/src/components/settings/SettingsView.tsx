@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { ViewHeader } from '../common/ViewHeader.js';
@@ -6,8 +6,15 @@ import { Separator } from '../ui/separator.js';
 import { ProviderConfigPanel } from './providers/ProviderConfigPanel.js';
 import { AutoApproveBar } from './AutoApproveBar.js';
 import { Tab } from '../common/Tab.js';
+import { PROVIDER_DEFAULTS } from '../../providers.js';
+import { postToHost } from '../../vscode-api.js';
+import type { ModelConfigPayload, ModelLevelConfigPayload, SearchConfigPayload } from '../../protocol.js';
 
 type SettingsViewProps = {
+  /** 从 extension host 推送的当前模型配置 */
+  config?: ModelConfigPayload | null;
+  /** 从 extension host 推送的联网搜索配置 */
+  searchConfig?: SearchConfigPayload | null;
   onBack?: () => void;
   className?: string;
 };
@@ -26,7 +33,14 @@ const LEVEL_META = [
   { level: 3 as const, title: '兜底模型', desc: '备选也不可用时保底，推荐 Ollama 本地模型', required: false },
 ];
 
-export function SettingsView({ onBack, className }: SettingsViewProps) {
+// ─── VLLM Level 级别标签（均为可选） ───
+const VLLM_LEVEL_META = [
+  { level: 1 as const, title: '主力视觉模型', desc: '截图粘贴时优先使用', required: false },
+  { level: 2 as const, title: '备选视觉模型', desc: '主视觉模型不可用时降级', required: false },
+  { level: 3 as const, title: '兜底视觉模型', desc: '备选也不可用时保底', required: false },
+];
+
+export function SettingsView({ config, searchConfig, onBack, className }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState('llm');
   // Step 21: 配置搜索
   const [searchQuery, setSearchQuery] = useState('');
@@ -35,24 +49,67 @@ export function SettingsView({ onBack, className }: SettingsViewProps) {
   const [llmLevelState, setLlmLevelState] = useState<Record<number, {
     provider: string; model: string; apiKey: string; baseUrl: string;
   }>>({
-    1: { provider: 'deepseek', model: 'deepseek-chat', apiKey: '', baseUrl: '' },
+    1: { provider: 'deepseek', model: 'deepseek-v4-flash', apiKey: '', baseUrl: '' },
     2: { provider: '', model: '', apiKey: '', baseUrl: '' },
     3: { provider: '', model: '', apiKey: '', baseUrl: '' },
   });
   const [llmLevelExpanded, setLlmLevelExpanded] = useState<Record<number, boolean>>({ 1: true });
 
-  // VLLM 类似
+  // VLLM 三级配置（均为可选）
   const [vllmLevelState, setVllmLevelState] = useState<Record<number, {
     provider: string; model: string; apiKey: string; baseUrl: string;
   }>>({
-    1: { provider: 'qwen', model: 'qwen-vl-max', apiKey: '', baseUrl: '' },
+    1: { provider: 'qwen', model: 'qwen-vl-plus', apiKey: '', baseUrl: '' },
+    2: { provider: '', model: '', apiKey: '', baseUrl: '' },
+    3: { provider: '', model: '', apiKey: '', baseUrl: '' },
   });
   const [vllmLevelExpanded, setVllmLevelExpanded] = useState<Record<number, boolean>>({ 1: true });
+
+  // ─── 从 extension host 推送的 config 同步到本地 state ───
+  useEffect(() => {
+    if (!config) return;
+    const toLocal = (c: ModelLevelConfigPayload) => ({
+      provider: c.provider || '',
+      model: c.model || '',
+      apiKey: c.apiKeySet ? '••••••••' : '',
+      baseUrl: c.baseUrl || '',
+    });
+    setLlmLevelState({
+      1: toLocal(config.llm.level1),
+      2: config.llm.level2 ? toLocal(config.llm.level2) : { provider: '', model: '', apiKey: '', baseUrl: '' },
+      3: config.llm.level3 ? toLocal(config.llm.level3) : { provider: '', model: '', apiKey: '', baseUrl: '' },
+    });
+    setVllmLevelState({
+      1: toLocal(config.vllm.level1),
+      2: config.vllm.level2 ? toLocal(config.vllm.level2) : { provider: '', model: '', apiKey: '', baseUrl: '' },
+      3: config.vllm.level3 ? toLocal(config.vllm.level3) : { provider: '', model: '', apiKey: '', baseUrl: '' },
+    });
+  }, [config]);
 
   // 联网搜索
   const [tavilyKeys, setTavilyKeys] = useState('');
   const [bochaKeys, setBochaKeys] = useState('');
   const [searchProvider, setSearchProvider] = useState('auto');
+
+  // ─── 从 extension host 推送的搜索配置同步到本地 state ───
+  useEffect(() => {
+    if (!searchConfig) return;
+    setTavilyKeys(searchConfig.tavilyKeys.join('\n'));
+    setBochaKeys(searchConfig.bochaKeys.join('\n'));
+    setSearchProvider(searchConfig.defaultProvider || 'auto');
+  }, [searchConfig]);
+
+  // 搜索配置变更时即时持久化（防抖 500ms）
+  const searchConfigTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistSearchField = useCallback(
+    (field: 'tavilyKeys' | 'bochaKeys' | 'defaultProvider', value: string | string[]) => {
+      if (searchConfigTimer.current) clearTimeout(searchConfigTimer.current);
+      searchConfigTimer.current = setTimeout(() => {
+        postToHost({ type: 'update_search_config', field, value });
+      }, 500);
+    },
+    [],
+  );
 
   // LLM 连接测试
   const [llmTesting, setLlmTesting] = useState(false);
@@ -67,39 +124,51 @@ export function SettingsView({ onBack, className }: SettingsViewProps) {
     }, 1000);
   }, [llmLevelState]);
 
-  // 通用更新单个字段
+  // 通用更新单个字段（本地 + 持久化到 extension host）
   const updateField = useCallback(
-    (setFn: React.Dispatch<React.SetStateAction<Record<number, { provider: string; model: string; apiKey: string; baseUrl: string }>>>, level: number, field: string, value: string) => {
+    (setFn: React.Dispatch<React.SetStateAction<Record<number, { provider: string; model: string; apiKey: string; baseUrl: string }>>>, track: 'llm' | 'vllm', level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
       setFn((prev) => ({
         ...prev,
         [level]: { ...prev[level], [field]: value },
       }));
+      // apiKey 掩码不写入
+      if (field === 'apiKey' && (value === '••••••••' || !value.trim())) return;
+      postToHost({ type: 'update_model_config', track, level, field, value });
     },
     [],
   );
 
-  // 更新 LLM 某级 provider（同时重置 model + baseUrl）
-  const updateLlmProvider = useCallback((level: number, provider: string) => {
+  // 更新 LLM 某级 provider（同时重置 model 为新 Provider 默认值 + baseUrl，并持久化）
+  const updateLlmProvider = useCallback((level: 1 | 2 | 3, provider: string) => {
+    const def = PROVIDER_DEFAULTS[provider as keyof typeof PROVIDER_DEFAULTS];
+    const defaultModel = def?.model ?? '';
+    const defaultBaseUrl = def?.baseUrl ?? '';
     setLlmLevelState((prev) => ({
       ...prev,
-      [level]: { ...prev[level], provider, model: '', apiKey: prev[level]?.apiKey ?? '', baseUrl: '' },
+      [level]: { ...prev[level], provider, model: defaultModel, apiKey: prev[level]?.apiKey ?? '', baseUrl: defaultBaseUrl },
     }));
+    // 持久化：provider 变更会自动联动 model + baseUrl
+    postToHost({ type: 'update_model_config', track: 'llm', level, field: 'provider', value: provider });
   }, []);
 
   // 更新 VLLM 某级 provider
-  const updateVllmProvider = useCallback((level: number, provider: string) => {
+  const updateVllmProvider = useCallback((level: 1 | 2 | 3, provider: string) => {
+    const def = PROVIDER_DEFAULTS[provider as keyof typeof PROVIDER_DEFAULTS];
+    const defaultModel = def?.vllmModel ?? def?.model ?? '';
+    const defaultBaseUrl = def?.baseUrl ?? '';
     setVllmLevelState((prev) => ({
       ...prev,
-      [level]: { ...prev[level], provider, model: '', apiKey: prev[level]?.apiKey ?? '', baseUrl: '' },
+      [level]: { ...prev[level], provider, model: defaultModel, apiKey: prev[level]?.apiKey ?? '', baseUrl: defaultBaseUrl },
     }));
+    postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'provider', value: provider });
   }, []);
 
-  const updateLlmLevel = useCallback((level: number, field: string, value: string) => {
-    updateField(setLlmLevelState, level, field, value);
+  const updateLlmLevel = useCallback((level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
+    updateField(setLlmLevelState, 'llm', level, field, value);
   }, [updateField]);
 
-  const updateVllmLevel = useCallback((level: number, field: string, value: string) => {
-    updateField(setVllmLevelState, level, field, value);
+  const updateVllmLevel = useCallback((level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
+    updateField(setVllmLevelState, 'vllm', level, field, value);
   }, [updateField]);
 
   return (
@@ -162,7 +231,7 @@ export function SettingsView({ onBack, className }: SettingsViewProps) {
             <p className="text-xs text-vscode-fg/50 mb-2">
               截图粘贴时用于理解图像内容，可选。若未配置则使用 LLM 主模型处理图像。
             </p>
-            {[1].map((level) => {
+            {VLLM_LEVEL_META.map(({ level, title, desc, required }) => {
               const cfg = vllmLevelState[level];
               if (!cfg) return null;
               const expanded = vllmLevelExpanded[level];
@@ -170,9 +239,9 @@ export function SettingsView({ onBack, className }: SettingsViewProps) {
                 <LevelCard
                   key={`vllm-l${level}`}
                   level={level}
-                  title="视觉模型"
-                  desc="主力视觉模型"
-                  required={false}
+                  title={title}
+                  desc={desc}
+                  required={required}
                   expanded={!!expanded}
                   configured={!!cfg.provider}
                   onToggle={() =>
@@ -216,7 +285,10 @@ export function SettingsView({ onBack, className }: SettingsViewProps) {
                 <select
                   className="px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border"
                   value={searchProvider}
-                  onChange={(e) => setSearchProvider(e.target.value)}
+                  onChange={(e) => {
+                    setSearchProvider(e.target.value);
+                    persistSearchField('defaultProvider', e.target.value);
+                  }}
                 >
                   <option value="auto">auto（自动）</option>
                   <option value="tavily">Tavily（英文优先）</option>
@@ -230,7 +302,10 @@ export function SettingsView({ onBack, className }: SettingsViewProps) {
                     className="w-full px-3 py-2 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-2 focus:ring-vscode-focus resize-y min-h-[60px]"
                     placeholder={"tavily-xxx\ntavily-yyy"}
                     value={tavilyKeys}
-                    onChange={(e) => setTavilyKeys(e.target.value)}
+                    onChange={(e) => {
+                      setTavilyKeys(e.target.value);
+                      persistSearchField('tavilyKeys', e.target.value);
+                    }}
                     rows={3}
                   />
                   <p className="text-xs text-vscode-fg/40">英文场景优先，1000 次/月免费。多个 Key 分行填写，系统自动随机选择 + 故障切换。</p>
@@ -241,7 +316,10 @@ export function SettingsView({ onBack, className }: SettingsViewProps) {
                     className="w-full px-3 py-2 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-2 focus:ring-vscode-focus resize-y min-h-[60px]"
                     placeholder={"bocha-xxx\nbocha-yyy"}
                     value={bochaKeys}
-                    onChange={(e) => setBochaKeys(e.target.value)}
+                    onChange={(e) => {
+                      setBochaKeys(e.target.value);
+                      persistSearchField('bochaKeys', e.target.value);
+                    }}
                     rows={3}
                   />
                   <p className="text-xs text-vscode-fg/40">中文场景优先。多个 Key 分行填写，系统自动随机选择 + 故障切换。</p>

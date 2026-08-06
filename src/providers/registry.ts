@@ -113,6 +113,20 @@ function buildProvider(
         model,
       });
 
+    case 'minimax':
+      return new OpenAIProvider({
+        apiKey: apiKey || 'placeholder',
+        baseUrl: baseUrl !== PROVIDER_DEFAULTS.minimax.baseUrl ? baseUrl : undefined,
+        model: model !== PROVIDER_DEFAULTS.minimax.model ? model : undefined,
+      });
+
+    case 'kimi':
+      return new OpenAIProvider({
+        apiKey: apiKey || 'placeholder',
+        baseUrl: baseUrl !== PROVIDER_DEFAULTS.kimi.baseUrl ? baseUrl : undefined,
+        model: model !== PROVIDER_DEFAULTS.kimi.model ? model : undefined,
+      });
+
     case 'custom-openai':
       return new OpenAIProvider({
         apiKey: apiKey || 'placeholder',
@@ -389,7 +403,26 @@ export class ProviderRegistry {
 
     if (!provider) {
       // L2/L3 可选：未配置 provider → 不注册（避免幻影 Provider 占据降级链和 UI 下拉）
-      if (level !== 1) return undefined;
+      if (level !== 1) {
+        // 检查是否有其他字段被用户显式配置（如 apiKey）。
+        // 如果有，说明用户已开始配置该 Level 但尚未选择 Provider，
+        // 返回默认 Provider 占位，确保 UI 能回显已配置的 apiKey 掩码等信息。
+        const hasAnyField = inspectStr(`${prefix}.apiKey`) !== undefined
+          || inspectArr(`${prefix}.apiKeys`) !== undefined
+          || inspectStr(`${prefix}.model`) !== undefined
+          || inspectStr(`${prefix}.baseUrl`) !== undefined;
+        if (!hasAnyField) return undefined;
+        // 有字段但无 provider → 用默认 Provider 占位，让 UI 能回显
+        const defaultProvider = track === 'llm' ? 'deepseek' : 'qwen';
+        const defaults = PROVIDER_DEFAULTS[defaultProvider];
+        return {
+          provider: defaultProvider,
+          model: track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model,
+          apiKey: inspectStr(`${prefix}.apiKey`),
+          apiKeys: inspectArr(`${prefix}.apiKeys`),
+          baseUrl: inspectStr(`${prefix}.baseUrl`),
+        };
+      }
       // Level 1 必填，返回占位（引导用户配置）
       const defaultProvider = track === 'llm' ? 'deepseek' : 'qwen';
       const defaults = PROVIDER_DEFAULTS[defaultProvider];
@@ -591,6 +624,24 @@ export class ProviderRegistry {
   hasUsableCredentials(providerId: ProviderId): boolean {
     if (providerId.split(':')[0] === 'ollama') return true;
     return this.hasValidKey(providerId);
+  }
+
+  /**
+   * 检查 Provider 当前使用的 API Key 是否含有非 ASCII 字符。
+   * HTTP 头部仅允许 ByteString（charCode 0-255），含中文等字符会导致请求直接崩溃。
+   * @returns 含非 ASCII 字符时返回该字符及其 index；合法时返回 null。
+   */
+  findNonAsciiInApiKey(providerId: ProviderId): { char: string; index: number } | null {
+    const pool = this.apiKeyPool.get(providerId);
+    if (!pool || pool.length === 0) return null;
+    const key = pool[this.apiKeyIndex.get(providerId) ?? 0];
+    if (!key) return null;
+    for (let i = 0; i < key.length; i++) {
+      if (key.charCodeAt(i) > 255) {
+        return { char: key[i], index: i };
+      }
+    }
+    return null;
   }
 
   /**

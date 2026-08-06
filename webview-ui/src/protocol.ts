@@ -25,6 +25,7 @@ export type {
   TodoListPayload,
   ModelLevelConfigPayload,
   ModelConfigPayload,
+  SearchConfigPayload,
   /** Step 7: @ 上下文选择器搜索结果 */
   ContextSearchItem,
   /** Step 12: Skill 命令信息 */

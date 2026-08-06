@@ -130,6 +130,13 @@ export function renderModePromptSection(mode: Mode): string {
         'call `switch_mode(target_mode_id="plan")` FIRST to propose a plan (user must approve).',
         'If you encounter a bug or need to diagnose an error,',
         'call `switch_mode(target_mode_id="debug")` to use the evidence-first troubleshooting loop.',
+        '',
+        '## Proactive Clarification',
+        'When you face a meaningful decision and multiple reasonable approaches exist,',
+        'use `ask_user_question` to let the user choose BEFORE proceeding.',
+        'Typical scenarios: choosing between implementations, confirming destructive actions,',
+        'resolving ambiguous requirements, or picking between libraries/frameworks.',
+        'Do NOT ask for trivial choices you can resolve yourself (naming, formatting, etc.).',
       );
       break;
     case 'plan':

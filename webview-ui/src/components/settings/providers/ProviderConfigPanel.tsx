@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { cn } from '../../../lib/utils.js';
 import { ApiKeyField } from '../common/ApiKeyField.js';
 import { BaseUrlField } from '../common/BaseUrlField.js';
@@ -69,6 +69,14 @@ export function ProviderConfigPanel({
 }: ProviderConfigPanelProps) {
   const provider = providerId as ProviderType;
 
+  // 自定义 Provider 输入模式
+  const [customProviderMode, setCustomProviderMode] = useState(() =>
+    !PROVIDER_TYPES.includes(providerId as ProviderType) && providerId !== '',
+  );
+  const [customProviderInput, setCustomProviderInput] = useState(() =>
+    !PROVIDER_TYPES.includes(providerId as ProviderType) ? providerId : '',
+  );
+
   // 从 PROVIDER_DEFAULTS 推断默认 baseUrl
   const inferredDefaultUrl = useMemo(() => {
     if (defaultBaseUrl !== undefined) return defaultBaseUrl;
@@ -80,36 +88,33 @@ export function ProviderConfigPanel({
     if (modelOptions && modelOptions.length > 0) return modelOptions;
     const models = PROVIDER_MODELS[provider];
     if (models) return models.map((m) => ({ id: m.id, name: m.label }));
+    // 自定义 Provider 或未知 Provider：返回空列表，用户可手动输入模型名
     return [];
   }, [modelOptions, provider]);
 
-  // Provider 变更处理：自动切默认 model 和 baseUrl
+  // Provider 变更处理：通过 onProviderChange 通知父组件，父级负责重置 model + baseUrl
   const handleProviderChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const newProvider = e.target.value;
-      onProviderChange?.(newProvider);
-
-      // 自动设置默认 model
-      const defaults = PROVIDER_DEFAULTS[newProvider as ProviderType];
-      if (defaults) {
-        const defaultModel = track === 'vllm' && defaults.vllmModel
-          ? defaults.vllmModel
-          : defaults.model;
-        if (defaultModel) {
-          onModelChange(defaultModel);
-        }
-        // 自动设置 baseUrl
-        const newModels = PROVIDER_MODELS[newProvider as ProviderType] || [];
-        if (newModels.length > 0) {
-          const firstModel = newModels[0];
-          if (firstModel && firstModel.id !== '_placeholder_') {
-            onModelChange(firstModel.id);
-          }
-        }
+      if (newProvider === '__custom__') {
+        // 切换到自定义模式
+        setCustomProviderMode(true);
+        setCustomProviderInput('');
+        return;
       }
+      setCustomProviderMode(false);
+      onProviderChange?.(newProvider);
     },
-    [onProviderChange, onModelChange, track],
+    [onProviderChange],
   );
+
+  // 自定义 Provider 确认
+  const handleCustomProviderConfirm = useCallback(() => {
+    const trimmed = customProviderInput.trim();
+    if (trimmed) {
+      onProviderChange?.(trimmed);
+    }
+  }, [customProviderInput, onProviderChange]);
 
   return (
     <div className={cn('space-y-3', className)}>
@@ -141,17 +146,70 @@ export function ProviderConfigPanel({
       {!hideProviderSelect && (
         <div className="space-y-1">
           <label className="text-xs text-vscode-fg/60">Provider</label>
-          <select
-            value={providerId}
-            onChange={handleProviderChange}
-            className="w-full px-3 py-2 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-2 focus:ring-vscode-focus"
-          >
-            {PROVIDER_TYPES.map((pt) => (
-              <option key={pt} value={pt}>
-                {PROVIDER_DISPLAY_NAMES[pt]}
-              </option>
-            ))}
-          </select>
+          {customProviderMode ? (
+            // 自定义 Provider 输入模式
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customProviderInput}
+                onChange={(e) => setCustomProviderInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCustomProviderConfirm();
+                  if (e.key === 'Escape') {
+                    setCustomProviderMode(false);
+                    setCustomProviderInput('');
+                  }
+                }}
+                placeholder="输入 Provider ID（如 zhipu、yi 等）"
+                className="flex-1 px-3 py-2 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border
+                           focus:outline-none focus:ring-2 focus:ring-vscode-focus placeholder:text-vscode-fg/40"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={handleCustomProviderConfirm}
+                className="px-3 py-2 text-sm rounded bg-vscode-focus-bg text-vscode-fg hover:opacity-80 cursor-pointer"
+              >
+                确认
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomProviderMode(false);
+                  setCustomProviderInput('');
+                }}
+                className="px-3 py-2 text-sm rounded bg-vscode-sidebar-bg text-vscode-fg/60 hover:text-vscode-fg cursor-pointer"
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <select
+              value={PROVIDER_TYPES.includes(providerId as ProviderType) ? providerId : ''}
+              onChange={handleProviderChange}
+              className="w-full px-3 py-2 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-2 focus:ring-vscode-focus"
+            >
+              {PROVIDER_TYPES.map((pt) => (
+                <option key={pt} value={pt}>
+                  {PROVIDER_DISPLAY_NAMES[pt]}
+                </option>
+              ))}
+              <option value="__custom__">✏️ 自定义 Provider…</option>
+            </select>
+          )}
+          {/* 当前 Provider 不在已知列表中时显示提示 */}
+          {!PROVIDER_TYPES.includes(providerId as ProviderType) && providerId && !customProviderMode && (
+            <p className="text-xs text-vscode-fg/40">
+              当前: <code className="text-vscode-focus">{providerId}</code>
+              <button
+                type="button"
+                onClick={() => setCustomProviderMode(true)}
+                className="ml-2 underline cursor-pointer text-vscode-focus hover:opacity-80"
+              >
+                修改
+              </button>
+            </p>
+          )}
         </div>
       )}
 
