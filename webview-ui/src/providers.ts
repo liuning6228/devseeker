@@ -168,7 +168,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderType, ProviderDefaults> = {
     model: 'qwen3:8b',
   },
   minimax: {
-    baseUrl: 'https://api.minimaxi.com/v1',
+    baseUrl: 'https://api.minimax.chat/v1',
     model: 'MiniMax-M3',
   },
   kimi: {

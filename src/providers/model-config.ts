@@ -470,7 +470,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderType, ProviderDefaults> = {
     hasVision: false,
   },
   minimax: {
-    baseUrl: 'https://api.minimaxi.com/v1',
+    baseUrl: 'https://api.minimax.chat/v1',
     model: 'MiniMax-M3',
     hasVision: false,
   },
