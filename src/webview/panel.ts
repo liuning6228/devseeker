@@ -1995,6 +1995,34 @@ export class DualMindChatPanel {
       onEvent: (event) => {
         const t0 = performance.now();
         try {
+          // L1/L2/L3 三级兜底：只有当所有级别都失败后才向 Webview 报错
+          // 拦截 task_end 事件（reason: 'error'），检查是否还有 fallback 级别可用
+          if (event.type === 'task_end' && event.reason === 'error') {
+            const reason = classifyErrorCode(event.errorCode ?? '');
+            const strategy = FAILOVER_STRATEGY[reason];
+            // 如果策略是降级到下一级，检查是否还有下一级 Provider 可用
+            if (strategy === 'next_level') {
+              const registry = getProviderRegistry();
+              const nextProvider = registry.getNextLevel(provider.id, ['tool-use']);
+              if (nextProvider) {
+                // 还有下一级 Provider，不转发错误事件，让 fallback 逻辑继续
+                log.info(
+                  { providerId: provider.id, errorCode: event.errorCode, nextProvider: nextProvider.id },
+                  'Suppressing task_end error event; fallback to next level is possible',
+                );
+                return; // 不转发事件，直接返回
+              }
+            }
+            // 策略是 same_level_retry 时，也不转发错误事件（同级重试或降级到下一级）
+            if (strategy === 'same_level_retry') {
+              log.info(
+                { providerId: provider.id, errorCode: event.errorCode, reason },
+                'Suppressing task_end error event; same_level_retry strategy',
+              );
+              return; // 不转发事件，直接返回
+            }
+            // 策略是 no_fallback 或没有下一级 Provider，转发错误事件
+          }
           this.post({ type: 'task_event', event });
           // W12.3 · PerfProbe 接入（测量首 token / 总时长 / cache 命中率）
           if (event.type === 'task_start') {
