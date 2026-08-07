@@ -88,8 +88,8 @@ function buildProvider(
     case 'qwen-code':
       return new OpenAIProvider({
         apiKey: apiKey || 'placeholder',
-        baseUrl: baseUrl !== PROVIDER_DEFAULTS['qwen-code'].baseUrl ? baseUrl : undefined,
-        model: model !== PROVIDER_DEFAULTS['qwen-code'].model ? model : undefined,
+        baseUrl,
+        model,
       });
 
     case 'anthropic':
@@ -102,8 +102,8 @@ function buildProvider(
     case 'openrouter':
       return new OpenAIProvider({
         apiKey: apiKey || 'placeholder',
-        baseUrl: baseUrl !== PROVIDER_DEFAULTS.openrouter.baseUrl ? baseUrl : undefined,
-        model: model !== PROVIDER_DEFAULTS.openrouter.model ? model : undefined,
+        baseUrl,
+        model,
       });
 
     case 'ollama':
@@ -116,15 +116,15 @@ function buildProvider(
     case 'minimax':
       return new OpenAIProvider({
         apiKey: apiKey || 'placeholder',
-        baseUrl: baseUrl !== PROVIDER_DEFAULTS.minimax.baseUrl ? baseUrl : undefined,
-        model: model !== PROVIDER_DEFAULTS.minimax.model ? model : undefined,
+        baseUrl,
+        model,
       });
 
     case 'kimi':
       return new OpenAIProvider({
         apiKey: apiKey || 'placeholder',
-        baseUrl: baseUrl !== PROVIDER_DEFAULTS.kimi.baseUrl ? baseUrl : undefined,
-        model: model !== PROVIDER_DEFAULTS.kimi.model ? model : undefined,
+        baseUrl,
+        model,
       });
 
     case 'custom-openai':
