@@ -429,6 +429,10 @@ export class ProviderRegistry {
       return {
         provider: defaultProvider,
         model: track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model,
+        apiKey: inspectStr(`${prefix}.apiKey`),
+        apiKeys: inspectArr(`${prefix}.apiKeys`),
+        baseUrl: inspectStr(`${prefix}.baseUrl`),
+        reasoningModel: inspectStr(`${prefix}.reasoningModel`),
       };
     }
 
