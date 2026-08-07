@@ -385,8 +385,9 @@ export class ProviderRegistry {
     const inspectStr = (key: string): string | undefined => {
       const v = pickValue<string>(config.inspect<string>(key));
       if (typeof v !== 'string') return undefined;
-      const trimmed = v.trim();
-      return trimmed || undefined;
+      // 保留空字符串（用户显式清空），而不是转换为 undefined
+      // 这样可以区分"用户显式清空"和"用户从未配置"
+      return v;
     };
     const inspectArr = (key: string): string[] | undefined => {
       const v = pickValue<string[]>(config.inspect<string[]>(key));

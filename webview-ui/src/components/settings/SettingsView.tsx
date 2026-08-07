@@ -161,6 +161,18 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
 
   // 更新 LLM 某级 provider（同时重置 model 为新 Provider 默认值 + baseUrl，并持久化）
   const updateLlmProvider = useCallback((level: 1 | 2 | 3, provider: string) => {
+    // Provider 为空时，清空所有关联字段
+    if (!provider) {
+      setLlmLevelState((prev) => ({
+        ...prev,
+        [level]: { provider: '', model: '', apiKey: '', baseUrl: '' },
+      }));
+      // 持久化：清空 provider + model + baseUrl
+      postToHost({ type: 'update_model_config', track: 'llm', level, field: 'provider', value: '' });
+      postToHost({ type: 'update_model_config', track: 'llm', level, field: 'model', value: '' });
+      postToHost({ type: 'update_model_config', track: 'llm', level, field: 'baseUrl', value: '' });
+      return;
+    }
     const def = PROVIDER_DEFAULTS[provider as keyof typeof PROVIDER_DEFAULTS];
     const defaultModel = def?.model ?? '';
     const defaultBaseUrl = def?.baseUrl ?? '';
@@ -174,6 +186,17 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
 
   // 更新 VLLM 某级 provider
   const updateVllmProvider = useCallback((level: 1 | 2 | 3, provider: string) => {
+    // Provider 为空时，清空所有关联字段
+    if (!provider) {
+      setVllmLevelState((prev) => ({
+        ...prev,
+        [level]: { provider: '', model: '', apiKey: '', baseUrl: '' },
+      }));
+      postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'provider', value: '' });
+      postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'model', value: '' });
+      postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'baseUrl', value: '' });
+      return;
+    }
     const def = PROVIDER_DEFAULTS[provider as keyof typeof PROVIDER_DEFAULTS];
     const defaultModel = def?.vllmModel ?? def?.model ?? '';
     const defaultBaseUrl = def?.baseUrl ?? '';
@@ -227,7 +250,7 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                   }
                 >
                   <ProviderConfigPanel
-                    providerId={cfg.provider || 'deepseek'}
+                    providerId={cfg.provider}
                     apiKey={cfg.apiKey}
                     onApiKeyChange={(v) => updateLlmLevel(level, 'apiKey', v)}
                     baseUrl={cfg.baseUrl}
@@ -271,7 +294,7 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                   }
                 >
                   <ProviderConfigPanel
-                    providerId={cfg.provider || 'qwen'}
+                    providerId={cfg.provider}
                     apiKey={cfg.apiKey}
                     onApiKeyChange={(v) => updateVllmLevel(level, 'apiKey', v)}
                     baseUrl={cfg.baseUrl}

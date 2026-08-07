@@ -185,16 +185,20 @@ export function ProviderConfigPanel({
             </div>
           ) : (
             <select
-              value={PROVIDER_TYPES.includes(providerId as ProviderType) ? providerId : ''}
+              value={PROVIDER_TYPES.includes(providerId as ProviderType) ? providerId : (providerId ? '__unknown__' : '')}
               onChange={handleProviderChange}
               className="w-full px-3 py-2 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-2 focus:ring-vscode-focus"
             >
+              <option value="">（未选择）</option>
               {PROVIDER_TYPES.map((pt) => (
                 <option key={pt} value={pt}>
                   {PROVIDER_DISPLAY_NAMES[pt]}
                 </option>
               ))}
               <option value="__custom__">✏️ 自定义 Provider…</option>
+              {providerId && !PROVIDER_TYPES.includes(providerId as ProviderType) && (
+                <option value="__unknown__" disabled>当前: {providerId}</option>
+              )}
             </select>
           )}
           {/* 当前 Provider 不在已知列表中时显示提示 */}

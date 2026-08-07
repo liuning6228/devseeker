@@ -778,15 +778,16 @@ export class DualMindChatPanel {
     const modelsConfig = registry.readModelsConfigPublic(config);
 
     const toPayload = (c: ModelLevelConfig, track: 'llm' | 'vllm'): ModelLevelConfigPayload => {
-      // 统一用 PROVIDER_DEFAULTS 兜底，保证 webview 显示的值与 VS Code Settings 页一致
-      const defaults = PROVIDER_DEFAULTS[c.provider];
-      const defaultModel = track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model;
+      // 尊重用户的显式输入（包括空值），不再用 PROVIDER_DEFAULTS 填充
+      // 只有当 provider 存在且 model/baseUrl 为 undefined 时才用默认值
+      const defaults = c.provider ? PROVIDER_DEFAULTS[c.provider] : undefined;
+      const defaultModel = defaults ? (track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model) : '';
       return {
-        provider: c.provider,
-        model: c.model || defaultModel || '',
+        provider: c.provider ?? '',
+        model: c.model ?? (c.provider ? defaultModel : ''),
         apiKeySet: !!(c.apiKey ?? '').trim() || (c.apiKeys?.length ?? 0) > 0,
-        baseUrl: c.baseUrl || defaults.baseUrl || '',
-        reasoningModel: c.reasoningModel || defaults.reasoningModel || '',
+        baseUrl: c.baseUrl ?? (defaults?.baseUrl || ''),
+        reasoningModel: c.reasoningModel ?? (defaults?.reasoningModel || ''),
         apiKeysCount: c.apiKeys?.length ?? 0,
       };
     };
@@ -841,23 +842,32 @@ export class DualMindChatPanel {
     // 切换 provider 时，同步更新 model 为新 provider 的默认值（区分 LLM/VLLM）
     if (field === 'provider' && typeof value === 'string') {
       const newProvider = value as ProviderType;
-      const defaults = PROVIDER_DEFAULTS[newProvider];
-      const defaultModel = track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model;
       const modelKey = `models.${track}.level${level}.model`;
       const baseUrlKey = `models.${track}.level${level}.baseUrl`;
 
-      // 链式写入：provider → model → baseUrl。空 baseUrl 写 undefined（删除设置，回落到 Provider 默认值），
-      // 避免将 "" 写入 settings.json 被 VS Code 视为"覆盖为空"。
-      Promise.resolve(config.update(key, value || undefined, vscode.ConfigurationTarget.Global)).then(() => {
-        return config.update(modelKey, defaultModel || undefined, vscode.ConfigurationTarget.Global);
+      // Provider 为空时，清空所有关联字段
+      if (!newProvider) {
+        Promise.resolve(config.update(key, '', vscode.ConfigurationTarget.Global)).then(() => {
+          return config.update(modelKey, '', vscode.ConfigurationTarget.Global);
+        }).then(() => {
+          return config.update(baseUrlKey, '', vscode.ConfigurationTarget.Global);
+        }).then(() => {
+          this.pushModelConfig();
+        }).catch((err: unknown) => {
+          log.error({ err: String(err), key }, 'Failed to clear provider config');
+        });
+        return;
+      }
+
+      const defaults = PROVIDER_DEFAULTS[newProvider];
+      const defaultModel = track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model;
+      const defaultBaseUrl = defaults?.baseUrl ?? '';
+
+      // 链式写入：provider → model → baseUrl
+      Promise.resolve(config.update(key, newProvider, vscode.ConfigurationTarget.Global)).then(() => {
+        return config.update(modelKey, defaultModel, vscode.ConfigurationTarget.Global);
       }).then(() => {
-        // 仅当 default baseUrl 非空时才显式写入；否则用 undefined 删除用户残留的旧 baseUrl，
-        // 让读侧（pushModelConfig / registry.readLevelConfig）通过 PROVIDER_DEFAULTS 兜底。
-        return config.update(
-          baseUrlKey,
-          defaults.baseUrl ? defaults.baseUrl : undefined,
-          vscode.ConfigurationTarget.Global,
-        );
+        return config.update(baseUrlKey, defaultBaseUrl, vscode.ConfigurationTarget.Global);
       }).then(() => {
         this.pushModelConfig();
         // Provider 切换后自动拉取新 Provider 的模型列表
@@ -868,31 +878,34 @@ export class DualMindChatPanel {
       return;
     }
 
-    // apiKey 兜底防御：若 webview 意外传回掩码字符或纯空白，直接忽略，避免污染 settings.json
+    // apiKey 处理：掩码字符不写入，但允许空值清空
     if (field === 'apiKey' && typeof value === 'string') {
       const trimmed = value.trim();
-      if (trimmed === '••••••••' || !trimmed) {
-        // 不写入；保持原有 key 不变，但仍重新推送当前 config 给 webview 以刷新 UI 状态
+      if (trimmed === '••••••••') {
+        // 掩码字符不写入，保持原有 key 不变
         this.pushModelConfig();
         return;
       }
-      // 防御：过滤非 ASCII 字符（HTTP 头部仅允许 ByteString，含中文会导致请求崩溃）
-      const asciiOnly = trimmed.replace(/[^\x00-\xFF]/g, '');
-      if (asciiOnly.length !== trimmed.length) {
-        log.warn(
-          { removedChars: trimmed.length - asciiOnly.length },
-          'API Key contains non-ASCII characters, they have been stripped',
-        );
-        if (!asciiOnly) {
-          // 过滤后为空（全是非法字符），不写入
-          this.pushModelConfig();
-          return;
+      // 空值允许清空；非空时防御：过滤非 ASCII 字符
+      if (trimmed) {
+        const asciiOnly = trimmed.replace(/[^\x00-\xFF]/g, '');
+        if (asciiOnly.length !== trimmed.length) {
+          log.warn(
+            { removedChars: trimmed.length - asciiOnly.length },
+            'API Key contains non-ASCII characters, they have been stripped',
+          );
+          if (!asciiOnly) {
+            // 过滤后为空（全是非法字符），不写入
+            this.pushModelConfig();
+            return;
+          }
+          value = asciiOnly;
         }
-        value = asciiOnly;
       }
     }
 
-    config.update(key, value || undefined, vscode.ConfigurationTarget.Global).then(
+    // 允许空值持久化（不转换为 undefined），这样用户可以清空字段
+    config.update(key, value, vscode.ConfigurationTarget.Global).then(
       () => {
         this.pushModelConfig();
       },
