@@ -65,6 +65,27 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
   });
   const [vllmLevelExpanded, setVllmLevelExpanded] = useState<Record<number, boolean>>({ 1: true });
 
+  // ─── 动态模型列表（从 Provider API 获取） ───
+  const [llmModelOptions, setLlmModelOptions] = useState<Record<number, Array<{ id: string; name: string }>>>({});
+  const [vllmModelOptions, setVllmModelOptions] = useState<Record<number, Array<{ id: string; name: string }>>>({});
+
+  // 监听 extension host 推送的动态模型列表
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      const msg = ev.data;
+      if (msg?.type === 'provider_models_fetched') {
+        const { track, level, models } = msg;
+        if (track === 'llm') {
+          setLlmModelOptions((prev) => ({ ...prev, [level]: models }));
+        } else if (track === 'vllm') {
+          setVllmModelOptions((prev) => ({ ...prev, [level]: models }));
+        }
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
   // ─── 从 extension host 推送的 config 同步到本地 state ───
   useEffect(() => {
     if (!config) return;
@@ -214,6 +235,7 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                     model={cfg.model}
                     onModelChange={(v) => updateLlmLevel(level, 'model', v)}
                     onProviderChange={(v) => updateLlmProvider(level, v)}
+                    modelOptions={llmModelOptions[level]}
                     testing={llmTesting}
                     testResult={llmTestResult}
                     onTestConnection={level === 1 ? handleTestLlm : undefined}
@@ -257,6 +279,7 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                     model={cfg.model}
                     onModelChange={(v) => updateVllmLevel(level, 'model', v)}
                     onProviderChange={(v) => updateVllmProvider(level, v)}
+                    modelOptions={vllmModelOptions[level]}
                     track="vllm"
                   />
                 </LevelCard>

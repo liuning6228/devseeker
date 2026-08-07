@@ -227,6 +227,12 @@ export type WebviewInboundMessage =
       field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'apiKeys';
       value: string | string[];
     }
+  /** 动态模型获取：Webview 请求从 Provider API 拉取可用模型列表 */
+  | {
+      type: 'fetch_provider_models';
+      track: 'llm' | 'vllm';
+      level: 1 | 2 | 3;
+    }
   /** W-UI2 · Accept 单文件 diff → 通知 extension 清除 inline diff 装饰 */
   | { type: 'accept_diff'; relPath: string }
   /** W-UI2 · Accept 所有文件 diff → 通知 extension 清除所有 inline diff 装饰 */
@@ -565,6 +571,14 @@ export type WebviewOutboundMessage =
   | { type: 'todo_list'; payload: TodoListPayload }
   /** 模型配置推送（Extension → Webview） */
   | { type: 'model_config'; payload: ModelConfigPayload }
+  /** 动态模型列表推送（Extension → Webview） */
+  | {
+      type: 'provider_models_fetched';
+      track: 'llm' | 'vllm';
+      level: 1 | 2 | 3;
+      provider: string;
+      models: Array<{ id: string; name: string }>;
+    }
   /** W11.4 · run_preview 请求通知 webview 显示「打开预览」按钮 */
   | {
       type: 'preview_request';

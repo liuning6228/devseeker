@@ -860,6 +860,8 @@ export class DualMindChatPanel {
         );
       }).then(() => {
         this.pushModelConfig();
+        // Provider 切换后自动拉取新 Provider 的模型列表
+        this.fetchProviderModels(track, level);
       }).catch((err: unknown) => {
         log.error({ err: String(err), key }, 'Failed to update model config (provider switch)');
       });
@@ -898,6 +900,85 @@ export class DualMindChatPanel {
         log.error({ err: String(err), key }, 'Failed to update model config');
       },
     );
+  }
+
+  // ─── 动态模型列表获取 ───
+
+  /** 模型列表缓存：key = `${track}:${level}:${provider}:${baseUrl}`, value = { models, fetchedAt } */
+  private readonly providerModelsCache = new Map<string, { models: Array<{ id: string; name: string }>; fetchedAt: number }>();
+  private static readonly PROVIDER_MODELS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+
+  /**
+   * 从 Provider 的 /v1/models 端点动态获取可用模型列表。
+   * 成功后通过 provider_models_fetched 消息推送到 webview，更新本地模型列表。
+   */
+  private async fetchProviderModels(track: 'llm' | 'vllm', level: 1 | 2 | 3): Promise<void> {
+    const config = vscode.workspace.getConfiguration('devSeeker');
+    const provider = (config.get<string>(`models.${track}.level${level}.provider`) ?? '').trim();
+    const baseUrl = (config.get<string>(`models.${track}.level${level}.baseUrl`) ?? '').trim().replace(/\/+$/, '');
+    const apiKey = (config.get<string>(`models.${track}.level${level}.apiKey`) ?? '').trim();
+
+    if (!provider || !baseUrl) {
+      log.debug({ track, level, provider, baseUrl }, '[fetchProviderModels] skipped: missing provider or baseUrl');
+      return;
+    }
+
+    if (!URL.canParse(baseUrl)) {
+      log.debug({ baseUrl }, '[fetchProviderModels] skipped: invalid baseUrl');
+      return;
+    }
+
+    // 检查缓存
+    const cacheKey = `${track}:${level}:${provider}:${baseUrl}`;
+    const cached = this.providerModelsCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < DualMindChatPanel.PROVIDER_MODELS_CACHE_TTL_MS) {
+      log.debug({ cacheKey, modelCount: cached.models.length }, '[fetchProviderModels] cache hit');
+      this.post({
+        type: 'provider_models_fetched',
+        track, level, provider,
+        models: cached.models,
+      });
+      return;
+    }
+
+    try {
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const url = `${baseUrl}/models`;
+      log.info({ url, provider }, '[fetchProviderModels] fetching models');
+
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) {
+        log.warn({ url, status: response.status, statusText: response.statusText }, '[fetchProviderModels] request failed');
+        return;
+      }
+
+      const data = await response.json() as { data?: Array<{ id?: string }> };
+      const modelsArray = data?.data?.map((m) => m.id).filter((id): id is string => !!id) ?? [];
+      const uniqueIds = [...new Set(modelsArray)];
+
+      if (uniqueIds.length === 0) {
+        log.debug({ url }, '[fetchProviderModels] no models returned');
+        return;
+      }
+
+      const models = uniqueIds.map((id) => ({ id, name: id }));
+
+      // 更新缓存
+      this.providerModelsCache.set(cacheKey, { models, fetchedAt: Date.now() });
+
+      log.info({ provider, modelCount: models.length }, '[fetchProviderModels] success');
+      this.post({
+        type: 'provider_models_fetched',
+        track, level, provider,
+        models,
+      });
+    } catch (e) {
+      log.warn({ err: String(e), provider, baseUrl }, '[fetchProviderModels] error');
+    }
   }
 
   // ─── 联网搜索配置：推送 & 更新 ───
@@ -1080,6 +1161,10 @@ export class DualMindChatPanel {
 
       case 'update_model_config':
         this.handleUpdateModelConfig(msg.track, msg.level, msg.field, msg.value);
+        break;
+
+      case 'fetch_provider_models':
+        this.fetchProviderModels(msg.track, msg.level);
         break;
 
       case 'update_search_config':
