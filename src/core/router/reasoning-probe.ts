@@ -146,3 +146,75 @@ export function detectDebugNeed(userInput: string): DebugProbeResult {
 
   return { needed, confidence, signals };
 }
+
+// ── T10 · LLM 语义 BUG 判定 ──
+
+import type { IProvider } from '../../providers/base.js';
+import type { Message } from '../../providers/types.js';
+
+/**
+ * LLM 语义 BUG 判定：当关键词正则未命中时，用 flash 模型做语义分类。
+ *
+ * 设计原则：
+ * - 仅作为兜底，关键词命中时不调用（零延迟）
+ * - 极简 prompt，只返回 yes/no
+ * - 500ms 超时保护，超时则放弃（返回 needed=false）
+ */
+const SEMANTIC_DEBUG_PROMPT = `You are a bug detection classifier. Determine if the user's message describes a software bug, error, or unexpected behavior.
+
+Rules:
+- Reply ONLY "yes" or "no"
+- "yes" = message describes a bug, error, crash, failure, or something not working as expected
+- "no" = message is a feature request, question, or normal task
+
+User message:
+`;
+
+export async function detectDebugNeedSemantic(
+  userInput: string,
+  provider: IProvider,
+): Promise<DebugProbeResult> {
+  const text = (userInput ?? '').trim();
+  if (text.length === 0 || text.length > 2000) {
+    return { needed: false, confidence: 0, signals: [] };
+  }
+
+  const messages: Message[] = [
+    { role: 'user', content: SEMANTIC_DEBUG_PROMPT + text },
+  ];
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 500);
+
+  try {
+    let response = '';
+    const stream = provider.createMessage({
+      messages,
+      maxTokens: 10,
+      temperature: 0,
+      signal: controller.signal,
+    });
+
+    for await (const event of stream) {
+      if (event.type === 'text_delta') {
+        response += event.text;
+      }
+      if (event.type === 'done') break;
+    }
+
+    clearTimeout(timeoutId);
+
+    const normalized = response.trim().toLowerCase();
+    const isBug = normalized.includes('yes');
+
+    return {
+      needed: isBug,
+      confidence: isBug ? 0.7 : 0,
+      signals: isBug ? ['semantic-llm'] : [],
+    };
+  } catch (e) {
+    clearTimeout(timeoutId);
+    // 超时或调用失败 → 放弃，走原流程
+    return { needed: false, confidence: 0, signals: [] };
+  }
+}

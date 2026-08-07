@@ -19,7 +19,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectReasoningNeed, detectDebugNeed } from '../../src/core/router/reasoning-probe.js';
+import { detectReasoningNeed, detectDebugNeed, detectDebugNeedSemantic } from '../../src/core/router/reasoning-probe.js';
+import type { IProvider } from '../../src/providers/base.js';
 
 // ── 原有测试用例见下方 ──
 
@@ -257,5 +258,50 @@ describe('detectDebugNeed', () => {
     );
     expect(r.signals.length).toBeGreaterThanOrEqual(2);
     expect(r.confidence).toBeGreaterThanOrEqual(0.8);
+  });
+});
+
+// ── T10 · detectDebugNeedSemantic 回归测试 ──
+
+function createMockProvider(response: string): IProvider {
+  return {
+    id: 'mock',
+    capabilities: [],
+    contextWindow: 4096,
+    pricing: { input: 0, output: 0, inputPerMillion: 0, outputPerMillion: 0, currency: 'USD' },
+    createMessage: async function* () {
+      yield { type: 'text_delta', text: response };
+      yield { type: 'done', reason: 'stop' };
+    },
+    probe: async () => ({ ok: true, latencyMs: 0 }),
+    countTokens: async () => 0,
+    updateApiKey: () => {},
+  } as IProvider;
+}
+
+describe('detectDebugNeedSemantic', () => {
+  it('LLM returns "yes" → needed=true', async () => {
+    const provider = createMockProvider('yes');
+    const r = await detectDebugNeedSemantic('api key 设置后消失了', provider);
+    expect(r.needed).toBe(true);
+    expect(r.signals).toContain('semantic-llm');
+  });
+
+  it('LLM returns "no" → needed=false', async () => {
+    const provider = createMockProvider('no');
+    const r = await detectDebugNeedSemantic('帮我写一个排序算法', provider);
+    expect(r.needed).toBe(false);
+  });
+
+  it('empty input → needed=false', async () => {
+    const provider = createMockProvider('yes');
+    const r = await detectDebugNeedSemantic('', provider);
+    expect(r.needed).toBe(false);
+  });
+
+  it('very long input (>2000 chars) → skipped', async () => {
+    const provider = createMockProvider('yes');
+    const r = await detectDebugNeedSemantic('x'.repeat(2001), provider);
+    expect(r.needed).toBe(false);
   });
 });

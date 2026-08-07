@@ -47,7 +47,7 @@ import {
   PROVIDER_REASONING_MODELS,
 } from '../providers/model-config.js';
 import { ModelRouter, shouldKeepVisionPolicy, hasVisionContent } from '../core/router/router.js';
-import { detectReasoningNeed, detectDebugNeed } from '../core/router/reasoning-probe.js';
+import { detectReasoningNeed, detectDebugNeed, detectDebugNeedSemantic } from '../core/router/reasoning-probe.js';
 import { CostTracker } from '../core/cost/tracker.js';
 import { UsageJsonlStore } from '../core/cost/usage-store.js';
 import {
@@ -1597,7 +1597,25 @@ export class DualMindChatPanel {
     // ── T6 · Debug 模式自动决策（必须在 reasoning probe 之前执行！）──
     // 仅在 agent 模式下触发（debug 模式已激活则不重复判断）
     if (this.modeManager.getCurrent() === 'agent') {
-      const debugProbe = detectDebugNeed(userInput);
+      let debugProbe = detectDebugNeed(userInput);
+
+      // T10 · 关键词未命中时，用 LLM 语义判定兜底
+      if (!debugProbe.needed && defaultProvider) {
+        try {
+          const semanticProbe = await detectDebugNeedSemantic(userInput, defaultProvider);
+          if (semanticProbe.needed) {
+            debugProbe = semanticProbe;
+            log.info(
+              { signals: semanticProbe.signals, confidence: semanticProbe.confidence },
+              '[debug-probe] semantic LLM detection triggered',
+            );
+          }
+        } catch (e) {
+          // 语义判定失败 → 静默忽略，走原流程
+          log.debug({ err: String(e) }, '[debug-probe] semantic detection failed, ignoring');
+        }
+      }
+
       if (debugProbe.needed) {
         if (debugProbe.confidence >= 0.8) {
           // 高置信度 → 自动切换 debug 模式（在 reasoning probe 之前，确保 T2 强制 reasoning 生效）
