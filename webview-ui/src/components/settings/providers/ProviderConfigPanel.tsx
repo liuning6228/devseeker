@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { cn } from '../../../lib/utils.js';
 import { ApiKeyField } from '../common/ApiKeyField.js';
 import { BaseUrlField } from '../common/BaseUrlField.js';
@@ -16,9 +16,13 @@ interface ProviderConfigPanelProps {
   providerId: string;
   /** 显示名（如省略则从 providerId 自动推断） */
   displayName?: string;
-  /** API Key */
+  /** API Key：仅承载用户新输入的明文（已保存但未编辑时为空） */
   apiKey: string;
   onApiKeyChange: (value: string) => void;
+  /** 宿主是否已保存 API Key */
+  apiKeySet?: boolean;
+  /** 清除已保存的 API Key */
+  onApiKeyClear?: () => void;
   /** API 端点 */
   baseUrl: string;
   onBaseUrlChange: (value: string) => void;
@@ -33,6 +37,8 @@ interface ProviderConfigPanelProps {
   testing?: boolean;
   /** 连接测试结果 */
   testResult?: 'idle' | 'success' | 'error';
+  /** 测试失败的具体原因（仅 testResult === 'error' 时展示） */
+  testError?: string;
   onTestConnection?: () => void;
   /** Provider 变更回调 */
   onProviderChange?: (providerId: string) => void;
@@ -53,6 +59,8 @@ export function ProviderConfigPanel({
   displayName,
   apiKey,
   onApiKeyChange,
+  apiKeySet,
+  onApiKeyClear,
   baseUrl,
   onBaseUrlChange,
   model,
@@ -61,6 +69,7 @@ export function ProviderConfigPanel({
   defaultBaseUrl,
   testing,
   testResult,
+  testError,
   onTestConnection,
   onProviderChange,
   hideProviderSelect,
@@ -76,6 +85,17 @@ export function ProviderConfigPanel({
   const [customProviderInput, setCustomProviderInput] = useState(() =>
     !PROVIDER_TYPES.includes(providerId as ProviderType) ? providerId : '',
   );
+
+  // providerId 由外部变更时（宿主回推、清空或切换）同步自定义输入态，
+  // 否则会卡在自定义文本框里，与实际生效的 Provider 不一致
+  useEffect(() => {
+    if (!providerId || PROVIDER_TYPES.includes(providerId as ProviderType)) {
+      setCustomProviderMode(false);
+      setCustomProviderInput('');
+    } else {
+      setCustomProviderInput(providerId);
+    }
+  }, [providerId]);
 
   // 从 PROVIDER_DEFAULTS 推断默认 baseUrl
   const inferredDefaultUrl = useMemo(() => {
@@ -112,6 +132,7 @@ export function ProviderConfigPanel({
   const handleCustomProviderConfirm = useCallback(() => {
     const trimmed = customProviderInput.trim();
     if (trimmed) {
+      setCustomProviderMode(false);
       onProviderChange?.(trimmed);
     }
   }, [customProviderInput, onProviderChange]);
@@ -126,7 +147,7 @@ export function ProviderConfigPanel({
         {onTestConnection && (
           <button
             onClick={onTestConnection}
-            disabled={testing || !apiKey}
+            disabled={testing || (!apiKey && !apiKeySet)}
             className={cn(
               'px-2.5 py-1 text-xs rounded cursor-pointer',
               testResult === 'success' ? 'text-green-600 bg-green-500/10' :
@@ -218,7 +239,12 @@ export function ProviderConfigPanel({
       )}
 
       {/* API Key */}
-      <ApiKeyField value={apiKey} onChange={onApiKeyChange} />
+      <ApiKeyField
+        value={apiKey}
+        onChange={onApiKeyChange}
+        isSet={apiKeySet}
+        onClear={onApiKeyClear}
+      />
 
       {/* Base URL */}
       <BaseUrlField
@@ -233,6 +259,11 @@ export function ProviderConfigPanel({
         onChange={onModelChange}
         options={availableModels}
       />
+
+      {/* 测试失败原因：不显示具体原因的话用户无法判断是 Key 错、端点错还是网络不通 */}
+      {testResult === 'error' && testError && (
+        <p className="text-xs text-red-500 break-all">{testError}</p>
+      )}
     </div>
   );
 }

@@ -25,8 +25,8 @@ import {
 } from '../../src/core/modes/index.js';
 import type { ToolSafetyLevel } from '../../src/core/tools/types.js';
 
-function fakeTool(name: string, safetyLevel: ToolSafetyLevel) {
-  return { name, safetyLevel };
+function fakeTool(name: string, safetyLevel: ToolSafetyLevel, interactive?: boolean) {
+  return { name, safetyLevel, ...(interactive ? { interactive } : {}) };
 }
 
 describe('ModeManager', () => {
@@ -112,15 +112,19 @@ describe('isToolAllowedInMode', () => {
     expect(isToolAllowedInMode(fakeTool('skill', 'external'), 'plan')).toBe(false);
   });
 
-  // P1-D · ask_user_question 加入 Plan 白名单（Interview Phase 需要它提问）
-  it('Plan allows ask_user_question (safetyLevel=external) for Interview Phase', () => {
-    expect(
-      isToolAllowedInMode(fakeTool('ask_user_question', 'external'), 'plan'),
-    ).toBe(true);
-    // 但 Ask 模式仍然不放（用户已经直接提问，不需要反问）
-    expect(
-      isToolAllowedInMode(fakeTool('ask_user_question', 'external'), 'ask'),
-    ).toBe(false);
+  // 交互类工具由 ITool.interactive 标记放行（不再依赖 PLAN_EXTRA_ALLOW_TOOLS 硬编码名单）
+  it('interactive tools are allowed in agent/debug/plan but not ask', () => {
+    const askTool = () => fakeTool('ask_user_question', 'external', true);
+    expect(isToolAllowedInMode(askTool(), 'agent')).toBe(true);
+    expect(isToolAllowedInMode(askTool(), 'debug')).toBe(true);
+    // Plan 的 Interview Phase 需要向用户提问
+    expect(isToolAllowedInMode(askTool(), 'plan')).toBe(true);
+    // Ask 模式仍然不放（用户已经直接提问，不需要弹窗反问打断）
+    expect(isToolAllowedInMode(askTool(), 'ask')).toBe(false);
+
+    // 关键：放行来源于 interactive 标记而非工具名。
+    // 同名但未标记的 external 工具在 Plan 仍应被拒。
+    expect(isToolAllowedInMode(fakeTool('ask_user_question', 'external'), 'plan')).toBe(false);
   });
 
   it('Ask allows read_only + network (no create_plan, no switch_mode)', () => {

@@ -61,14 +61,14 @@ export const MODE_INFO: Record<Mode, ModeInfo> = {
 /**
  * 仅 Plan 模式允许的额外工具白名单。
  * - `create_plan` / `update_plan`：Plan 模式的核心产出工具（W6b2）。
- * - `ask_user_question`：Interview Phase 需要它向用户提问（P1-D 修复）。
- *   该工具 safetyLevel='external'，不在 read_only/network 里，
- *   不加白名单的话 Plan 模式 prompt 要求"分阶段需求收集"却根本调不到它。
+ *
+ * 注意：`ask_user_question` 不在此名单里——它由 ITool.interactive 标记统一放行（见下）。
+ * 交互类工具的可用性属于工具自身的语义，不应再用每个模式一张硬编码名单叙述一次，
+ * 否则名单与标记会分裂成两套真相。
  */
 const PLAN_EXTRA_ALLOW_TOOLS = new Set<string>([
   'create_plan',
   'update_plan',
-  'ask_user_question',
 ]);
 
 /**
@@ -81,6 +81,7 @@ const MODE_META_TOOLS = new Set<string>(['switch_mode']);
  * 判断一个工具在当前 mode 下是否可用。
  *
  * 规则：
+ * - 交互类工具（ITool.interactive）：Agent / Debug / Plan 放行，Ask 不放行
  * - Agent / Debug：所有工具（全开）
  * - Plan：safetyLevel === 'read_only' || 'network' + PLAN_EXTRA_ALLOW_TOOLS
  * - Ask：safetyLevel === 'read_only' || 'network'（允许查资料，但不改文件不跑命令）
@@ -91,13 +92,19 @@ const MODE_META_TOOLS = new Set<string>(['switch_mode']);
  * switch_mode 工具仅在 Agent / Debug 暴露给 LLM（Plan/Ask 不暴露）。
  */
 export function isToolAllowedInMode(
-  tool: Pick<ITool<unknown, ToolResult>, 'name' | 'safetyLevel'>,
+  tool: Pick<ITool<unknown, ToolResult>, 'name' | 'safetyLevel' | 'interactive'>,
   mode: Mode,
 ): boolean {
   // switch_mode 工具的特殊处理：仅 agent / debug 可见
   if (MODE_META_TOOLS.has(tool.name)) {
     return mode === 'agent' || mode === 'debug';
   }
+
+  // 交互类工具（如 ask_user_question）：它们不读不写任何东西，只向用户提问，
+  // 所以不可能违反 Plan 的只读边界，而 Plan 的需求收集阶段恰好需要反问用户。
+  // Ask 模式例外：该模式定位是轻量只读问答，用户已经直接提问，AI 应在回复里
+  // 用自然语言澄清，而不是弹窗打断（原设计决策）。
+  if (tool.interactive === true) return mode !== 'ask';
 
   switch (mode) {
     case 'agent':

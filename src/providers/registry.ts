@@ -135,9 +135,19 @@ function buildProvider(
       });
 
     default:
+      // 用户在设置页填写的自定义 Provider 名（不在 PROVIDER_TYPES 中）按 OpenAI 兼容接口处理，
+      // 否则自定义 Provider 会因抛错而完全无法注册。但缺少 baseUrl 时无法发请求，仍需报错引导用户补全。
+      if (baseUrl && model) {
+        log.info({ providerType, baseUrl, model }, 'Unknown provider treated as OpenAI-compatible');
+        return new OpenAIProvider({
+          apiKey: apiKey || 'placeholder',
+          baseUrl,
+          model,
+        });
+      }
       throw new AgentError({
         code: ErrorCodes.PROVIDER_MODEL_NOT_FOUND,
-        message: `Unknown provider type: ${providerType}`,
+        message: `Unknown provider type: ${providerType}（自定义 Provider 需同时填写 API 端点与模型名）`,
       });
   }
 }
@@ -186,6 +196,21 @@ function buildProviderWithId(
 }
 
 // ─────────── ProviderRegistry ───────────
+
+/**
+ * 单级配置的「原始读取」结果。
+ * 严格保留 `''`（用户显式清空）与 `undefined`（从未配置）的语义差异，
+ * 不做任何 PROVIDER_DEFAULTS 兜底 —— 供 UI 精确回显用户实际写入的内容。
+ */
+export interface RawLevelSettings {
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+  apiKeys?: string[];
+  baseUrl?: string;
+  reasoningModel?: string;
+  contextWindow?: number;
+}
 
 export class ProviderRegistry {
   private readonly providers = new Map<ProviderId, IProvider>();
@@ -274,18 +299,18 @@ export class ProviderRegistry {
       };
     }
 
-    // 检查是否有新格式的 provider 配置（即使没有凭证）
-    const hasAnyNewProvider = this.checkAnyNewProvider(config);
-
-    // 新格式有 provider 但无凭证 → 检查旧格式是否有凭证
+    // 新格式无凭证 → 仅当旧格式确实存有凭证时才回退迁移。
     const hasLegacyCredentials = !!(config.get<string>('deepseek.apiKey')?.trim()
       || config.get<string>('openai.apiKey')?.trim()
       || config.get<string>('qwenVl.apiKey')?.trim()
       || config.get<string>('anthropic.apiKey')?.trim());
 
-    if (hasAnyNewProvider && !hasNewConfigWithCredentials && !hasLegacyCredentials) {
-      // 新旧都没有凭证 → 仍走新格式（让 UI 引导用户配新格式）
-      log.warn('New config has provider but no API key; no legacy config either. Returning new config with placeholder credentials.');
+    if (!hasLegacyCredentials) {
+      // 新旧都没有凭证 → 仍走新格式（让 UI 引导用户配新格式）。
+      // 此处绝不能回退 legacy：migrateFromLegacyFlat 在空输入下会造出 3 级
+      // deepseek/ollama 占位 Provider，把降级链填满无凭证的幻影节点，
+      // 表现为 L1 失败后还要空跑 L2/L3 才报错、且报错指向用户从未配置的 Provider。
+      log.warn('No API key found in either new or legacy config; returning new config with placeholder credentials.');
       return {
         llm: this.readTrackConfig(config, 'llm'),
         vllm: this.readTrackConfig(config, 'vllm'),
@@ -320,28 +345,22 @@ export class ProviderRegistry {
     return migrateFromLegacyFlat(legacy);
   }
 
-  /** 检查新格式配置中是否有任何轨任何级的凭证 */
+  /**
+   * 检查新格式配置中是否有任何轨任何级的凭证。
+   *
+   * 必须走 inspect 而非 config.get：package.json 为 models.*.level*.* 配了 default
+   * （如 llm.level1.provider = 'deepseek'），config.get 永远能拿到值，判断结果会与
+   * 真正读配置的 readLevelConfig（inspect 语义）分裂成两套真相。
+   * L1 例外：readLevelConfig 允许 L1 缺 provider 并返回占位，故 L1 只要有凭证就算已配置。
+   */
   private checkNewConfigCredentials(config: vscode.WorkspaceConfiguration): boolean {
+    const { str, arr } = ProviderRegistry.makeInspectors(config);
     for (const track of ['llm', 'vllm'] as const) {
       for (let level = 1; level <= 3; level++) {
         const prefix = `models.${track}.level${level}`;
-        const provider = config.get<string>(`${prefix}.provider`)?.trim();
-        const apiKey = config.get<string>(`${prefix}.apiKey`)?.trim();
-        const apiKeys = config.get<string[]>(`${prefix}.apiKeys`);
-        if (provider && (apiKey || (apiKeys && apiKeys.length > 0))) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  /** 检查新格式配置中是否有任何 provider 配置（无论有无凭证） */
-  private checkAnyNewProvider(config: vscode.WorkspaceConfiguration): boolean {
-    for (const track of ['llm', 'vllm'] as const) {
-      for (let level = 1; level <= 3; level++) {
-        const provider = config.get<string>(`models.${track}.level${level}.provider`)?.trim();
-        if (provider) return true;
+        const provider = str(`${prefix}.provider`)?.trim();
+        const hasKey = !!str(`${prefix}.apiKey`)?.trim() || (arr(`${prefix}.apiKeys`)?.length ?? 0) > 0;
+        if (hasKey && (provider || level === 1)) return true;
       }
     }
     return false;
@@ -361,70 +380,80 @@ export class ProviderRegistry {
     };
   }
 
-  /** 从 VSCode 配置读取单级配置；L2/L3 的 provider 为空则返回 undefined（未配置） */
+  /**
+   * 构造 inspect 读取器。
+   * 用 inspect 区分"用户显式写入"与"package.json default"：
+   * - workspaceFolder > workspace > global 依次取第一个有值的层级
+   * - defaultValue（package.json）不视为"用户配置"，返回 undefined 让下游兜底
+   *
+   * 空字符串 `''` 会被保留（表示用户显式清空），与 `undefined`（从未配置）区分开。
+   */
+  private static makeInspectors(config: vscode.WorkspaceConfiguration) {
+    const pick = <T>(info: { defaultValue?: T; globalValue?: T; workspaceValue?: T; workspaceFolderValue?: T } | undefined): T | undefined => {
+      if (!info) return undefined;
+      if (info.workspaceFolderValue !== undefined) return info.workspaceFolderValue;
+      if (info.workspaceValue !== undefined) return info.workspaceValue;
+      if (info.globalValue !== undefined) return info.globalValue;
+      return undefined;
+    };
+    return {
+      str: (key: string): string | undefined => {
+        const v = pick<string>(config.inspect<string>(key));
+        return typeof v === 'string' ? v : undefined;
+      },
+      arr: (key: string): string[] | undefined => {
+        const v = pick<string[]>(config.inspect<string[]>(key));
+        if (!Array.isArray(v)) return undefined;
+        const filtered = v.filter((k) => k?.trim());
+        return filtered.length ? filtered : undefined;
+      },
+      num: (key: string): number | undefined => {
+        const v = pick<number>(config.inspect<number>(key));
+        return typeof v === 'number' && v > 0 ? v : undefined;
+      },
+    };
+  }
+
+  /**
+   * 读取单级配置的原始值（供 UI 精确回显）。
+   * 与 readLevelConfig 不同：不做任何 PROVIDER_DEFAULTS 兜底，
+   * 严格保留 `''`（用户显式清空）与 `undefined`（从未配置）的差异。
+   */
+  readRawLevelSettings(
+    config: vscode.WorkspaceConfiguration,
+    track: 'llm' | 'vllm',
+    level: ModelLevel,
+  ): RawLevelSettings {
+    const prefix = `models.${track}.level${level}`;
+    const { str, arr, num } = ProviderRegistry.makeInspectors(config);
+    return {
+      provider: str(`${prefix}.provider`),
+      model: str(`${prefix}.model`),
+      apiKey: str(`${prefix}.apiKey`),
+      apiKeys: arr(`${prefix}.apiKeys`),
+      baseUrl: str(`${prefix}.baseUrl`),
+      reasoningModel: str(`${prefix}.reasoningModel`),
+      contextWindow: num(`${prefix}.contextWindow`),
+    };
+  }
+
+  /** 从 VSCode 配置读取单级配置；provider 为空则返回 undefined（未配置，L1 除外） */
   private readLevelConfig(
     config: vscode.WorkspaceConfiguration,
     track: 'llm' | 'vllm',
     level: ModelLevel,
   ): ModelLevelConfig | undefined {
     const prefix = `models.${track}.level${level}`;
-    // 用 inspect 区分"用户显式写入"与"package.json default"：
-    // - 所有 scope 都无值（workspace/global/default 全为 undefined）→ 视为未配置 → 返回 undefined
-    // - 任一层级有值 → 使用该值（按 workspace > global > default 优先级）
-    // 这样 VS Code Settings 页能用 package.json default 显示默认值，
-    // 代码侧也能正确识别"未配置"语义，避免把 package.json 默认值当成用户值写回。
-    const pickValue = <T>(info: { defaultValue?: T; globalValue?: T; workspaceValue?: T; workspaceFolderValue?: T } | undefined): T | undefined => {
-      if (!info) return undefined;
-      if (info.workspaceFolderValue !== undefined) return info.workspaceFolderValue;
-      if (info.workspaceValue !== undefined) return info.workspaceValue;
-      if (info.globalValue !== undefined) return info.globalValue;
-      // defaultValue 来自 package.json；当且仅当其他层级全无值时才用到。
-      // 但这里不把它视为"用户配置"——返回 undefined，让下游 PROVIDER_DEFAULTS 兜底。
-      return undefined;
-    };
-    const inspectStr = (key: string): string | undefined => {
-      const v = pickValue<string>(config.inspect<string>(key));
-      if (typeof v !== 'string') return undefined;
-      // 保留空字符串（用户显式清空），而不是转换为 undefined
-      // 这样可以区分"用户显式清空"和"用户从未配置"
-      return v;
-    };
-    const inspectArr = (key: string): string[] | undefined => {
-      const v = pickValue<string[]>(config.inspect<string[]>(key));
-      if (!Array.isArray(v)) return undefined;
-      const filtered = v.filter((k) => k?.trim());
-      return filtered.length ? filtered : undefined;
-    };
-    const inspectNum = (key: string): number | undefined => {
-      const v = pickValue<number>(config.inspect<number>(key));
-      return typeof v === 'number' && v > 0 ? v : undefined;
-    };
+    const { str: inspectStr, arr: inspectArr, num: inspectNum } = ProviderRegistry.makeInspectors(config);
 
-    const provider = inspectStr(`${prefix}.provider`) as ProviderType | undefined;
+    const provider = inspectStr(`${prefix}.provider`)?.trim() as ProviderType | undefined;
 
     if (!provider) {
-      // L2/L3 可选：未配置 provider → 不注册（避免幻影 Provider 占据降级链和 UI 下拉）
-      if (level !== 1) {
-        // 检查是否有其他字段被用户显式配置（如 apiKey）。
-        // 如果有，说明用户已开始配置该 Level 但尚未选择 Provider，
-        // 返回默认 Provider 占位，确保 UI 能回显已配置的 apiKey 掩码等信息。
-        const hasAnyField = inspectStr(`${prefix}.apiKey`) !== undefined
-          || inspectArr(`${prefix}.apiKeys`) !== undefined
-          || inspectStr(`${prefix}.model`) !== undefined
-          || inspectStr(`${prefix}.baseUrl`) !== undefined;
-        if (!hasAnyField) return undefined;
-        // 有字段但无 provider → 用默认 Provider 占位，让 UI 能回显
-        const defaultProvider = track === 'llm' ? 'deepseek' : 'qwen';
-        const defaults = PROVIDER_DEFAULTS[defaultProvider];
-        return {
-          provider: defaultProvider,
-          model: track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model,
-          apiKey: inspectStr(`${prefix}.apiKey`),
-          apiKeys: inspectArr(`${prefix}.apiKeys`),
-          baseUrl: inspectStr(`${prefix}.baseUrl`),
-        };
-      }
-      // Level 1 必填，返回占位（引导用户配置）
+      // provider 为空（未配置或用户显式清空）→ 不构造 Provider。
+      // L2/L3 直接返回 undefined，避免幻影 Provider 占据降级链；
+      // L1 因 ModelTrackConfig.level1 为必填，返回默认占位以引导用户配置
+      // （UI 回显不走此路径，改用 readRawLevelSettings，故不会污染设置页显示）。
+      if (level !== 1) return undefined;
       const defaultProvider = track === 'llm' ? 'deepseek' : 'qwen';
       const defaults = PROVIDER_DEFAULTS[defaultProvider];
       return {
@@ -437,13 +466,16 @@ export class ProviderRegistry {
       };
     }
 
+    // 自定义 Provider（不在 PROVIDER_DEFAULTS 中）时 defaults 为 undefined，需可选链保护，
+    // 否则此处抛错会中断整个 initFromConfig，导致所有 Provider 都注册失败。
+    const defaults = PROVIDER_DEFAULTS[provider] as typeof PROVIDER_DEFAULTS[ProviderType] | undefined;
+    const defaultModel = track === 'vllm' && defaults?.vllmModel ? defaults.vllmModel : (defaults?.model ?? '');
+
     return {
       provider,
       // model 字段兜底：用户未显式配置时用 PROVIDER_DEFAULTS 默认值（保证 ModelLevelConfig.model 类型 string）
       // 结合 package.json default 与 PROVIDER_DEFAULTS 取同一值，VS Code Settings 页与 webview 显示一致
-      model: inspectStr(`${prefix}.model`) ?? (track === 'vllm' && PROVIDER_DEFAULTS[provider].vllmModel
-        ? PROVIDER_DEFAULTS[provider].vllmModel!
-        : PROVIDER_DEFAULTS[provider].model),
+      model: inspectStr(`${prefix}.model`) ?? defaultModel,
       apiKey: inspectStr(`${prefix}.apiKey`),
       apiKeys: inspectArr(`${prefix}.apiKeys`),
       baseUrl: inspectStr(`${prefix}.baseUrl`),

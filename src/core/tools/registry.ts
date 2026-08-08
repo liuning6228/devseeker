@@ -153,7 +153,17 @@ export class ToolRunner {
       };
     }
 
-    const timeoutMs = opts.timeoutMs ?? tool.executionTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+    // 交互类工具不设执行超时：它的耗时全部是「用户在读题、思考、打字」，
+    // 用挂钟给人类思考计时是错的。默认 30s 远不够读完 2-4 个问题再输入自定义方案，
+    // 而 withTimeout 只是 race —— 超时后底层 Promise 仍在跑、弹窗仍在 UI 上，
+    // 用户随后提交的答案会 resolve 一个已被丢弃的 Promise，答案静默丢失
+    // （LLM 已经收到「执行超时」并继续往下走了）。
+    // 这与 approvalGate 的设计一致：审批门同样不设超时，只与 ctx.signal 竞速。
+    // 中止路径由 signal 覆盖（Stop / 新会话 / dispose → cancelAllPendingAsk）。
+    // opts.timeoutMs 显式传入时仍然尊重（调用方明确要求）。
+    const timeoutMs =
+      opts.timeoutMs ??
+      (tool.interactive ? undefined : tool.executionTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS);
     const ctx: ToolContext = {
       workspaceRoot: opts.workspaceRoot,
       signal: opts.signal,
@@ -201,7 +211,11 @@ export class ToolRunner {
     const bashForceApproval = isBashTool && commandSafety === 'safe' && this.approvalGate !== undefined;
 
     // confirm 或 dangerous 或 bash safe 强制审批 → 走审批门
-    const needsApproval = approvalResult.decision === 'confirm' || bashForceApproval;
+    // 交互类工具（tool.interactive）除外：它们的执行本身就是向用户弹窗征询，
+    // 再套一层审批会产生双重弹窗，且用户误拒后真正的交互卡片永远不会出现。
+    // 注意这里只豁免 confirm —— deny 已在上方硬拒绝，不受影响。
+    const needsApproval =
+      !tool.interactive && (approvalResult.decision === 'confirm' || bashForceApproval);
     if (needsApproval && this.approvalGate) {
       const allowRemember = approvalResult.reason.startsWith('按 ToolSafetyLevel.');
       let approvedResult: { approved: boolean; remember?: boolean; redirected?: boolean };
@@ -325,11 +339,14 @@ export class ToolRunner {
       ? { ...(opts.args as Record<string, unknown>), terminalMode: 'user_visible' }
       : opts.args;
     try {
-      result = await withTimeout(
-        tool.execute(execArgs, ctx),
-        timeoutMs,
-        `工具 "${tool.name}" 执行超时（${timeoutMs}ms）`,
-      );
+      result =
+        timeoutMs === undefined
+          ? await tool.execute(execArgs, ctx)
+          : await withTimeout(
+              tool.execute(execArgs, ctx),
+              timeoutMs,
+              `工具 "${tool.name}" 执行超时（${timeoutMs}ms）`,
+            );
       log.debug(
         {
           tool: tool.name,
@@ -378,7 +395,13 @@ export class ToolRunner {
         timestamp: new Date().toISOString(),
         toolName: tool.name,
         safetyLevel: tool.safetyLevel,
-        decision: needsApproval ? 'confirm' : approvalResult.decision as 'deny' | 'auto',
+        // 交互类工具虽然策略表算出 'confirm'，但它没走审批门（执行本身即征询），
+        // 记成 'confirm' 会让审计日志读起来像「用户确认过」。记 'auto' 才是事实。
+        decision: needsApproval
+          ? 'confirm'
+          : tool.interactive
+            ? 'auto'
+            : (approvalResult.decision as 'deny' | 'auto'),
         approved: result.ok,
         reason: approvalResult.reason,
         argsPreview: truncate(safeStringify(opts.args), 200),

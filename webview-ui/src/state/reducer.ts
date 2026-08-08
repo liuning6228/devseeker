@@ -7,7 +7,6 @@ import type {
   IndexProgressPayload,
   IndexStatusPayload,
   ModeStatusPayload,
-  AskQuestionPayload,
   ApprovalRequestPayload,
   ToolDiffPayload,
   TodoItem,
@@ -118,8 +117,6 @@ export interface AppState {
   indexProgress?: IndexProgressPayload;
   indexStatus?: IndexStatusPayload;
   modeStatus?: ModeStatusPayload;
-  /** W7b4b · 当前 pending 的 ask_user_question；一次仅一个 */
-  askQuestion?: AskQuestionPayload;
   /** 当前 pending 的审批请求；一次仅一个 */
   approvalRequest?: ApprovalRequestPayload;
   /** 等待审批的 toolCallId 集合（与 ToolCard 关联） */
@@ -165,8 +162,6 @@ export type Action =
   | { type: 'REINDEX_PROGRESS'; payload: IndexProgressPayload }
   | { type: 'INDEX_STATUS'; payload: IndexStatusPayload }
   | { type: 'MODE_STATUS'; payload: ModeStatusPayload }
-  | { type: 'ASK_QUESTION'; payload: AskQuestionPayload }
-  | { type: 'ASK_CLEAR' }
   | { type: 'APPROVAL_REQUEST'; payload: ApprovalRequestPayload }
   | { type: 'APPROVAL_CLEAR' }
   | { type: 'TOOL_DIFF'; payload: ToolDiffPayload }
@@ -224,7 +219,7 @@ export function reducer(state: AppState, action: Action): AppState {
         revertedHunks: new Set(),
         toolCallIndex: new Map(),
         // 清除残留的弹窗状态，避免会话切换后显示已取消的弹窗
-        askQuestion: undefined,
+        // （ask_user_question 弹窗由 AppWithNav 的 useState 持有，不在此 store 里）
         approvalRequest: undefined,
         messages: action.messages.map((m, i) => ({
           id: `hist-${i}`,
@@ -251,12 +246,6 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'MODE_STATUS':
       return { ...state, modeStatus: action.payload };
-
-    case 'ASK_QUESTION':
-      return { ...state, askQuestion: action.payload };
-
-    case 'ASK_CLEAR':
-      return { ...state, askQuestion: undefined };
 
     case 'APPROVAL_REQUEST': {
       const nextIds = new Set(state.pendingApprovalToolIds);

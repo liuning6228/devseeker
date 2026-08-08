@@ -14,9 +14,10 @@
  * - 工具 await panel 回调，panel 通过 ask_question_response 回填
  * - 工具把回复的结构化 JSON 作为 content 返回给 LLM（tool role message）
  *
- * 取消行为：
- * - ctx.signal abort → 立即 resolve cancelled=true
- * - panel.dispose / new_session → pending ask 全部 cancelled
+ * 取消行为（两种语义必须区分）：
+ * - ctx.signal abort（用户点 Stop / 新会话 / panel dispose）→ 任务真中止，返回失败
+ * - 用户在弹窗上点「取消」→ 仅表示「不想从这些选项里选，你自己定」，不等于中止任务；
+ *   必须返回 ok=true 并引导 LLM 带着假设继续推进，否则 LLM 会把它当成失败而放弃任务
  *
  * 设计权衡：
  * - UI 总是自动追加 "Other" 选项（webview 层处理），工具层只关心结构化答案
@@ -109,6 +110,15 @@ export class AskUserQuestionTool implements ITool<AskUserQuestionArgs, ToolResul
     '只用于对话确实需要用户输入的岔路，不要用于可以自行推断的场景。';
   readonly parameters = PARAMS_SCHEMA;
   readonly safetyLevel = 'external' as const;
+  /**
+   * 交互类工具：执行即向用户弹窗征询，永不进审批门。
+   *
+   * safetyLevel 保留 'external'（供 Plan/Ask 模式白名单与 MCP 审批策略区分用），
+   * 但 DEFAULT_POLICY.external = 'confirm' 会把本工具拦在审批卡后面，造成双重弹窗。
+   * 不能改 external 的默认策略：该等级同时覆盖所有 MCP 工具（mcp/tool-adapter.ts），
+   * 改成 auto 会让第三方 MCP 工具集体绕过审批。
+   */
+  readonly interactive = true as const;
 
   private readonly bridge: AskUserQuestionBridge;
   private readonly genRequestId: () => string;
@@ -150,10 +160,23 @@ export class AskUserQuestionTool implements ITool<AskUserQuestionArgs, ToolResul
     }
 
     if (response.cancelled) {
+      // 任务真中止（Stop / 新会话 / dispose）—— signal 已 abort
+      if (ctx.signal.aborted) {
+        return {
+          ok: false,
+          content: 'Error: ask_user_question 已取消（任务中止）',
+          errorCode: ErrorCodes.TASK_LOOP_ABORTED,
+        };
+      }
+      // 用户主动关掉弹窗 = "不想选，你自己定"，不是中止任务。
+      // 必须 ok=true：否则 LLM 把它当成工具失败，典型反应是放弃整个任务或反复重试提问。
+      log.info({ requestId }, 'ask_user_question dismissed by user; instructing LLM to proceed');
       return {
-        ok: false,
-        content: 'Error: 用户取消了 ask_user_question',
-        errorCode: ErrorCodes.TASK_LOOP_ABORTED,
+        ok: true,
+        content:
+          'The user dismissed the question without answering. Do NOT ask the same question again. '
+          + 'Proceed with the most reasonable default based on the current context, '
+          + 'and explicitly state the assumption you made so the user can correct it later.',
       };
     }
 

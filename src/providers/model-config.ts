@@ -493,18 +493,28 @@ export function getLevelProviderId(provider: ProviderType, level: ModelLevel, tr
   return `${provider}:${track}:L${level}`;
 }
 
+/**
+ * 取 Provider 的内置默认值。
+ * 用户可在设置页填写任意自定义 Provider 名（如 `zhipu`），此时不在 PROVIDER_DEFAULTS 中，
+ * 必须返回 undefined 而非直接索引，否则会抛 TypeError 中断整个 Provider 注册流程。
+ */
+function lookupDefaults(provider: string): typeof PROVIDER_DEFAULTS[ProviderType] | undefined {
+  return PROVIDER_DEFAULTS[provider as ProviderType] as typeof PROVIDER_DEFAULTS[ProviderType] | undefined;
+}
+
 /** 获取某级配置的有效 baseUrl（用户未配则回退到 Provider 默认值） */
 export function resolveBaseUrl(config: ModelLevelConfig): string {
   const custom = (config.baseUrl ?? '').trim().replace(/\/+$/, '');
   if (custom) return custom;
-  return PROVIDER_DEFAULTS[config.provider].baseUrl;
+  return lookupDefaults(config.provider)?.baseUrl ?? '';
 }
 
 /** 获取某级配置的有效 model（用户未配则回退到 Provider 默认值） */
 export function resolveModel(config: ModelLevelConfig, track?: 'llm' | 'vllm'): string {
   const custom = (config.model ?? '').trim();
   const fallback = (() => {
-    const defaults = PROVIDER_DEFAULTS[config.provider];
+    const defaults = lookupDefaults(config.provider);
+    if (!defaults) return '';
     if (track === 'vllm' && defaults.vllmModel) return defaults.vllmModel;
     return defaults.model;
   })();
@@ -520,7 +530,7 @@ export function resolveModel(config: ModelLevelConfig, track?: 'llm' | 'vllm'): 
 export function resolveReasoningModel(config: ModelLevelConfig): string | undefined {
   const raw = config.reasoningModel?.trim()
     ? config.reasoningModel.trim()
-    : PROVIDER_DEFAULTS[config.provider].reasoningModel;
+    : lookupDefaults(config.provider)?.reasoningModel;
   if (!raw) return raw;
   if (config.provider === 'deepseek') {
     return normalizeDeepSeekModel(raw);

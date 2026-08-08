@@ -34,12 +34,12 @@ import type {
 } from './messages.js';
 import type { AskQuestionItem, TodoItem, TodoListPayload, ModelConfigPayload, ModelLevelConfigPayload, ApprovalRequestPayload } from '../shared/protocol.js';
 import { getProviderRegistry } from '../providers/registry.js';
+import type { RawLevelSettings } from '../providers/registry.js';
 import type { IProvider } from '../providers/base.js';
 import type { Message, ProviderId } from '../providers/types.js';
 import {
   type ProviderType,
   type ModelLevel,
-  type ModelLevelConfig,
   PROVIDER_TYPES,
   PROVIDER_DEFAULTS,
   PROVIDER_DISPLAY_NAMES,
@@ -775,21 +775,36 @@ export class DualMindChatPanel {
   private pushModelConfig(): void {
     const config = vscode.workspace.getConfiguration('devSeeker');
     const registry = getProviderRegistry();
-    const modelsConfig = registry.readModelsConfigPublic(config);
 
-    const toPayload = (c: ModelLevelConfig, track: 'llm' | 'vllm'): ModelLevelConfigPayload => {
-      // 尊重用户的显式输入（包括空值），不再用 PROVIDER_DEFAULTS 填充
-      // 只有当 provider 存在且 model/baseUrl 为 undefined 时才用默认值
-      const defaults = c.provider ? PROVIDER_DEFAULTS[c.provider] : undefined;
-      const defaultModel = defaults ? (track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model) : '';
+    // UI 回显基于 inspect 语义。与 readModelsConfigPublic 不同，这里不走
+    // PROVIDER_DEFAULTS 自动填充逻辑，避免「用户显式清空后重新打开又变回默认值」。
+    // 但选了 provider 时 model / baseUrl / reasoningModel 不允许为空：
+    // 用 || 而非 ?? —— 空字符串和 undefined 一样，都兜底为 defaultModel。
+    const toPayload = (raw: RawLevelSettings, track: 'llm' | 'vllm'): ModelLevelConfigPayload => {
+      const provider = raw.provider ?? '';
+      // 自定义 Provider 不在 PROVIDER_DEFAULTS 中，索引结果可能为 undefined
+      const defaults = provider
+        ? (PROVIDER_DEFAULTS[provider as ProviderType] as typeof PROVIDER_DEFAULTS[ProviderType] | undefined)
+        : undefined;
+      const defaultModel = defaults
+        ? (track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model)
+        : '';
       return {
-        provider: c.provider ?? '',
-        model: c.model ?? (c.provider ? defaultModel : ''),
-        apiKeySet: !!(c.apiKey ?? '').trim() || (c.apiKeys?.length ?? 0) > 0,
-        baseUrl: c.baseUrl ?? (defaults?.baseUrl || ''),
-        reasoningModel: c.reasoningModel ?? (defaults?.reasoningModel || ''),
-        apiKeysCount: c.apiKeys?.length ?? 0,
+        provider,
+        // 选 Provider 后 model 不允许为空；空字符串和 undefined 一律兜底
+        model: raw.model || (provider ? defaultModel : ''),
+        apiKeySet: !!(raw.apiKey ?? '').trim() || (raw.apiKeys?.length ?? 0) > 0,
+        baseUrl: raw.baseUrl || (provider ? defaults?.baseUrl ?? '' : ''),
+        reasoningModel: raw.reasoningModel || (provider ? defaults?.reasoningModel ?? '' : ''),
+        apiKeysCount: raw.apiKeys?.length ?? 0,
       };
+    };
+
+    /** L2/L3 可选：用户从未写入任何字段时不下发（保持旧面板"未配置则不显示"的行为） */
+    const optionalLevel = (track: 'llm' | 'vllm', level: ModelLevel): ModelLevelConfigPayload | undefined => {
+      const raw = registry.readRawLevelSettings(config, track, level);
+      const touched = Object.values(raw).some((v) => v !== undefined);
+      return touched ? toPayload(raw, track) : undefined;
     };
 
     const providerDefaults: ModelConfigPayload['providerDefaults'] = {};
@@ -808,14 +823,14 @@ export class DualMindChatPanel {
 
     const payload: ModelConfigPayload = {
       llm: {
-        level1: toPayload(modelsConfig.llm.level1, 'llm'),
-        level2: modelsConfig.llm.level2 ? toPayload(modelsConfig.llm.level2, 'llm') : undefined,
-        level3: modelsConfig.llm.level3 ? toPayload(modelsConfig.llm.level3, 'llm') : undefined,
+        level1: toPayload(registry.readRawLevelSettings(config, 'llm', 1), 'llm'),
+        level2: optionalLevel('llm', 2),
+        level3: optionalLevel('llm', 3),
       },
       vllm: {
-        level1: toPayload(modelsConfig.vllm.level1, 'vllm'),
-        level2: modelsConfig.vllm.level2 ? toPayload(modelsConfig.vllm.level2, 'vllm') : undefined,
-        level3: modelsConfig.vllm.level3 ? toPayload(modelsConfig.vllm.level3, 'vllm') : undefined,
+        level1: toPayload(registry.readRawLevelSettings(config, 'vllm', 1), 'vllm'),
+        level2: optionalLevel('vllm', 2),
+        level3: optionalLevel('vllm', 3),
       },
       providerTypes: [...PROVIDER_TYPES],
       providerDefaults,
@@ -828,6 +843,34 @@ export class DualMindChatPanel {
     this.post({ type: 'model_config', payload });
   }
 
+  /**
+   * 选择配置写入 scope。
+   * 一律写 Global 会被已存在的 workspace / workspaceFolder 值遮蔽（读取时工作区优先），
+   * 表现为「改了设置但读回来还是旧值」。因此若该键已在工作区层配置，就写回同一层。
+   */
+  private pickConfigTarget(config: vscode.WorkspaceConfiguration, key: string): vscode.ConfigurationTarget {
+    const info = config.inspect(key);
+    if (info?.workspaceFolderValue !== undefined) return vscode.ConfigurationTarget.WorkspaceFolder;
+    if (info?.workspaceValue !== undefined) return vscode.ConfigurationTarget.Workspace;
+    return vscode.ConfigurationTarget.Global;
+  }
+
+  /**
+   * 彻底删除一个配置键（所有已存在的 scope）。
+   * 只删当前生效层会让下层的旧值重新暴露（如删了 workspace 后回退到 global 旧值），
+   * 表现为「清空后又冒出旧内容」。仅对实际存在的 scope 调 update，避开无工作区时写 Workspace 抛错。
+   */
+  private async clearConfigKey(config: vscode.WorkspaceConfiguration, key: string): Promise<void> {
+    const info = config.inspect(key);
+    const targets: vscode.ConfigurationTarget[] = [];
+    if (info?.globalValue !== undefined) targets.push(vscode.ConfigurationTarget.Global);
+    if (info?.workspaceValue !== undefined) targets.push(vscode.ConfigurationTarget.Workspace);
+    if (info?.workspaceFolderValue !== undefined) targets.push(vscode.ConfigurationTarget.WorkspaceFolder);
+    for (const t of targets) {
+      await config.update(key, undefined, t);
+    }
+  }
+
   /** 即改即写：单个字段变更写入 VS Code 配置 */
   private handleUpdateModelConfig(
     track: 'llm' | 'vllm',
@@ -836,87 +879,161 @@ export class DualMindChatPanel {
     value: string | string[],
   ): void {
     const config = vscode.workspace.getConfiguration('devSeeker');
-    const key = `models.${track}.level${level}.${field}`;
+    const prefix = `models.${track}.level${level}`;
+    const key = `${prefix}.${field}`;
+    const write = (k: string, v: unknown): Promise<void> =>
+      Promise.resolve(config.update(k, v, this.pickConfigTarget(config, k)));
     log.info({ track, level, field, valueType: typeof value }, 'Updating model config');
 
     // 切换 provider 时，同步更新 model 为新 provider 的默认值（区分 LLM/VLLM）
     if (field === 'provider' && typeof value === 'string') {
-      const newProvider = value as ProviderType;
-      const modelKey = `models.${track}.level${level}.model`;
-      const baseUrlKey = `models.${track}.level${level}.baseUrl`;
+      const newProvider = value.trim();
+      const currentProvider = (
+        getProviderRegistry().readRawLevelSettings(config, track, level).provider ?? ''
+      ).trim();
 
-      // Provider 为空时，清空所有关联字段
+      // Provider 清空 → 删除该级所有键（含 contextWindow）。
+      // 用 undefined 删除而非写 ''：写 '' 会让该级永远处于「已配置但为空」状态，
+      // 面板据此渲染空表单而非「+ 添加」占位，用户无法回到未配置态，settings.json 也会堆积空值。
       if (!newProvider) {
-        Promise.resolve(config.update(key, '', vscode.ConfigurationTarget.Global)).then(() => {
-          return config.update(modelKey, '', vscode.ConfigurationTarget.Global);
-        }).then(() => {
-          return config.update(baseUrlKey, '', vscode.ConfigurationTarget.Global);
-        }).then(() => {
-          this.pushModelConfig();
-        }).catch((err: unknown) => {
-          log.error({ err: String(err), key }, 'Failed to clear provider config');
-        });
+        const keys = ['provider', 'model', 'baseUrl', 'reasoningModel', 'apiKey', 'apiKeys', 'contextWindow'];
+        (async () => {
+          for (const k of keys) {
+            await this.clearConfigKey(config, `${prefix}.${k}`);
+          }
+        })()
+          .then(() => {
+            this.pushModelConfig();
+          })
+          .catch((err: unknown) => {
+            log.error({ err: String(err), key }, 'Failed to clear provider config');
+          });
         return;
       }
 
-      const defaults = PROVIDER_DEFAULTS[newProvider];
-      const defaultModel = track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model;
+      // Provider 未发生变化 → 只做幂等写入，绝不联动重置。
+      // 否则「重新确认同名自定义 Provider」或「下拉里重选当前 Provider」会把用户
+      // 自己填的 API 端点与模型名覆盖成默认值（自定义 Provider 更会被覆盖成空）。
+      if (newProvider === currentProvider) {
+        write(key, newProvider)
+          .then(() => {
+            this.pushModelConfig();
+            this.fetchProviderModels(track, level);
+          })
+          .catch((err: unknown) => {
+            log.error({ err: String(err), key }, 'Failed to update model config (same provider)');
+          });
+        return;
+      }
+
+      // 自定义 Provider（如 zhipu）不在 PROVIDER_DEFAULTS 中，必须保护索引，否则抛 TypeError
+      const defaults = PROVIDER_DEFAULTS[newProvider as ProviderType] as typeof PROVIDER_DEFAULTS[ProviderType] | undefined;
+      const defaultModel = defaults
+        ? (track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model)
+        : '';
       const defaultBaseUrl = defaults?.baseUrl ?? '';
 
-      // 链式写入：provider → model → baseUrl
-      Promise.resolve(config.update(key, newProvider, vscode.ConfigurationTarget.Global)).then(() => {
-        return config.update(modelKey, defaultModel, vscode.ConfigurationTarget.Global);
-      }).then(() => {
-        return config.update(baseUrlKey, defaultBaseUrl, vscode.ConfigurationTarget.Global);
-      }).then(() => {
-        this.pushModelConfig();
-        // Provider 切换后自动拉取新 Provider 的模型列表
-        this.fetchProviderModels(track, level);
-      }).catch((err: unknown) => {
-        log.error({ err: String(err), key }, 'Failed to update model config (provider switch)');
-      });
+      // 链式写入：provider → model → baseUrl → 清理旧 Provider 遗留的 reasoningModel / contextWindow。
+      // contextWindow 必须清：它会 override 新 Provider 的真实上下文窗口，导致上下文裁剪按错误的窗口计算。
+      write(key, newProvider)
+        .then(() => write(`${prefix}.model`, defaultModel))
+        .then(() => write(`${prefix}.baseUrl`, defaultBaseUrl))
+        .then(() => write(`${prefix}.reasoningModel`, defaults?.reasoningModel ?? ''))
+        .then(() => this.clearConfigKey(config, `${prefix}.contextWindow`))
+        .then(() => {
+          this.pushModelConfig();
+          // Provider 切换后自动拉取新 Provider 的模型列表
+          this.fetchProviderModels(track, level);
+        })
+        .catch((err: unknown) => {
+          log.error({ err: String(err), key }, 'Failed to update model config (provider switch)');
+        });
       return;
     }
 
-    // apiKey 处理：掩码字符不写入，但允许空值清空
     if (field === 'apiKey' && typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed === '••••••••') {
-        // 掩码字符不写入，保持原有 key 不变
-        this.pushModelConfig();
-        return;
-      }
-      // 空值允许清空；非空时防御：过滤非 ASCII 字符
-      if (trimmed) {
-        const asciiOnly = trimmed.replace(/[^\x00-\xFF]/g, '');
-        if (asciiOnly.length !== trimmed.length) {
+      // 剥离 UI 掩码字符：用户在 '••••••••' 后继续输入时，不能把掩码一起写进配置
+      let next = value.replace(/\u2022/g, '').trim();
+      if (!next) {
+        // 原内容全是掩码 → 用户并未真正修改，保持原 Key 不变
+        if (value.trim()) {
+          this.pushModelConfig();
+          return;
+        }
+        // 完全空 → 用户显式清空，允许写入空值
+      } else {
+        // 非空时防御：过滤非 ASCII 字符（中文引号、全角字符等会导致 header 非法）
+        const asciiOnly = next.replace(/[^\x00-\xFF]/g, '');
+        if (asciiOnly.length !== next.length) {
           log.warn(
-            { removedChars: trimmed.length - asciiOnly.length },
+            { removedChars: next.length - asciiOnly.length },
             'API Key contains non-ASCII characters, they have been stripped',
           );
-          if (!asciiOnly) {
-            // 过滤后为空（全是非法字符），不写入
-            this.pushModelConfig();
-            return;
-          }
-          value = asciiOnly;
         }
+        if (!asciiOnly) {
+          // 过滤后为空（全是非法字符），不写入
+          this.pushModelConfig();
+          return;
+        }
+        next = asciiOnly;
       }
+      value = next;
     }
 
     // 允许空值持久化（不转换为 undefined），这样用户可以清空字段
-    config.update(key, value, vscode.ConfigurationTarget.Global).then(
+    write(key, value).then(
       () => {
         this.pushModelConfig();
       },
-      (err) => {
+      (err: unknown) => {
         log.error({ err: String(err), key }, 'Failed to update model config');
       },
     );
   }
 
-  // ─── 动态模型列表获取 ───
+  /**
+   * 连接测试：对某级 Provider 发一次真实探测。
+   * 不能在 Webview 侧靠 API Key 的字符串形态判断可用性 —— 宿主不回传明文，
+   * 且「格式像 sk-」与「真的能用」是两件事。
+   */
+  private async handleTestProvider(track: 'llm' | 'vllm', level: 1 | 2 | 3): Promise<void> {
+    const config = vscode.workspace.getConfiguration('devSeeker');
+    const registry = getProviderRegistry();
+    const providerName = (registry.readRawLevelSettings(config, track, level).provider ?? '').trim();
 
+    if (!providerName) {
+      this.post({ type: 'provider_test_result', track, level, ok: false, error: '未选择 Provider' });
+      return;
+    }
+
+    const provider = registry.get(`${providerName}:${track}:L${level}`);
+    if (!provider) {
+      this.post({
+        type: 'provider_test_result',
+        track,
+        level,
+        ok: false,
+        error: '该级未注册（请检查 API 端点与模型名是否完整）',
+      });
+      return;
+    }
+
+    try {
+      const r = await provider.probe();
+      this.post({
+        type: 'provider_test_result',
+        track,
+        level,
+        ok: r.ok,
+        latencyMs: r.latencyMs,
+        error: r.ok ? undefined : (r.error?.message ?? '探测失败'),
+      });
+    } catch (e) {
+      this.post({ type: 'provider_test_result', track, level, ok: false, error: String(e) });
+    }
+  }
+
+  // ─── 动态模型列表获取 ───
   /** 模型列表缓存：key = `${track}:${level}:${provider}:${baseUrl}`, value = { models, fetchedAt } */
   private readonly providerModelsCache = new Map<string, { models: Array<{ id: string; name: string }>; fetchedAt: number }>();
   private static readonly PROVIDER_MODELS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
@@ -927,12 +1044,25 @@ export class DualMindChatPanel {
    */
   private async fetchProviderModels(track: 'llm' | 'vllm', level: 1 | 2 | 3): Promise<void> {
     const config = vscode.workspace.getConfiguration('devSeeker');
-    const provider = (config.get<string>(`models.${track}.level${level}.provider`) ?? '').trim();
-    const baseUrl = (config.get<string>(`models.${track}.level${level}.baseUrl`) ?? '').trim().replace(/\/+$/, '');
-    const apiKey = (config.get<string>(`models.${track}.level${level}.apiKey`) ?? '').trim();
+    // 必须走 readRawLevelSettings（inspect 语义）：package.json 给这些键配了 default，
+    // 用 config.get 会在用户未配（或刚清空）时拿到 deepseek / dashscope 等默认值，
+    // 导致向用户从未配置的第三方端点发请求，或拿 deepseek 的模型列表当作 openai 的候选项。
+    const raw = getProviderRegistry().readRawLevelSettings(config, track, level);
+    const provider = (raw.provider ?? '').trim();
+    if (!provider) {
+      log.debug({ track, level }, '[fetchProviderModels] skipped: provider not configured');
+      return;
+    }
 
-    if (!provider || !baseUrl) {
-      log.debug({ track, level, provider, baseUrl }, '[fetchProviderModels] skipped: missing provider or baseUrl');
+    // baseUrl 兼容回退与 pushModelConfig / resolveBaseUrl 保持一致：
+    // 用户未填时用该 Provider 自己的默认端点，而不是配置项的全局默认值。
+    const providerDefaults = PROVIDER_DEFAULTS[provider as ProviderType] as typeof PROVIDER_DEFAULTS[ProviderType] | undefined;
+    const baseUrl = ((raw.baseUrl ?? '').trim() || (providerDefaults?.baseUrl ?? '')).replace(/\/+$/, '');
+    // 仅配了 Key 池（apiKeys）的用户也应能拉到模型列表，否则请求会因未鉴权而失败
+    const apiKey = (raw.apiKey ?? '').trim() || (raw.apiKeys?.[0] ?? '').trim();
+
+    if (!baseUrl) {
+      log.debug({ track, level, provider }, '[fetchProviderModels] skipped: missing baseUrl');
       return;
     }
 
@@ -979,6 +1109,17 @@ export class DualMindChatPanel {
       }
 
       const models = uniqueIds.map((id) => ({ id, name: id }));
+
+      // 仅当模型列表有变化时才推送 webview，避免每次切 provider 都触发不必要的重渲染。
+      // 比较规则：模型 ID 集合的排序字符串一致即视为无变化（单 provider 下列表极少增减）。
+      const oldFingerprint = cached?.models.map((m) => m.id).sort().join(',') ?? '';
+      const newFingerprint = [...uniqueIds].sort().join(',');
+      if (oldFingerprint === newFingerprint) {
+        // 列表未变，仅刷新缓存时间戳，不推 webview
+        this.providerModelsCache.set(cacheKey, { models: cached!.models, fetchedAt: Date.now() });
+        log.debug({ provider, modelCount: models.length }, '[fetchProviderModels] models unchanged, cache refreshed');
+        return;
+      }
 
       // 更新缓存
       this.providerModelsCache.set(cacheKey, { models, fetchedAt: Date.now() });
@@ -1178,6 +1319,10 @@ export class DualMindChatPanel {
 
       case 'fetch_provider_models':
         this.fetchProviderModels(msg.track, msg.level);
+        break;
+
+      case 'test_provider':
+        this.handleTestProvider(msg.track, msg.level);
         break;
 
       case 'update_search_config':
@@ -4249,6 +4394,9 @@ export class DualMindChatPanel {
 
   /** 取消所有 pending ask（session 切换 / panel dispose） */
   private cancelAllPendingAsk(reason: string): void {
+    // 通知 webview 关掉弹窗 UI（无论是否有 pending Promise：
+    // webview 侧的 useState 可能仍持有上一次弹窗的状态）
+    this.post({ type: 'dismiss_pending_dialogs' });
     if (this.askPending.size === 0) return;
     log.info({ count: this.askPending.size, reason }, 'cancel all pending ask');
     for (const [, entry] of this.askPending) {
@@ -4301,6 +4449,7 @@ export class DualMindChatPanel {
 
   /** 取消所有 pending approval（session 切换 / panel dispose / 用户中止） */
   private cancelAllPendingApprovals(reason: string): void {
+    this.post({ type: 'dismiss_pending_dialogs' });
     if (this.approvalPending.size === 0) return;
     log.info({ count: this.approvalPending.size, reason }, 'cancel all pending approvals');
     for (const [, entry] of this.approvalPending) {

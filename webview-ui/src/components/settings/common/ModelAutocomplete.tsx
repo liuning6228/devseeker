@@ -22,11 +22,28 @@ export function ModelAutocomplete({ value, onChange, options, placeholder }: Mod
   const [input, setInput] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 外部 value 变化时同步输入框（如 Provider 切换导致 model 重置）
+  // 外部 value 变化时同步输入框（如 Provider 切换导致 model 重置）；
+  // 但聚焦编辑中不接受回显 —— 宿主每次写配置都会回推 model_config，
+  // 直接覆盖会把用户正在输入的模型名替换掉。失焦后再以宿主值为准。
   useEffect(() => {
+    if (focused) return;
     setInput(value);
-  }, [value]);
+  }, [value, focused]);
+
+  // 输入防抖提交：避免每击键都写一次 VS Code 配置（每次写入都会重建 Provider Registry）
+  const commitDebounced = (next: string) => {
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+    commitTimerRef.current = setTimeout(() => {
+      commitTimerRef.current = null;
+      onChange(next);
+    }, 400);
+  };
+
+  useEffect(() => () => {
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current);
+  }, []);
 
   // 聚焦时计算下拉位置（fixed 定位，相对于 viewport）
   useEffect(() => {
@@ -64,6 +81,10 @@ export function ModelAutocomplete({ value, onChange, options, placeholder }: Mod
   })();
 
   const handleSelect = (id: string) => {
+    if (commitTimerRef.current) {
+      clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
     setInput(id);
     onChange(id);
     setFocused(false);
@@ -78,10 +99,18 @@ export function ModelAutocomplete({ value, onChange, options, placeholder }: Mod
         value={input}
         onChange={(e) => {
           setInput(e.target.value);
-          onChange(e.target.value);
+          commitDebounced(e.target.value);
         }}
         onFocus={() => setFocused(true)}
-        onBlur={() => setTimeout(() => setFocused(false), 200)}
+        onBlur={() => {
+          // 失焦时立即提交未到期的输入，再退出编辑态
+          if (commitTimerRef.current) {
+            clearTimeout(commitTimerRef.current);
+            commitTimerRef.current = null;
+            onChange(input);
+          }
+          setTimeout(() => setFocused(false), 200);
+        }}
         placeholder={placeholder || '选择或输入模型名'}
         className="w-full px-3 py-2 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border
                    focus:outline-none focus:ring-2 focus:ring-vscode-focus placeholder:text-vscode-fg/40"

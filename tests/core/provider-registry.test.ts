@@ -254,4 +254,64 @@ describe('ProviderRegistry', () => {
     const next = registry.getNextLevelWithLargerContext('deepseek:llm:L1');
     expect(next).toBeUndefined();
   });
+
+  // ─── 设置页回显语义：'' （显式清空）vs undefined（从未配置） ───
+
+  it('readRawLevelSettings preserves empty string (explicit clear) and undefined (never set)', () => {
+    const raw = registry.readRawLevelSettings(mockConfig({
+      'models.llm.level2.provider': '',
+      'models.llm.level2.apiKey': '',
+    }), 'llm', 2);
+    // 显式清空 → 保留 ''，不得回退到 PROVIDER_DEFAULTS
+    expect(raw.provider).toBe('');
+    expect(raw.apiKey).toBe('');
+    // 从未配置 → undefined
+    expect(raw.model).toBeUndefined();
+    expect(raw.baseUrl).toBeUndefined();
+  });
+
+  it('readRawLevelSettings returns user values as-is', () => {
+    const raw = registry.readRawLevelSettings(mockConfig({
+      'models.llm.level1.provider': 'openai',
+      'models.llm.level1.model': 'gpt-4o',
+      'models.llm.level1.baseUrl': 'https://example.com/v1',
+    }), 'llm', 1);
+    expect(raw.provider).toBe('openai');
+    expect(raw.model).toBe('gpt-4o');
+    expect(raw.baseUrl).toBe('https://example.com/v1');
+  });
+
+  it('cleared L2 provider does not register a phantom provider', () => {
+    registry.initFromConfig(mockConfig({
+      'models.llm.level1.apiKey': 'sk-l1',
+      // 用户清空了 L2 的 provider，但 apiKey/baseUrl 残留空字符串
+      'models.llm.level2.provider': '',
+      'models.llm.level2.apiKey': '',
+      'models.llm.level2.baseUrl': '',
+    }));
+    // 不得因为"有其他字段"而用 deepseek 占位注册 L2
+    expect(registry.ids().some((id) => id.includes(':llm:L2'))).toBe(false);
+  });
+
+  it('custom provider (not in PROVIDER_DEFAULTS) registers as OpenAI-compatible', () => {
+    registry.initFromConfig(mockConfig({
+      'models.llm.level1.provider': 'zhipu',
+      'models.llm.level1.model': 'glm-4',
+      'models.llm.level1.baseUrl': 'https://open.bigmodel.cn/api/paas/v4',
+      'models.llm.level1.apiKey': 'sk-zhipu',
+    }));
+    // 自定义 Provider 按 OpenAI 兼容协议注册，且不得中断其他轨道的初始化
+    expect(registry.ids().some((id) => id.includes('zhipu:llm:L1'))).toBe(true);
+    expect(registry.ids().some((id) => id.includes(':vllm:L1'))).toBe(true);
+  });
+
+  it('custom provider without baseUrl is skipped without breaking init', () => {
+    registry.initFromConfig(mockConfig({
+      'models.llm.level1.provider': 'zhipu',
+      'models.llm.level1.apiKey': 'sk-zhipu',
+    }));
+    // 缺 baseUrl/model 无法发请求 → 跳过该级，但 vllm L1 仍应注册
+    expect(registry.ids().some((id) => id.includes('zhipu:llm:L1'))).toBe(false);
+    expect(registry.ids().some((id) => id.includes(':vllm:L1'))).toBe(true);
+  });
 });

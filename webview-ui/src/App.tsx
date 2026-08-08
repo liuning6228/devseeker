@@ -134,6 +134,12 @@ function AppWithNav(): JSX.Element {
         setAskQuestion(null);
         setApprovalRequest(null);
       }
+      // Stop / dispose 等场景：panel 侧 cancelAllPending 已释放 Promise，
+      // 但 webview 侧的弹窗 UI 需要主动关掉
+      if (msg?.type === 'dismiss_pending_dialogs') {
+        setAskQuestion(null);
+        setApprovalRequest(null);
+      }
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
@@ -380,10 +386,14 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
           }
           break;
         case 'ask_question':
-          dispatch({
-            type: 'ASK_QUESTION',
-            payload: msg.payload as AskQuestionPayload,
-          });
+          // 故意不在此处理：ask_user_question 弹窗由 AppWithNav 持有（useState + QuestionCard），
+          // 确保切到非聊天视图时仍能弹出。若在这里再 dispatch 一份，同一条消息会
+          // 被两处消费，reducer 里会留下一份无人渲染且无人清理的死状态。
+          break;
+        case 'dismiss_pending_dialogs':
+          // approval 的双重状态：AppWithNav 的 useState 已在 onMessage 里清除，
+          // 这里清 reducer 里的 approvalRequest + pendingApprovalToolIds
+          dispatch({ type: 'APPROVAL_CLEAR' });
           break;
         case 'approval_request':
           dispatch({

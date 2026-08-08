@@ -28,8 +28,14 @@ export function DebouncedTextField({
 }: DebouncedTextFieldProps) {
   const [localValue, setLocalValue] = useState(value);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 是否正在编辑（聚焦中，或有未提交的防抖写入） */
+  const editingRef = useRef(false);
 
   useEffect(() => {
+    // 用户正在编辑时忽略外部回显：
+    // 宿主每次写配置都会回推一次 model_config，若直接覆盖会把正在输入的内容
+    // （或刚输入的 API Key）替换成旧值/掩码，表现为「输入到一半又变回去」。
+    if (editingRef.current) return;
     setLocalValue(value);
   }, [value]);
 
@@ -37,7 +43,24 @@ export function DebouncedTextField({
     const newVal = e.target.value;
     setLocalValue(newVal);
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => onChange(newVal), debounceMs);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      onChange(newVal);
+    }, debounceMs);
+  };
+
+  const handleFocus = () => {
+    editingRef.current = true;
+  };
+
+  const handleBlur = () => {
+    editingRef.current = false;
+    // 失焦时立即提交未到期的防抖写入，避免用户切走后丢失最后一次输入
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+      onChange(localValue);
+    }
   };
 
   useEffect(() => {
@@ -51,6 +74,8 @@ export function DebouncedTextField({
       type={type}
       value={localValue}
       onChange={handleChange}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
       placeholder={placeholder}
       disabled={disabled}
       className={cn(

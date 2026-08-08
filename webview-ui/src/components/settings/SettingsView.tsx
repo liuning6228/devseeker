@@ -40,30 +40,56 @@ const VLLM_LEVEL_META = [
   { level: 3 as const, title: '兜底视觉模型', desc: '备选也不可用时保底', required: false },
 ];
 
+// ─── 本地编辑保护窗口：该窗口内宿主回推的同名字段不覆盖本地输入 ───
+const ECHO_GUARD_MS = 2000;
+
+/** 单级配置的本地编辑态。apiKey 只存用户新输入的明文，apiKeySet 表示宿主已保存 */
+type LevelState = {
+  provider: string;
+  model: string;
+  apiKey: string;
+  apiKeySet: boolean;
+  baseUrl: string;
+};
+
+const EMPTY_LEVEL: LevelState = { provider: '', model: '', apiKey: '', apiKeySet: false, baseUrl: '' };
+
 export function SettingsView({ config, searchConfig, onBack, className }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState('llm');
   // Step 21: 配置搜索
   const [searchQuery, setSearchQuery] = useState('');
 
-  // LLM 三级配置
-  const [llmLevelState, setLlmLevelState] = useState<Record<number, {
-    provider: string; model: string; apiKey: string; baseUrl: string;
-  }>>({
-    1: { provider: 'deepseek', model: 'deepseek-v4-flash', apiKey: '', baseUrl: '' },
-    2: { provider: '', model: '', apiKey: '', baseUrl: '' },
-    3: { provider: '', model: '', apiKey: '', baseUrl: '' },
+  // LLM 三级配置（初始为空，等 extension host 推送真实配置后再填充，避免闪现默认值）
+  const [llmLevelState, setLlmLevelState] = useState<Record<number, LevelState>>({
+    1: { ...EMPTY_LEVEL },
+    2: { ...EMPTY_LEVEL },
+    3: { ...EMPTY_LEVEL },
   });
   const [llmLevelExpanded, setLlmLevelExpanded] = useState<Record<number, boolean>>({ 1: true });
 
-  // VLLM 三级配置（均为可选）
-  const [vllmLevelState, setVllmLevelState] = useState<Record<number, {
-    provider: string; model: string; apiKey: string; baseUrl: string;
-  }>>({
-    1: { provider: 'qwen', model: 'qwen-vl-plus', apiKey: '', baseUrl: '' },
-    2: { provider: '', model: '', apiKey: '', baseUrl: '' },
-    3: { provider: '', model: '', apiKey: '', baseUrl: '' },
+  // VLLM 三级配置（均为可选；同样初始为空，以宿主配置为准）
+  const [vllmLevelState, setVllmLevelState] = useState<Record<number, LevelState>>({
+    1: { ...EMPTY_LEVEL },
+    2: { ...EMPTY_LEVEL },
+    3: { ...EMPTY_LEVEL },
   });
   const [vllmLevelExpanded, setVllmLevelExpanded] = useState<Record<number, boolean>>({ 1: true });
+
+  // ─── 本地编辑标记：`${track}.${level}.${field}` → 最后编辑时间戳 ───
+  const editedAtRef = useRef<Map<string, number>>(new Map());
+  const markEdited = useCallback((track: 'llm' | 'vllm', level: 1 | 2 | 3, field: string) => {
+    editedAtRef.current.set(`${track}.${level}.${field}`, Date.now());
+  }, []);
+  const isRecentlyEdited = useCallback((track: 'llm' | 'vllm', level: 1 | 2 | 3, field: string) => {
+    const k = `${track}.${level}.${field}`;
+    const at = editedAtRef.current.get(k);
+    if (at === undefined) return false;
+    if (Date.now() - at > ECHO_GUARD_MS) {
+      editedAtRef.current.delete(k);
+      return false;
+    }
+    return true;
+  }, []);
 
   // ─── 动态模型列表（从 Provider API 获取） ───
   const [llmModelOptions, setLlmModelOptions] = useState<Record<number, Array<{ id: string; name: string }>>>({});
@@ -87,25 +113,46 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
   }, []);
 
   // ─── 从 extension host 推送的 config 同步到本地 state ───
+  // 宿主每次写配置都会回推一次 model_config（写入后立即推 + onDidChangeConfiguration 防抖再推）。
+  // 若无条件用回推值重置本地 state，会把用户刚输入/刚清空的字段覆盖回旧值，
+  // 表现为「API Key 设置后消失」「删完又出现删除的内容」。
+  // 因此对最近编辑过的字段（ECHO_GUARD_MS 内）保留本地值，其余以宿主为准。
   useEffect(() => {
     if (!config) return;
-    const toLocal = (c: ModelLevelConfigPayload) => ({
-      provider: c.provider || '',
-      model: c.model || '',
-      apiKey: c.apiKeySet ? '••••••••' : '',
-      baseUrl: c.baseUrl || '',
-    });
-    setLlmLevelState({
-      1: toLocal(config.llm.level1),
-      2: config.llm.level2 ? toLocal(config.llm.level2) : { provider: '', model: '', apiKey: '', baseUrl: '' },
-      3: config.llm.level3 ? toLocal(config.llm.level3) : { provider: '', model: '', apiKey: '', baseUrl: '' },
-    });
-    setVllmLevelState({
-      1: toLocal(config.vllm.level1),
-      2: config.vllm.level2 ? toLocal(config.vllm.level2) : { provider: '', model: '', apiKey: '', baseUrl: '' },
-      3: config.vllm.level3 ? toLocal(config.vllm.level3) : { provider: '', model: '', apiKey: '', baseUrl: '' },
-    });
-  }, [config]);
+    const merge = (
+      track: 'llm' | 'vllm',
+      level: 1 | 2 | 3,
+      prev: LevelState | undefined,
+      payload?: ModelLevelConfigPayload,
+    ): LevelState => {
+      const incoming: LevelState = payload
+        ? {
+            provider: payload.provider || '',
+            model: payload.model || '',
+            // 明文永不回传：输入框恢复为空，由 apiKeySet 驱动「已保存」提示。
+            // 用户仍在输入框内时 DebouncedTextField 的 editingRef 会拦住这次清空。
+            apiKey: '',
+            apiKeySet: payload.apiKeySet,
+            baseUrl: payload.baseUrl || '',
+          }
+        : { ...EMPTY_LEVEL };
+      const next = { ...incoming };
+      for (const f of ['provider', 'model', 'apiKey', 'baseUrl'] as const) {
+        if (isRecentlyEdited(track, level, f)) next[f] = prev?.[f] ?? '';
+      }
+      return next;
+    };
+    setLlmLevelState((prev) => ({
+      1: merge('llm', 1, prev[1], config.llm.level1),
+      2: merge('llm', 2, prev[2], config.llm.level2),
+      3: merge('llm', 3, prev[3], config.llm.level3),
+    }));
+    setVllmLevelState((prev) => ({
+      1: merge('vllm', 1, prev[1], config.vllm.level1),
+      2: merge('vllm', 2, prev[2], config.vllm.level2),
+      3: merge('vllm', 3, prev[3], config.vllm.level3),
+    }));
+  }, [config, isRecentlyEdited]);
 
   // 联网搜索
   const [tavilyKeys, setTavilyKeys] = useState('');
@@ -132,80 +179,130 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
     [],
   );
 
-  // LLM 连接测试
-  const [llmTesting, setLlmTesting] = useState(false);
-  const [llmTestResult, setLlmTestResult] = useState<'idle' | 'success' | 'error'>('idle');
-  const handleTestLlm = useCallback(() => {
-    setLlmTesting(true);
-    setLlmTestResult('idle');
-    setTimeout(() => {
-      const key = llmLevelState[1]?.apiKey;
-      setLlmTesting(false);
-      setLlmTestResult(key?.startsWith('sk-') ? 'success' : 'error');
-    }, 1000);
-  }, [llmLevelState]);
+  // ─── 连接测试（宿主真实探测，按 track+level 粒度） ───
+  type TestState = { status: 'idle' | 'testing' | 'success' | 'error'; error?: string };
+  const [testStates, setTestStates] = useState<Record<string, TestState>>({});
+  const testKey = (track: 'llm' | 'vllm', level: 1 | 2 | 3) => `${track}.${level}`;
+
+  const handleTest = useCallback((track: 'llm' | 'vllm', level: 1 | 2 | 3) => {
+    setTestStates((prev) => ({ ...prev, [`${track}.${level}`]: { status: 'testing' } }));
+    postToHost({ type: 'test_provider', track, level });
+  }, []);
+
+  /** 探测中时按钮已由 testing 控制文案，此处回退 idle */
+  const testResultOf = (track: 'llm' | 'vllm', level: 1 | 2 | 3): 'idle' | 'success' | 'error' => {
+    const s = testStates[testKey(track, level)]?.status;
+    return s === 'success' || s === 'error' ? s : 'idle';
+  };
+
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      const msg = ev.data;
+      if (msg?.type !== 'provider_test_result') return;
+      setTestStates((prev) => ({
+        ...prev,
+        [`${msg.track}.${msg.level}`]: {
+          status: msg.ok ? 'success' : 'error',
+          error: msg.error,
+        },
+      }));
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
 
   // 通用更新单个字段（本地 + 持久化到 extension host）
   const updateField = useCallback(
-    (setFn: React.Dispatch<React.SetStateAction<Record<number, { provider: string; model: string; apiKey: string; baseUrl: string }>>>, track: 'llm' | 'vllm', level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
+    (setFn: React.Dispatch<React.SetStateAction<Record<number, LevelState>>>, track: 'llm' | 'vllm', level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
+      markEdited(track, level, field);
+
+      if (field === 'apiKey') {
+        // 输入框为空只意味着「未输入新值」，不代表要清空已保存的 Key（清空走「清除」按钮），
+        // 否则失焦/防抖触发的空值提交会把已存的 Key 意外删掉
+        const next = value.trim();
+        if (!next) return;
+        setFn((prev) => ({ ...prev, [level]: { ...prev[level], apiKey: next } }));
+        postToHost({ type: 'update_model_config', track, level, field, value: next });
+        return;
+      }
+
       setFn((prev) => ({
         ...prev,
         [level]: { ...prev[level], [field]: value },
       }));
-      // apiKey 掩码不写入
-      if (field === 'apiKey' && (value === '••••••••' || !value.trim())) return;
       postToHost({ type: 'update_model_config', track, level, field, value });
     },
-    [],
+    [markEdited],
+  );
+
+  /** 清除已保存的 API Key（含备用 Key 池） */
+  const clearApiKey = useCallback(
+    (setFn: React.Dispatch<React.SetStateAction<Record<number, LevelState>>>, track: 'llm' | 'vllm', level: 1 | 2 | 3) => {
+      markEdited(track, level, 'apiKey');
+      setFn((prev) => ({ ...prev, [level]: { ...prev[level], apiKey: '', apiKeySet: false } }));
+      postToHost({ type: 'update_model_config', track, level, field: 'apiKey', value: '' });
+      postToHost({ type: 'update_model_config', track, level, field: 'apiKeys', value: [] });
+    },
+    [markEdited],
   );
 
   // 更新 LLM 某级 provider（同时重置 model 为新 Provider 默认值 + baseUrl，并持久化）
   const updateLlmProvider = useCallback((level: 1 | 2 | 3, provider: string) => {
-    // Provider 为空时，清空所有关联字段
+    markEdited('llm', level, 'provider');
+    markEdited('llm', level, 'model');
+    markEdited('llm', level, 'baseUrl');
+    // Provider 为空时清空本地展示；宿主收到 provider='' 后会同步删除
+    // model / baseUrl / reasoningModel / apiKey / contextWindow，无需再逐个下发（避免多次写入相互竞争）
     if (!provider) {
       setLlmLevelState((prev) => ({
         ...prev,
-        [level]: { provider: '', model: '', apiKey: '', baseUrl: '' },
+        [level]: { ...EMPTY_LEVEL },
       }));
-      // 持久化：清空 provider + model + baseUrl
       postToHost({ type: 'update_model_config', track: 'llm', level, field: 'provider', value: '' });
-      postToHost({ type: 'update_model_config', track: 'llm', level, field: 'model', value: '' });
-      postToHost({ type: 'update_model_config', track: 'llm', level, field: 'baseUrl', value: '' });
       return;
     }
     const def = PROVIDER_DEFAULTS[provider as keyof typeof PROVIDER_DEFAULTS];
     const defaultModel = def?.model ?? '';
     const defaultBaseUrl = def?.baseUrl ?? '';
-    setLlmLevelState((prev) => ({
-      ...prev,
-      [level]: { ...prev[level], provider, model: defaultModel, apiKey: prev[level]?.apiKey ?? '', baseUrl: defaultBaseUrl },
-    }));
+    setLlmLevelState((prev) => {
+      // Provider 未变 → 不重置 model / baseUrl，与宿主的幂等处理保持一致
+      if (prev[level]?.provider === provider) return prev;
+      return {
+        ...prev,
+        [level]: { ...prev[level], provider, model: defaultModel, baseUrl: defaultBaseUrl },
+      };
+    });
     // 持久化：provider 变更会自动联动 model + baseUrl
     postToHost({ type: 'update_model_config', track: 'llm', level, field: 'provider', value: provider });
-  }, []);
+  }, [markEdited]);
 
   // 更新 VLLM 某级 provider
   const updateVllmProvider = useCallback((level: 1 | 2 | 3, provider: string) => {
-    // Provider 为空时，清空所有关联字段
+    markEdited('vllm', level, 'provider');
+    markEdited('vllm', level, 'model');
+    markEdited('vllm', level, 'baseUrl');
+    // Provider 为空时清空本地展示；其余字段由宿主联动删除
     if (!provider) {
       setVllmLevelState((prev) => ({
         ...prev,
-        [level]: { provider: '', model: '', apiKey: '', baseUrl: '' },
+        [level]: { ...EMPTY_LEVEL },
       }));
       postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'provider', value: '' });
-      postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'model', value: '' });
-      postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'baseUrl', value: '' });
       return;
     }
     const def = PROVIDER_DEFAULTS[provider as keyof typeof PROVIDER_DEFAULTS];
     const defaultModel = def?.vllmModel ?? def?.model ?? '';
     const defaultBaseUrl = def?.baseUrl ?? '';
-    setVllmLevelState((prev) => ({
-      ...prev,
-      [level]: { ...prev[level], provider, model: defaultModel, apiKey: prev[level]?.apiKey ?? '', baseUrl: defaultBaseUrl },
-    }));
+    setVllmLevelState((prev) => {
+      // Provider 未变 → 不重置 model / baseUrl，与宿主的幂等处理保持一致
+      if (prev[level]?.provider === provider) return prev;
+      return {
+        ...prev,
+        [level]: { ...prev[level], provider, model: defaultModel, baseUrl: defaultBaseUrl },
+      };
+    });
     postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'provider', value: provider });
-  }, []);
+  }, [markEdited]);
 
   const updateLlmLevel = useCallback((level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
     updateField(setLlmLevelState, 'llm', level, field, value);
@@ -214,6 +311,14 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
   const updateVllmLevel = useCallback((level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
     updateField(setVllmLevelState, 'vllm', level, field, value);
   }, [updateField]);
+
+  const clearLlmApiKey = useCallback((level: 1 | 2 | 3) => {
+    clearApiKey(setLlmLevelState, 'llm', level);
+  }, [clearApiKey]);
+
+  const clearVllmApiKey = useCallback((level: 1 | 2 | 3) => {
+    clearApiKey(setVllmLevelState, 'vllm', level);
+  }, [clearApiKey]);
 
   return (
     <div className={cn('flex flex-col h-full', className)}>
@@ -253,15 +358,18 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                     providerId={cfg.provider}
                     apiKey={cfg.apiKey}
                     onApiKeyChange={(v) => updateLlmLevel(level, 'apiKey', v)}
+                    apiKeySet={cfg.apiKeySet}
+                    onApiKeyClear={() => clearLlmApiKey(level)}
                     baseUrl={cfg.baseUrl}
                     onBaseUrlChange={(v) => updateLlmLevel(level, 'baseUrl', v)}
                     model={cfg.model}
                     onModelChange={(v) => updateLlmLevel(level, 'model', v)}
                     onProviderChange={(v) => updateLlmProvider(level, v)}
                     modelOptions={llmModelOptions[level]}
-                    testing={llmTesting}
-                    testResult={llmTestResult}
-                    onTestConnection={level === 1 ? handleTestLlm : undefined}
+                    testing={testStates[testKey('llm', level)]?.status === 'testing'}
+                    testResult={testResultOf('llm', level)}
+                    testError={testStates[testKey('llm', level)]?.error}
+                    onTestConnection={() => handleTest('llm', level)}
                     track="llm"
                   />
                 </LevelCard>
@@ -297,12 +405,18 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                     providerId={cfg.provider}
                     apiKey={cfg.apiKey}
                     onApiKeyChange={(v) => updateVllmLevel(level, 'apiKey', v)}
+                    apiKeySet={cfg.apiKeySet}
+                    onApiKeyClear={() => clearVllmApiKey(level)}
                     baseUrl={cfg.baseUrl}
                     onBaseUrlChange={(v) => updateVllmLevel(level, 'baseUrl', v)}
                     model={cfg.model}
                     onModelChange={(v) => updateVllmLevel(level, 'model', v)}
                     onProviderChange={(v) => updateVllmProvider(level, v)}
                     modelOptions={vllmModelOptions[level]}
+                    testing={testStates[testKey('vllm', level)]?.status === 'testing'}
+                    testResult={testResultOf('vllm', level)}
+                    testError={testStates[testKey('vllm', level)]?.error}
+                    onTestConnection={() => handleTest('vllm', level)}
                     track="vllm"
                   />
                 </LevelCard>

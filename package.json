@@ -219,6 +219,7 @@
         "devSeeker.models.llm.level1.provider": {
           "type": "string",
           "enum": [
+            "",
             "deepseek",
             "openai",
             "qwen",
@@ -230,12 +231,13 @@
             "kimi",
             "custom-openai"
           ],
-          "default": "deepseek",
-          "description": "LLM 主力模型（Level 1）的 Provider 类型"
+          "default": "",
+          "description": "LLM 主力模型（Level 1）的 Provider 类型（留空=未配置）"
         },
         "devSeeker.models.llm.level1.model": {
           "type": "string",
           "enum": [
+            "",
             "deepseek-v4-flash",
             "deepseek-v4-pro",
             "gpt-4o",
@@ -267,6 +269,7 @@
             "kimi-k2"
           ],
           "enumDescriptions": [
+            "（未配置）",
             "DeepSeek V4 Flash · 高并发低成本，1M 上下文（推荐主力）",
             "DeepSeek V4 Pro · 复杂推理/编码任务",
             "OpenAI GPT-4o · 多模态旗舰",
@@ -297,8 +300,8 @@
             "Kimi K3 · 2.8T 参数 1M 上下文旗舰",
             "Kimi K2"
           ],
-          "default": "deepseek-v4-flash",
-          "description": "LLM Level 1 模型名称（DeepSeek 默认 V4-Flash；如需自定义模型请通过 Webview 面板输入）"
+          "default": "",
+          "description": "LLM Level 1 模型名称（留空则回落到所选 Provider 的默认模型；如需自定义模型请通过 DevSeeker 面板输入）"
         },
         "devSeeker.models.llm.level1.apiKey": {
           "type": "string",
@@ -317,8 +320,8 @@
         },
         "devSeeker.models.llm.level1.baseUrl": {
           "type": "string",
-          "default": "https://api.deepseek.com/v1",
-          "description": "LLM Level 1 Base URL（DeepSeek 默认 https://api.deepseek.com/v1；留空回落到 Provider 默认值）"
+          "default": "",
+          "description": "LLM Level 1 Base URL（留空则回落到所选 Provider 的默认端点）"
         },
         "devSeeker.models.llm.level1.reasoningModel": {
           "type": "string",
@@ -350,8 +353,8 @@
             "MiniMax M3 · 1M 上下文强推理",
             "Kimi K3 · 2.8T 强推理"
           ],
-          "default": "deepseek-v4-pro",
-          "description": "LLM Level 1 推理模型（DeepSeek 默认 V4-Pro；选择空值表示不使用推理模型）"
+          "default": "",
+          "description": "LLM Level 1 推理模型（留空则回落到所选 Provider 的默认推理模型，该 Provider 无默认时不使用推理模型）"
         },
         "devSeeker.models.llm.level1.contextWindow": {
           "type": "integer",
@@ -362,6 +365,7 @@
         "devSeeker.models.llm.level2.provider": {
           "type": "string",
           "enum": [
+            "",
             "deepseek",
             "openai",
             "qwen",
@@ -379,6 +383,7 @@
         "devSeeker.models.llm.level2.model": {
           "type": "string",
           "enum": [
+            "",
             "deepseek-v4-pro",
             "deepseek-v4-flash",
             "gpt-4o",
@@ -404,8 +409,8 @@
             "kimi-k3",
             "kimi-k2"
           ],
-          "default": "deepseek-v4-pro",
-          "description": "LLM Level 2 模型名称（推荐 deepseek-v4-pro 作为备选）"
+          "default": "",
+          "description": "LLM Level 2 模型名称（留空则回落到所选 Provider 的默认模型；推荐 deepseek-v4-pro 作为备选）"
         },
         "devSeeker.models.llm.level2.apiKey": {
           "type": "string",
@@ -424,8 +429,8 @@
         },
         "devSeeker.models.llm.level2.baseUrl": {
           "type": "string",
-          "default": "https://api.deepseek.com/v1",
-          "description": "LLM Level 2 Base URL（配置 Provider 后生效；DeepSeek 默认 https://api.deepseek.com/v1）"
+          "default": "",
+          "description": "LLM Level 2 Base URL（留空则回落到所选 Provider 的默认端点）"
         },
         "devSeeker.models.llm.level2.reasoningModel": {
           "type": "string",
@@ -453,8 +458,8 @@
             "MiniMax M3 · 1M 上下文强推理",
             "Kimi K3 · 2.8T 强推理"
           ],
-          "default": "deepseek-v4-pro",
-          "description": "LLM Level 2 推理模型（推荐 deepseek-v4-pro）"
+          "default": "",
+          "description": "LLM Level 2 推理模型（留空则回落到所选 Provider 的默认推理模型；推荐 deepseek-v4-pro）"
         },
         "devSeeker.models.llm.level2.contextWindow": {
           "type": "integer",
@@ -465,6 +470,7 @@
         "devSeeker.models.llm.level3.provider": {
           "type": "string",
           "enum": [
+            "",
             "deepseek",
             "openai",
             "qwen",
@@ -482,6 +488,7 @@
         "devSeeker.models.llm.level3.model": {
           "type": "string",
           "enum": [
+            "",
             "llama3",
             "llama3.1",
             "llama3.2",
@@ -496,8 +503,8 @@
             "phi3",
             "gemma2"
           ],
-          "default": "llama3",
-          "description": "LLM Level 3 模型名称（推荐 Ollama 本地部署，如 llama3）"
+          "default": "",
+          "description": "LLM Level 3 模型名称（留空则回落到所选 Provider 的默认模型；推荐 Ollama 本地部署，如 llama3）"
         },
         "devSeeker.models.llm.level3.apiKey": {
           "type": "string",
@@ -516,8 +523,8 @@
         },
         "devSeeker.models.llm.level3.baseUrl": {
           "type": "string",
-          "default": "http://localhost:11434/v1",
-          "description": "LLM Level 3 Base URL（配置 Provider 后生效；Ollama 默认 http://localhost:11434/v1）"
+          "default": "",
+          "description": "LLM Level 3 Base URL（留空则回落到所选 Provider 的默认端点，Ollama 为 http://localhost:11434/v1）"
         },
         "devSeeker.models.llm.level3.reasoningModel": {
           "type": "string",
@@ -545,6 +552,7 @@
         "devSeeker.models.vllm.level1.provider": {
           "type": "string",
           "enum": [
+            "",
             "deepseek",
             "openai",
             "qwen",
@@ -556,12 +564,13 @@
             "kimi",
             "custom-openai"
           ],
-          "default": "qwen",
-          "description": "VLLM 主力视觉模型（Level 1）的 Provider 类型"
+          "default": "",
+          "description": "VLLM 主力视觉模型（Level 1）的 Provider 类型（留空=未配置）"
         },
         "devSeeker.models.vllm.level1.model": {
           "type": "string",
           "enum": [
+            "",
             "qwen-vl-max-latest",
             "qwen-vl-max",
             "qwen-vl-plus-latest",
@@ -575,6 +584,7 @@
             "kimi-k3"
           ],
           "enumDescriptions": [
+            "（未配置）",
             "Qwen VL Max · 视觉旗舰（推荐）",
             "Qwen VL Max",
             "Qwen VL Plus · 视觉均衡",
@@ -587,8 +597,8 @@
             "BakLLaVA · 开源视觉（Ollama）",
             "Kimi K3 · 2.8T 原生多模态"
           ],
-          "default": "qwen-vl-max-latest",
-          "description": "VLLM Level 1 视觉模型名称"
+          "default": "",
+          "description": "VLLM Level 1 视觉模型名称（留空则回落到所选 Provider 的默认视觉模型）"
         },
         "devSeeker.models.vllm.level1.apiKey": {
           "type": "string",
@@ -607,8 +617,8 @@
         },
         "devSeeker.models.vllm.level1.baseUrl": {
           "type": "string",
-          "default": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "description": "VLLM Level 1 Base URL（Qwen 默认 https://dashscope.aliyuncs.com/compatible-mode/v1；留空回落到 Provider 默认值）"
+          "default": "",
+          "description": "VLLM Level 1 Base URL（留空则回落到所选 Provider 的默认端点）"
         },
         "devSeeker.models.vllm.level1.contextWindow": {
           "type": "integer",
@@ -619,6 +629,7 @@
         "devSeeker.models.vllm.level2.provider": {
           "type": "string",
           "enum": [
+            "",
             "deepseek",
             "openai",
             "qwen",
@@ -631,11 +642,12 @@
             "custom-openai"
           ],
           "default": "",
-          "description": "VLLM 备选视觉模型（Level 2）的 Provider 类型"
+          "description": "VLLM 备选视觉模型（Level 2）的 Provider 类型（留空=不配置）"
         },
         "devSeeker.models.vllm.level2.model": {
           "type": "string",
           "enum": [
+            "",
             "qwen-vl-plus",
             "qwen-vl-plus-latest",
             "qwen-vl-max",
@@ -645,8 +657,8 @@
             "claude-3-5-sonnet-20241022",
             "llava"
           ],
-          "default": "qwen-vl-plus",
-          "description": "VLLM Level 2 视觉模型名称（推荐 qwen-vl-plus 作为备选）"
+          "default": "",
+          "description": "VLLM Level 2 视觉模型名称（留空则回落到所选 Provider 的默认视觉模型；推荐 qwen-vl-plus 作为备选）"
         },
         "devSeeker.models.vllm.level2.apiKey": {
           "type": "string",
@@ -665,8 +677,8 @@
         },
         "devSeeker.models.vllm.level2.baseUrl": {
           "type": "string",
-          "default": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "description": "VLLM Level 2 Base URL（配置 Provider 后生效；Qwen 默认 https://dashscope.aliyuncs.com/compatible-mode/v1）"
+          "default": "",
+          "description": "VLLM Level 2 Base URL（留空则回落到所选 Provider 的默认端点）"
         },
         "devSeeker.models.vllm.level2.contextWindow": {
           "type": "integer",
@@ -677,6 +689,7 @@
         "devSeeker.models.vllm.level3.provider": {
           "type": "string",
           "enum": [
+            "",
             "deepseek",
             "openai",
             "qwen",
@@ -689,11 +702,12 @@
             "custom-openai"
           ],
           "default": "",
-          "description": "VLLM 兜底视觉模型（Level 3）的 Provider 类型"
+          "description": "VLLM 兜底视觉模型（Level 3）的 Provider 类型（留空=不配置，推荐 Ollama）"
         },
         "devSeeker.models.vllm.level3.model": {
           "type": "string",
           "enum": [
+            "",
             "llava",
             "bakllava",
             "moondream",
@@ -701,8 +715,8 @@
             "qwen-vl-plus",
             "gpt-4o-mini"
           ],
-          "default": "llava",
-          "description": "VLLM Level 3 视觉模型名称（推荐 Ollama 本地 llava）"
+          "default": "",
+          "description": "VLLM Level 3 视觉模型名称（留空则回落到所选 Provider 的默认视觉模型；推荐 Ollama 本地 llava）"
         },
         "devSeeker.models.vllm.level3.apiKey": {
           "type": "string",
@@ -721,8 +735,8 @@
         },
         "devSeeker.models.vllm.level3.baseUrl": {
           "type": "string",
-          "default": "http://localhost:11434/v1",
-          "description": "VLLM Level 3 Base URL（配置 Provider 后生效；Ollama 默认 http://localhost:11434/v1）"
+          "default": "",
+          "description": "VLLM Level 3 Base URL（留空则回落到所选 Provider 的默认端点，Ollama 为 http://localhost:11434/v1）"
         },
         "devSeeker.models.vllm.level3.contextWindow": {
           "type": "integer",

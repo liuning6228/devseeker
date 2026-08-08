@@ -233,6 +233,12 @@ export type WebviewInboundMessage =
       track: 'llm' | 'vllm';
       level: 1 | 2 | 3;
     }
+  /** 连接测试：Webview 请求对某级 Provider 发一次真实探测 */
+  | {
+      type: 'test_provider';
+      track: 'llm' | 'vllm';
+      level: 1 | 2 | 3;
+    }
   /** W-UI2 · Accept 单文件 diff → 通知 extension 清除 inline diff 装饰 */
   | { type: 'accept_diff'; relPath: string }
   /** W-UI2 · Accept 所有文件 diff → 通知 extension 清除所有 inline diff 装饰 */
@@ -551,6 +557,9 @@ export type WebviewOutboundMessage =
   | { type: 'ask_question'; payload: AskQuestionPayload }
   /** 审批请求（Extension → Webview 内联卡片） */
   | { type: 'approval_request'; payload: ApprovalRequestPayload }
+  /** W7b4b · 清除 pending 的弹窗（Stop / 新会话 / dispose 等场景，panel 侧已释放 Promise，
+   *   但 webview 侧的弹窗 UI 需要主动关掉，否则残留在界面上且用户点击后答案被丢弃） */
+  | { type: 'dismiss_pending_dialogs' }
   /** W7b4b · 工具写入的 diff 快照（write_file / search_replace） */
   | { type: 'tool_diff'; payload: ToolDiffPayload }
   /** W7b4b · revert 完成回执 */
@@ -578,6 +587,15 @@ export type WebviewOutboundMessage =
       level: 1 | 2 | 3;
       provider: string;
       models: Array<{ id: string; name: string }>;
+    }
+  /** 连接测试结果推送（Extension → Webview） */
+  | {
+      type: 'provider_test_result';
+      track: 'llm' | 'vllm';
+      level: 1 | 2 | 3;
+      ok: boolean;
+      latencyMs?: number;
+      error?: string;
     }
   /** W11.4 · run_preview 请求通知 webview 显示「打开预览」按钮 */
   | {
