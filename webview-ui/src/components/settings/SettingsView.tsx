@@ -92,20 +92,18 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
   }, []);
 
   // ─── 动态模型列表（从 Provider API 获取） ───
-  const [llmModelOptions, setLlmModelOptions] = useState<Record<number, Array<{ id: string; name: string }>>>({});
-  const [vllmModelOptions, setVllmModelOptions] = useState<Record<number, Array<{ id: string; name: string }>>>({});
+  const [llmModelOptions, setLlmModelOptions] = useState<Record<number, { provider: string; models: Array<{ id: string; name: string }> }>>({});
+  const [vllmModelOptions, setVllmModelOptions] = useState<Record<number, { provider: string; models: Array<{ id: string; name: string }> }>>({});
 
   // 监听 extension host 推送的动态模型列表
   useEffect(() => {
     function onMessage(ev: MessageEvent) {
       const msg = ev.data;
       if (msg?.type === 'provider_models_fetched') {
-        const { track, level, models } = msg;
-        if (track === 'llm') {
-          setLlmModelOptions((prev) => ({ ...prev, [level]: models }));
-        } else if (track === 'vllm') {
-          setVllmModelOptions((prev) => ({ ...prev, [level]: models }));
-        }
+        const { track, level, models, provider: fetchedProvider } = msg;
+        const setter = track === 'llm' ? setLlmModelOptions : setVllmModelOptions;
+        // 存储时带上所属 provider，方便 ProviderConfigPanel 校验来源是否匹配
+        setter((prev) => ({ ...prev, [level]: { provider: fetchedProvider, models } }));
       }
     }
     window.addEventListener('message', onMessage);
@@ -365,7 +363,8 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                     model={cfg.model}
                     onModelChange={(v) => updateLlmLevel(level, 'model', v)}
                     onProviderChange={(v) => updateLlmProvider(level, v)}
-                    modelOptions={llmModelOptions[level]}
+                    modelOptions={llmModelOptions[level]?.models}
+                    modelOptionsProvider={llmModelOptions[level]?.provider}
                     testing={testStates[testKey('llm', level)]?.status === 'testing'}
                     testResult={testResultOf('llm', level)}
                     testError={testStates[testKey('llm', level)]?.error}
@@ -412,7 +411,8 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                     model={cfg.model}
                     onModelChange={(v) => updateVllmLevel(level, 'model', v)}
                     onProviderChange={(v) => updateVllmProvider(level, v)}
-                    modelOptions={vllmModelOptions[level]}
+                    modelOptions={vllmModelOptions[level]?.models}
+                    modelOptionsProvider={vllmModelOptions[level]?.provider}
                     testing={testStates[testKey('vllm', level)]?.status === 'testing'}
                     testResult={testResultOf('vllm', level)}
                     testError={testStates[testKey('vllm', level)]?.error}

@@ -29,8 +29,10 @@ interface ProviderConfigPanelProps {
   /** 模型名 */
   model: string;
   onModelChange: (value: string) => void;
-  /** 可选的模型列表（若提供则优先使用，否则从 PROVIDER_MODELS 取） */
+  /** 可选的模型列表（若提供且与当前 provider 匹配则优先使用，否则从 PROVIDER_MODELS 取） */
   modelOptions?: Array<{ id: string; name: string }>;
+  /** modelOptions 所属的 Provider ID（用于校验来源是否匹配当前选择） */
+  modelOptionsProvider?: string;
   /** 默认端点（提示用，若省略则从 PROVIDER_DEFAULTS 自动推断） */
   defaultBaseUrl?: string;
   /** 是否正在测试连接 */
@@ -66,6 +68,7 @@ export function ProviderConfigPanel({
   model,
   onModelChange,
   modelOptions,
+  modelOptionsProvider,
   defaultBaseUrl,
   testing,
   testResult,
@@ -104,13 +107,21 @@ export function ProviderConfigPanel({
   }, [defaultBaseUrl, provider]);
 
   // 当前 Provider 的可选模型列表
+  // 动态模型列表（来自 provider_models_fetched）优先，但仅当来源与当前 provider 匹配。
+  // 否则回退到静态 PROVIDER_MODELS，避免「切到 Qwen 后下拉框仍显示 DeepSeek 模型」。
   const availableModels = useMemo((): Array<{ id: string; name: string }> => {
-    if (modelOptions && modelOptions.length > 0) return modelOptions;
+    if (
+      modelOptions &&
+      modelOptions.length > 0 &&
+      (!modelOptionsProvider || modelOptionsProvider === providerId)
+    ) {
+      return modelOptions;
+    }
     const models = PROVIDER_MODELS[provider];
     if (models) return models.map((m) => ({ id: m.id, name: m.label }));
     // 自定义 Provider 或未知 Provider：返回空列表，用户可手动输入模型名
     return [];
-  }, [modelOptions, provider]);
+  }, [modelOptions, modelOptionsProvider, provider, providerId]);
 
   // Provider 变更处理：通过 onProviderChange 通知父组件，父级负责重置 model + baseUrl
   const handleProviderChange = useCallback(
