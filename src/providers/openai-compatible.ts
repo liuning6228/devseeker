@@ -586,7 +586,7 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
 
   // ─────────── 请求构造 ───────────
 
-  private buildRequestBody(
+  protected buildRequestBody(
     messages: Message[],
     options: CreateMessageOptions,
     model: string,
@@ -605,11 +605,27 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     if (options.temperature != null) body.temperature = options.temperature;
     if (options.topP != null) body.top_p = options.topP;
 
+    // 子类可注入 Provider 特定参数（如 DeepSeek 的 thinking / reasoning_effort）
+    this.enrichRequestBody(body, model, options);
+
     const forbidden = this.forbiddenKeys();
     for (const k of Object.keys(body)) {
       if (forbidden.has(k)) delete body[k];
     }
     return body;
+  }
+
+  /**
+   * Provider 特定参数注入钩子。
+   * 子类可覆盖以注入该 Provider 独有的请求体字段（在 forbiddenKeys 过滤之前调用，
+   * 因此注入的字段不受黑名单影响）。
+   */
+  protected enrichRequestBody(
+    _body: Record<string, unknown>,
+    _model: string,
+    _options: CreateMessageOptions,
+  ): void {
+    // 默认空操作
   }
 
   protected async fetchWithTimeout(

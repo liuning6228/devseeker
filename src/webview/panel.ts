@@ -45,6 +45,7 @@ import {
   PROVIDER_DISPLAY_NAMES,
   PROVIDER_MODELS,
   PROVIDER_REASONING_MODELS,
+  DEEPSEEK_LEGACY_MODEL_MAP,
 } from '../providers/model-config.js';
 import { ModelRouter, shouldKeepVisionPolicy, hasVisionContent } from '../core/router/router.js';
 import { detectReasoningNeed, detectDebugNeed, detectDebugNeedSemantic } from '../core/router/reasoning-probe.js';
@@ -780,7 +781,7 @@ export class DualMindChatPanel {
     // PROVIDER_DEFAULTS 自动填充逻辑，避免「用户显式清空后重新打开又变回默认值」。
     // 但选了 provider 时 model / baseUrl / reasoningModel 不允许为空：
     // 用 || 而非 ?? —— 空字符串和 undefined 一样，都兜底为 defaultModel。
-    const toPayload = (raw: RawLevelSettings, track: 'llm' | 'vllm'): ModelLevelConfigPayload => {
+    const toPayload = (raw: RawLevelSettings, track: 'llm' | 'vllm', level: ModelLevel): ModelLevelConfigPayload => {
       const provider = raw.provider ?? '';
       // 自定义 Provider 不在 PROVIDER_DEFAULTS 中，索引结果可能为 undefined
       const defaults = provider
@@ -789,6 +790,8 @@ export class DualMindChatPanel {
       const defaultModel = defaults
         ? (track === 'vllm' && defaults.vllmModel ? defaults.vllmModel : defaults.model)
         : '';
+      // 生效上下文窗口：用户显式配置 > 模型映射表推断 > Provider 默认（registry 已应用三级决策）
+      const registered = provider ? registry.get(`${provider}:${track}:L${level}`) : undefined;
       return {
         provider,
         // 选 Provider 后 model 不允许为空；空字符串和 undefined 一律兜底
@@ -797,6 +800,8 @@ export class DualMindChatPanel {
         baseUrl: raw.baseUrl || (provider ? defaults?.baseUrl ?? '' : ''),
         reasoningModel: raw.reasoningModel || (provider ? defaults?.reasoningModel ?? '' : ''),
         apiKeysCount: raw.apiKeys?.length ?? 0,
+        contextWindow: raw.contextWindow && raw.contextWindow > 0 ? String(raw.contextWindow) : '',
+        contextWindowEffective: registered?.contextWindow ?? 0,
       };
     };
 
@@ -804,7 +809,7 @@ export class DualMindChatPanel {
     const optionalLevel = (track: 'llm' | 'vllm', level: ModelLevel): ModelLevelConfigPayload | undefined => {
       const raw = registry.readRawLevelSettings(config, track, level);
       const touched = Object.values(raw).some((v) => v !== undefined);
-      return touched ? toPayload(raw, track) : undefined;
+      return touched ? toPayload(raw, track, level) : undefined;
     };
 
     const providerDefaults: ModelConfigPayload['providerDefaults'] = {};
@@ -823,12 +828,12 @@ export class DualMindChatPanel {
 
     const payload: ModelConfigPayload = {
       llm: {
-        level1: toPayload(registry.readRawLevelSettings(config, 'llm', 1), 'llm'),
+        level1: toPayload(registry.readRawLevelSettings(config, 'llm', 1), 'llm', 1),
         level2: optionalLevel('llm', 2),
         level3: optionalLevel('llm', 3),
       },
       vllm: {
-        level1: toPayload(registry.readRawLevelSettings(config, 'vllm', 1), 'vllm'),
+        level1: toPayload(registry.readRawLevelSettings(config, 'vllm', 1), 'vllm', 1),
         level2: optionalLevel('vllm', 2),
         level3: optionalLevel('vllm', 3),
       },
@@ -875,7 +880,7 @@ export class DualMindChatPanel {
   private handleUpdateModelConfig(
     track: 'llm' | 'vllm',
     level: 1 | 2 | 3,
-    field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'apiKeys',
+    field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'apiKeys' | 'contextWindow',
     value: string | string[],
   ): void {
     const config = vscode.workspace.getConfiguration('devSeeker');
@@ -948,6 +953,37 @@ export class DualMindChatPanel {
         .catch((err: unknown) => {
           log.error({ err: String(err), key }, 'Failed to update model config (provider switch)');
         });
+      return;
+    }
+
+    if (field === 'contextWindow' && typeof value === 'string') {
+      const raw = value.trim();
+      if (!raw) {
+        // 空输入 → 删除该键，恢复自动推断（模型映射表 / Provider 默认）
+        this.clearConfigKey(config, key)
+          .then(() => {
+            this.pushModelConfig();
+          })
+          .catch((err: unknown) => {
+            log.error({ err: String(err), key }, 'Failed to clear contextWindow');
+          });
+        return;
+      }
+      const parsed = parseInt(raw, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        // 非法输入（非数字或 ≤0）→ 不写入，仅回推当前状态
+        log.warn({ track, level, value: raw }, 'Ignoring invalid contextWindow input');
+        this.pushModelConfig();
+        return;
+      }
+      write(key, parsed).then(
+        () => {
+          this.pushModelConfig();
+        },
+        (err: unknown) => {
+          log.error({ err: String(err), key }, 'Failed to update model config');
+        },
+      );
       return;
     }
 
@@ -1034,7 +1070,8 @@ export class DualMindChatPanel {
   }
 
   // ─── 动态模型列表获取 ───
-  /** 模型列表缓存：key = `${track}:${level}:${provider}:${baseUrl}`, value = { models, fetchedAt } */
+  /** 模型列表缓存：key = `${track}:${level}:${provider}:${baseUrl}:v1`, value = { models, fetchedAt }
+   *  v1 后缀是缓存 schema 版本号——修改模型名映射逻辑后递增此版本，使旧缓存自动失效。 */
   private readonly providerModelsCache = new Map<string, { models: Array<{ id: string; name: string }>; fetchedAt: number }>();
   private static readonly PROVIDER_MODELS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
 
@@ -1071,8 +1108,9 @@ export class DualMindChatPanel {
       return;
     }
 
-    // 检查缓存
-    const cacheKey = `${track}:${level}:${provider}:${baseUrl}`;
+    // 检查缓存（cacheKey 包含 schema 版本号，使旧格式缓存自动失效）
+    const CACHE_SCHEMA_VERSION = 'v1';
+    const cacheKey = `${track}:${level}:${provider}:${baseUrl}:${CACHE_SCHEMA_VERSION}`;
     const cached = this.providerModelsCache.get(cacheKey);
     if (cached && Date.now() - cached.fetchedAt < DualMindChatPanel.PROVIDER_MODELS_CACHE_TTL_MS) {
       log.debug({ cacheKey, modelCount: cached.models.length }, '[fetchProviderModels] cache hit');
@@ -1090,18 +1128,46 @@ export class DualMindChatPanel {
         headers['Authorization'] = `Bearer ${apiKey}`;
       }
 
+      // Qwen / 百炼（DashScope）：OpenAI 兼容的 /compatible-mode/v1/models 只返回
+      // Qwen 自家模型，不包含平台上托管的三方模型（DeepSeek/GLM/Kimi/MiniMax 等）。
+      // DashScope 原生 GET /api/v1/models 可以返回全部模型，但该端点在中国站需要
+      // WorkspaceId、在国际站使用不同域名，无法从 compatible-mode 的 baseUrl 可靠推导。
+      // 因此统一走兼容端点 + 静态列表合并的方式，保证三方模型始终可见。
       const url = `${baseUrl}/models`;
       log.info({ url, provider }, '[fetchProviderModels] fetching models');
 
       const response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
       if (!response.ok) {
         log.warn({ url, status: response.status, statusText: response.statusText }, '[fetchProviderModels] request failed');
+        // 即使 API 拉取失败，也推送静态模型列表，让用户至少能看到可选模型
+        const staticModels = PROVIDER_MODELS[provider as ProviderType];
+        if (staticModels && staticModels.length > 0) {
+          const models = staticModels.map((m) => ({ id: m.id, name: m.label }));
+          this.providerModelsCache.set(cacheKey, { models, fetchedAt: Date.now() });
+          this.post({ type: 'provider_models_fetched', track, level, provider, models });
+        }
         return;
       }
 
       const data = await response.json() as { data?: Array<{ id?: string }> };
       const modelsArray = data?.data?.map((m) => m.id).filter((id): id is string => !!id) ?? [];
-      const uniqueIds = [...new Set(modelsArray)];
+      let uniqueIds = [...new Set(modelsArray)];
+
+      // DeepSeek 的 /v1/models 端点仍返回旧模型名（deepseek-chat/deepseek-reasoner），
+      // 这些旧名已于 2026-07-24 停服。映射到 V4 模型名，并确保 V4 模型始终在列表中。
+      if (provider === 'deepseek') {
+        const mapped = uniqueIds.map((id) => DEEPSEEK_LEGACY_MODEL_MAP[id] ?? id);
+        // 补充静态 V4 模型（API 可能不返回 V4 新名，导致下拉框无 V4 选项）
+        const staticV4Ids = (PROVIDER_MODELS['deepseek'] ?? []).map((m) => m.id);
+        uniqueIds = [...new Set([...mapped, ...staticV4Ids])];
+      }
+
+      // Qwen（百炼/DashScope）的 /models 端点只返回 Qwen 自家模型，不包含
+      // 平台上托管的三方模型（DeepSeek/GLM/Kimi/MiniMax 等）。需要补充静态列表。
+      if (provider === 'qwen') {
+        const staticIds = (PROVIDER_MODELS['qwen'] ?? []).map((m) => m.id);
+        uniqueIds = [...new Set([...uniqueIds, ...staticIds])];
+      }
 
       if (uniqueIds.length === 0) {
         log.debug({ url }, '[fetchProviderModels] no models returned');

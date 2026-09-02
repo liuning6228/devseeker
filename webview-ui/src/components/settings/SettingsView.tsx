@@ -50,9 +50,13 @@ type LevelState = {
   apiKey: string;
   apiKeySet: boolean;
   baseUrl: string;
+  /** 上下文窗口（token 数）显式配置值；空字符串 = 自动推断 */
+  contextWindow: string;
+  /** 当前生效的上下文窗口（自动推断结果），用于占位提示 */
+  contextWindowEffective: number;
 };
 
-const EMPTY_LEVEL: LevelState = { provider: '', model: '', apiKey: '', apiKeySet: false, baseUrl: '' };
+const EMPTY_LEVEL: LevelState = { provider: '', model: '', apiKey: '', apiKeySet: false, baseUrl: '', contextWindow: '', contextWindowEffective: 0 };
 
 export function SettingsView({ config, searchConfig, onBack, className }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState('llm');
@@ -132,10 +136,12 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
             apiKey: '',
             apiKeySet: payload.apiKeySet,
             baseUrl: payload.baseUrl || '',
+            contextWindow: payload.contextWindow || '',
+            contextWindowEffective: payload.contextWindowEffective ?? 0,
           }
         : { ...EMPTY_LEVEL };
       const next = { ...incoming };
-      for (const f of ['provider', 'model', 'apiKey', 'baseUrl'] as const) {
+      for (const f of ['provider', 'model', 'apiKey', 'baseUrl', 'contextWindow'] as const) {
         if (isRecentlyEdited(track, level, f)) next[f] = prev?.[f] ?? '';
       }
       return next;
@@ -211,7 +217,7 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
 
   // 通用更新单个字段（本地 + 持久化到 extension host）
   const updateField = useCallback(
-    (setFn: React.Dispatch<React.SetStateAction<Record<number, LevelState>>>, track: 'llm' | 'vllm', level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
+    (setFn: React.Dispatch<React.SetStateAction<Record<number, LevelState>>>, track: 'llm' | 'vllm', level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'contextWindow', value: string) => {
       markEdited(track, level, field);
 
       if (field === 'apiKey') {
@@ -302,11 +308,11 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
     postToHost({ type: 'update_model_config', track: 'vllm', level, field: 'provider', value: provider });
   }, [markEdited]);
 
-  const updateLlmLevel = useCallback((level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
+  const updateLlmLevel = useCallback((level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'contextWindow', value: string) => {
     updateField(setLlmLevelState, 'llm', level, field, value);
   }, [updateField]);
 
-  const updateVllmLevel = useCallback((level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
+  const updateVllmLevel = useCallback((level: 1 | 2 | 3, field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'contextWindow', value: string) => {
     updateField(setVllmLevelState, 'vllm', level, field, value);
   }, [updateField]);
 
@@ -363,6 +369,9 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                     model={cfg.model}
                     onModelChange={(v) => updateLlmLevel(level, 'model', v)}
                     onProviderChange={(v) => updateLlmProvider(level, v)}
+                    contextWindow={cfg.contextWindow}
+                    onContextWindowChange={(v) => updateLlmLevel(level, 'contextWindow', v)}
+                    contextWindowEffective={cfg.contextWindowEffective}
                     modelOptions={llmModelOptions[level]?.models}
                     modelOptionsProvider={llmModelOptions[level]?.provider}
                     testing={testStates[testKey('llm', level)]?.status === 'testing'}
@@ -411,6 +420,9 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
                     model={cfg.model}
                     onModelChange={(v) => updateVllmLevel(level, 'model', v)}
                     onProviderChange={(v) => updateVllmProvider(level, v)}
+                    contextWindow={cfg.contextWindow}
+                    onContextWindowChange={(v) => updateVllmLevel(level, 'contextWindow', v)}
+                    contextWindowEffective={cfg.contextWindowEffective}
                     modelOptions={vllmModelOptions[level]?.models}
                     modelOptionsProvider={vllmModelOptions[level]?.provider}
                     testing={testStates[testKey('vllm', level)]?.status === 'testing'}

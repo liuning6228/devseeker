@@ -82,6 +82,64 @@ export function normalizeDeepSeekModel(model: string | undefined): string | unde
   return DEEPSEEK_LEGACY_MODEL_MAP[model] ?? model;
 }
 
+// ─────────── 模型名 → 上下文窗口映射表 ───────────
+
+/**
+ * 模型名 → 上下文窗口（token 数）映射表。
+ *
+ * 用于在用户未显式配置 devSeeker.models.*.contextWindow（值为 0/空）时，
+ * 按所选模型名修正 Provider 类硬编码的默认窗口。典型错配：
+ * QwenVLProvider 固定 32K（按 qwen-vl-max 视觉模型设计），而 qwen3.8-max /
+ * qwen3.7-plus 实际为 1M、token-plan 托管的 deepseek-v4-pro-* 实际为 1M。
+ *
+ * 键支持两种形式：
+ * - 精确模型名（如 'qwen3.8-max'）
+ * - `prefix*` 通配（如 'deepseek-v4-pro-*' 匹配 deepseek-v4-pro-0813 等日期快照）
+ */
+export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  // Qwen 千问文本系列（1M 上下文）
+  'qwen3.8-max': 1_000_000,
+  'qwen3.7-max': 1_000_000,
+  'qwen3.7-plus': 1_000_000,
+  'qwen-max': 1_000_000,
+  'qwen-plus': 1_000_000,
+  'qwen-turbo': 1_000_000,
+  // Qwen 视觉系列（32K 上下文，与 QwenVLProvider 默认一致，显式声明防漂移）
+  'qwen-vl-max': 32_000,
+  'qwen-vl-max-latest': 32_000,
+  'qwen-vl-plus': 32_000,
+  // DeepSeek V4 系列（1M 上下文；`-*` 通配覆盖 token-plan 等三方端点托管的日期快照）
+  'deepseek-v4-pro': 1_000_000,
+  'deepseek-v4-flash': 1_000_000,
+  'deepseek-v4-pro-*': 1_000_000,
+  'deepseek-v4-flash-*': 1_000_000,
+  // MiniMax
+  'MiniMax-M3': 128_000,
+};
+
+/**
+ * 按模型名解析上下文窗口：先精确匹配，再最长前缀通配。
+ * 未命中返回 undefined（调用方保留 Provider 类默认值）。
+ */
+export function resolveContextWindowForModel(model: string | undefined): number | undefined {
+  const trimmed = (model ?? '').trim();
+  if (!trimmed) return undefined;
+  const exact = MODEL_CONTEXT_WINDOWS[trimmed];
+  if (exact !== undefined) return exact;
+  // 前缀通配：取最长匹配（避免短前缀如 'deepseek-*' 先命中覆盖更精确的规则）
+  let best: number | undefined;
+  let bestLen = -1;
+  for (const [key, value] of Object.entries(MODEL_CONTEXT_WINDOWS)) {
+    if (!key.endsWith('*')) continue;
+    const prefix = key.slice(0, -1);
+    if (trimmed.startsWith(prefix) && prefix.length > bestLen) {
+      best = value;
+      bestLen = prefix.length;
+    }
+  }
+  return best;
+}
+
 /**
  * 启动时迁移 settings.json 中的旧版 DeepSeek 模型名到 V4。
  *
@@ -150,8 +208,33 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'o3', label: 'o3' },
   ],
   qwen: [
+    // ── 🔥 Qwen 旗舰（百炼推荐） ──
+    { id: 'qwen3.8-max', label: 'qwen3.8-max (旗舰, 1M ctx)' },
+    { id: 'qwen3.7-plus', label: 'qwen3.7-plus (均衡, 1M ctx)' },
+    { id: 'qwen3.7-flash', label: 'qwen3.7-flash (轻量, 1M ctx)' },
+    // ── Qwen3.7 上一代 ──
+    { id: 'qwen3.7-max', label: 'qwen3.7-max' },
+    // ── Qwen3.6 ──
+    { id: 'qwen3.6-plus', label: 'qwen3.6-plus (1M ctx)' },
+    { id: 'qwen3.6-flash', label: 'qwen3.6-flash (1M ctx)' },
+    { id: 'qwen3.6-max-preview', label: 'qwen3.6-max-preview' },
+    // ── Qwen3.5 ──
+    { id: 'qwen3.5-plus', label: 'qwen3.5-plus (1M ctx, Multimodal)' },
+    { id: 'qwen3.5-flash', label: 'qwen3.5-flash (1M ctx)' },
+    { id: 'qwen3.5-397b-a17b', label: 'qwen3.5-397b-a17b (MoE)' },
+    { id: 'qwen3.5-122b-a10b', label: 'qwen3.5-122b-a10b (MoE)' },
+    { id: 'qwen3.5-35b-a3b', label: 'qwen3.5-35b-a3b (MoE)' },
+    { id: 'qwen3.5-27b', label: 'qwen3.5-27b' },
+    // ── Qwen3-Coder 编程专用 ──
+    { id: 'qwen3-coder-plus', label: 'qwen3-coder-plus (1M ctx)', free: true },
+    { id: 'qwen3-coder-flash', label: 'qwen3-coder-flash (1M ctx)', free: true },
+    { id: 'qwen3-coder-next', label: 'qwen3-coder-next (256k)' },
+    { id: 'qwen3-coder-480b-a35b-instruct', label: 'qwen3-coder-480b (MoE 35B)' },
+    { id: 'qwen3-coder-30b-a3b-instruct', label: 'qwen3-coder-30b (MoE)' },
     // ── Qwen3 开源系列 ──
     { id: 'qwen3-235b-a22b', label: 'qwen3-235b-a22b (Thinking)' },
+    { id: 'qwen3-next-80b-a3b-thinking', label: 'qwen3-next-80b (Thinking)' },
+    { id: 'qwen3-next-80b-a3b-instruct', label: 'qwen3-next-80b (Instruct)' },
     { id: 'qwen3-32b', label: 'qwen3-32b (Thinking)' },
     { id: 'qwen3-30b-a3b', label: 'qwen3-30b-a3b (MoE)' },
     { id: 'qwen3-14b', label: 'qwen3-14b' },
@@ -159,13 +242,7 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'qwen3-4b', label: 'qwen3-4b' },
     { id: 'qwen3-1.7b', label: 'qwen3-1.7b' },
     { id: 'qwen3-0.6b', label: 'qwen3-0.6b' },
-    // ── Qwen3 Coder 开源 ──
-    { id: 'qwen3-coder-plus', label: 'qwen3-coder-plus (1M ctx)', free: true },
-    { id: 'qwen3-coder-flash', label: 'qwen3-coder-flash (1M ctx)', free: true },
-    { id: 'qwen3-coder-480b-a35b-instruct', label: 'qwen3-coder-480b (MoE 35B)' },
-    // ── Qwen3.5 系列 ──
-    { id: 'qwen3.5-plus', label: 'qwen3.5-plus (Multimodal)' },
-    // ── Qwen2.5 Coder 系列 ──
+    // ── Qwen2.5-Coder ──
     { id: 'qwen2.5-coder-32b-instruct', label: 'qwen2.5-coder-32b' },
     { id: 'qwen2.5-coder-14b-instruct', label: 'qwen2.5-coder-14b' },
     { id: 'qwen2.5-coder-7b-instruct', label: 'qwen2.5-coder-7b' },
@@ -181,19 +258,37 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'qwen-turbo', label: 'qwen-turbo' },
     { id: 'qwen-max-latest', label: 'qwen-max-latest' },
     { id: 'qwen-max', label: 'qwen-max' },
-    { id: 'qwen-long', label: 'qwen-long (1M ctx)' },
-    // ── 推理模型 ──
+    { id: 'qwen-long', label: 'qwen-long (10M ctx)' },
+    // ── 💎 三方模型（百炼托管，同一 endpoint 调用） ──
+    { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (1M ctx, 强推理)' },
+    { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (1M ctx, 高并发)' },
+    { id: 'deepseek-v3.2', label: 'DeepSeek V3.2' },
+    { id: 'deepseek-v3.1', label: 'DeepSeek V3.1' },
+    { id: 'deepseek-v3', label: 'DeepSeek V3' },
+    { id: 'deepseek-r1', label: 'DeepSeek R1 (推理)' },
+    { id: 'glm-5.2', label: 'GLM-5.2 (1M ctx)' },
+    { id: 'glm-5.1', label: 'GLM-5.1 (198k ctx)' },
+    { id: 'glm-5', label: 'GLM-5 (198k ctx)' },
+    { id: 'glm-4.7', label: 'GLM-4.7 (198k ctx)' },
+    { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code (256k)' },
+    { id: 'kimi-k2.5', label: 'Kimi K2.5 (256k)' },
+    { id: 'MiniMax-M3', label: 'MiniMax M3 (192k)' },
+    { id: 'MiniMax-M2.7', label: 'MiniMax M2.7 (192k)' },
+    { id: 'MiniMax-M2.5', label: 'MiniMax M2.5 (192k)' },
+    { id: 'mimo-v2.5-pro', label: 'Mimo V2.5 Pro (1M ctx)' },
+    // ── 推理模型（旧版） ──
     { id: 'qwq-plus-latest', label: 'qwq-plus-latest (Reasoning)', free: true },
     { id: 'qwq-plus', label: 'qwq-plus (Reasoning)', free: true },
     { id: 'qwq-32b', label: 'qwq-32b (Reasoning)' },
-    // ── 视觉模型 ──
+    // ── 视觉模型（旧版） ──
     { id: 'qwen-vl-max-latest', label: 'qwen-vl-max-latest (Vision)' },
     { id: 'qwen-vl-max', label: 'qwen-vl-max (Vision)' },
     { id: 'qwen-vl-plus-latest', label: 'qwen-vl-plus-latest (Vision)' },
     { id: 'qwen-vl-plus', label: 'qwen-vl-plus (Vision)' },
-    // ── 通过 Qwen 调用的 DeepSeek ──
-    { id: 'deepseek-v3', label: 'deepseek-v3 (via Qwen)' },
-    { id: 'deepseek-r1', label: 'deepseek-r1 (via Qwen)' },
+    // ── 翻译模型 ──
+    { id: 'qwen-mt-plus', label: 'qwen-mt-plus (翻译)' },
+    { id: 'qwen-mt-turbo', label: 'qwen-mt-turbo (翻译)' },
+    { id: 'qwen-mt-flash', label: 'qwen-mt-flash (翻译)' },
   ],
   'qwen-code': [
     { id: 'qwen3-coder-plus', label: 'qwen3-coder-plus (1M ctx)', free: true },
@@ -443,7 +538,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderType, ProviderDefaults> = {
   },
   qwen: {
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-plus',
+    model: 'qwen3.7-plus', // 百炼推荐：能力与成本均衡，1M 上下文，完整工具调用
     vllmModel: 'qwen-vl-plus',
     hasVision: true,
   },

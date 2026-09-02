@@ -224,7 +224,7 @@ export type WebviewInboundMessage =
       type: 'update_model_config';
       track: 'llm' | 'vllm';
       level: 1 | 2 | 3;
-      field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'apiKeys';
+      field: 'provider' | 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'apiKeys' | 'contextWindow';
       value: string | string[];
     }
   /** 动态模型获取：Webview 请求从 Provider API 拉取可用模型列表 */
@@ -308,6 +308,10 @@ export interface ModelLevelConfigPayload {
   baseUrl: string;
   reasoningModel: string;
   apiKeysCount: number;     // 备用 Key 数量
+  /** 上下文窗口（token 数）显式配置值；空字符串 = 自动推断（映射表 / Provider 默认） */
+  contextWindow: string;
+  /** 当前生效的上下文窗口（用户值 > 模型映射 > Provider 默认），供 UI 占位提示 */
+  contextWindowEffective: number;
 }
 
 /** 模型配置推送 payload */

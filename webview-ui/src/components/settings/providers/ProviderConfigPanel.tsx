@@ -29,6 +29,11 @@ interface ProviderConfigPanelProps {
   /** 模型名 */
   model: string;
   onModelChange: (value: string) => void;
+  /** 上下文窗口（token 数）显式配置值；空字符串 = 自动推断 */
+  contextWindow?: string;
+  onContextWindowChange?: (value: string) => void;
+  /** 当前生效的上下文窗口（自动推断结果），用于占位提示 */
+  contextWindowEffective?: number;
   /** 可选的模型列表（若提供且与当前 provider 匹配则优先使用，否则从 PROVIDER_MODELS 取） */
   modelOptions?: Array<{ id: string; name: string }>;
   /** modelOptions 所属的 Provider ID（用于校验来源是否匹配当前选择） */
@@ -67,6 +72,9 @@ export function ProviderConfigPanel({
   onBaseUrlChange,
   model,
   onModelChange,
+  contextWindow,
+  onContextWindowChange,
+  contextWindowEffective,
   modelOptions,
   modelOptionsProvider,
   defaultBaseUrl,
@@ -107,18 +115,34 @@ export function ProviderConfigPanel({
   }, [defaultBaseUrl, provider]);
 
   // 当前 Provider 的可选模型列表
-  // 动态模型列表（来自 provider_models_fetched）优先，但仅当来源与当前 provider 匹配。
-  // 否则回退到静态 PROVIDER_MODELS，避免「切到 Qwen 后下拉框仍显示 DeepSeek 模型」。
+  // 动态模型列表（来自 provider_models_fetched）优先展示，但始终以静态
+  // PROVIDER_MODELS 为基线合并——动态拉取可能不包含三方模型（如 DashScope 的
+  // /models 只返回 Qwen 自家模型），合并后确保所有已知模型都出现在下拉框中。
   const availableModels = useMemo((): Array<{ id: string; name: string }> => {
-    if (
+    const staticModels = PROVIDER_MODELS[provider];
+    const staticMap = new Map((staticModels ?? []).map((m) => [m.id, m.label]));
+
+    // 动态模型列表，仅当来源与当前 provider 匹配时使用
+    const dynamicModels =
       modelOptions &&
       modelOptions.length > 0 &&
       (!modelOptionsProvider || modelOptionsProvider === providerId)
-    ) {
-      return modelOptions;
+        ? modelOptions
+        : [];
+
+    if (dynamicModels.length > 0) {
+      // 以动态列表为主体，用静态列表补充缺失的模型 ID
+      const seen = new Set(dynamicModels.map((m) => m.id));
+      const merged = [...dynamicModels];
+      for (const [id, label] of staticMap) {
+        if (!seen.has(id)) {
+          merged.push({ id, name: label });
+        }
+      }
+      return merged;
     }
-    const models = PROVIDER_MODELS[provider];
-    if (models) return models.map((m) => ({ id: m.id, name: m.label }));
+
+    if (staticModels) return staticModels.map((m) => ({ id: m.id, name: m.label }));
     // 自定义 Provider 或未知 Provider：返回空列表，用户可手动输入模型名
     return [];
   }, [modelOptions, modelOptionsProvider, provider, providerId]);
@@ -270,6 +294,27 @@ export function ProviderConfigPanel({
         onChange={onModelChange}
         options={availableModels}
       />
+
+      {/* 上下文窗口（可选，留空 = 自动按模型推断） */}
+      {onContextWindowChange && (
+        <div className="space-y-1">
+          <label className="text-xs text-vscode-fg/60">Context Window (tokens)</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={contextWindow ?? ''}
+            onChange={(e) => onContextWindowChange(e.target.value)}
+            placeholder={
+              contextWindowEffective && contextWindowEffective > 0
+                ? `自动（当前 ${contextWindowEffective.toLocaleString()}）`
+                : '自动（按模型推断）'
+            }
+            className="w-full px-3 py-2 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border
+                       focus:outline-none focus:ring-2 focus:ring-vscode-focus placeholder:text-vscode-fg/40"
+          />
+          <p className="text-xs text-vscode-fg/40">留空自动按模型推断；填入数字覆盖默认窗口（如 1000000 = 1M）</p>
+        </div>
+      )}
 
       {/* 测试失败原因：不显示具体原因的话用户无法判断是 Key 错、端点错还是网络不通 */}
       {testResult === 'error' && testError && (

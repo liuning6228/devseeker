@@ -68,6 +68,7 @@ function LevelConfigForm({
   const [baseUrl, setBaseUrl] = useState(data.baseUrl);
   const [reasoningModel, setReasoningModel] = useState(data.reasoningModel);
   const [apiKeysCount, setApiKeysCount] = useState(data.apiKeysCount);
+  const [contextWindow, setContextWindow] = useState(data.contextWindow ?? '');
 
   // 当 data prop 变化时（后端推送新配置），同步更新本地 state
   useEffect(() => {
@@ -77,7 +78,8 @@ function LevelConfigForm({
     setBaseUrl(data.baseUrl);
     setReasoningModel(data.reasoningModel);
     setApiKeysCount(data.apiKeysCount);
-  }, [data.provider, data.model, data.apiKeySet, data.baseUrl, data.reasoningModel, data.apiKeysCount]);
+    setContextWindow(data.contextWindow ?? '');
+  }, [data.provider, data.model, data.apiKeySet, data.baseUrl, data.reasoningModel, data.apiKeysCount, data.contextWindow]);
 
   // Provider 变更时自动切换 model 默认值
   const handleProviderChange = useCallback(
@@ -109,7 +111,7 @@ function LevelConfigForm({
   );
 
   const handleFieldBlur = useCallback(
-    (field: 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel', value: string) => {
+    (field: 'apiKey' | 'model' | 'baseUrl' | 'reasoningModel' | 'contextWindow', value: string) => {
       // apiKey 如果是掩码则不更新
       if (field === 'apiKey' && value === '••••••••') return;
       postMessage({ type: 'update_model_config', track, level, field, value });
@@ -211,6 +213,27 @@ function LevelConfigForm({
               onChange={(e) => setBaseUrl(e.target.value)}
               onBlur={(e) => handleFieldBlur('baseUrl', e.target.value)}
             />
+          </label>
+
+          {/* Context Window (可选) */}
+          <label className="mc-field mc-field--optional">
+            <span className="mc-field__label">Context Window (tokens)</span>
+            <input
+              className="mc-field__input"
+              type="text"
+              inputMode="numeric"
+              placeholder={
+                data.contextWindowEffective && data.contextWindowEffective > 0
+                  ? `自动（当前 ${data.contextWindowEffective.toLocaleString()}）`
+                  : '自动（按模型推断）'
+              }
+              value={contextWindow}
+              onChange={(e) => setContextWindow(e.target.value)}
+              onBlur={(e) => handleFieldBlur('contextWindow', e.target.value)}
+            />
+            <span className="mc-field__hint">
+              留空自动按模型推断；填入数字覆盖默认窗口（如 1000000 = 1M）
+            </span>
           </label>
 
           {/* Reasoning Model (仅 LLM) */}

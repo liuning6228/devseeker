@@ -140,7 +140,8 @@ describe('DeepSeekProvider.probe', () => {
     const p = new DeepSeekProvider({ apiKey: 'sk-test' });
     const r = await p.probe();
     expect(r.ok).toBe(true);
-    expect(r.model).toBe('deepseek-chat');
+    // V4 默认模型已改为 deepseek-v4-flash（旧名 deepseek-chat 已于 2026-07-24 停服）
+    expect(r.model).toBe('deepseek-v4-flash');
   });
 
   it('returns error on 401', async () => {
@@ -263,7 +264,7 @@ describe('DeepSeekProvider.createMessage', () => {
     expect(events[events.length - 1]).toEqual({ type: 'done', reason: 'stop' });
   }, 20_000);
 
-  it('K3: never sends reasoning_effort in body (even if someone added via options)', async () => {
+  it('K3: V4 supports reasoning_effort — no longer filtered', async () => {
     let captured: any = null;
     const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
       captured = JSON.parse(init.body as string);
@@ -278,8 +279,10 @@ describe('DeepSeekProvider.createMessage', () => {
     await drain(p.createMessage({ messages: [{ role: 'user', content: 'x' }] }));
 
     expect(captured).not.toBeNull();
-    expect(captured.reasoning_effort).toBeUndefined();
-    expect(captured.model).toBe('deepseek-chat');
+    // V4 默认模型已改为 deepseek-v4-flash（旧名 deepseek-chat 已于 2026-07-24 停服）
+    expect(captured.model).toBe('deepseek-v4-flash');
     expect(captured.stream).toBe(true);
+    // seed_mode 仍应被过滤
+    expect(captured.seed_mode).toBeUndefined();
   });
 });

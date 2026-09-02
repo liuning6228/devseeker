@@ -42,6 +42,7 @@ import {
   resolveApiKeys,
   flattenLevels,
   migrateFromLegacyFlat,
+  resolveContextWindowForModel,
 } from './model-config.js';
 
 const log = getLogger('provider.registry');
@@ -179,10 +180,18 @@ function buildProviderWithId(
     const provider = buildProvider(providerType, levelConfig, providerId, track);
     // 覆盖 id 为 3 级格式（通过 BaseProvider setter）
     provider.id = providerId;
-    // 覆盖 contextWindow（用户在 Settings 中配置了非零值时覆盖 Provider 默认值）
+    // 上下文窗口三级决策：
+    // 1) 用户显式配置（>0）优先；
+    // 2) 否则按所选模型名查映射表（修正 QwenVLProvider 32K 硬编码等错配，
+    //    如 qwen provider 下的 qwen3.8-max / deepseek-v4-pro-0813 实际为 1M）；
+    // 3) 均未命中 → 保留 Provider 类默认值。
     const customCtx = levelConfig.contextWindow;
-    if (customCtx && customCtx > 0) {
-      Object.defineProperty(provider, 'contextWindow', { value: customCtx, writable: false, configurable: true });
+    const inferredCtx = customCtx && customCtx > 0
+      ? undefined
+      : resolveContextWindowForModel(resolveModel(levelConfig, track));
+    const effectiveCtx = customCtx && customCtx > 0 ? customCtx : inferredCtx;
+    if (effectiveCtx && effectiveCtx > 0 && effectiveCtx !== provider.contextWindow) {
+      Object.defineProperty(provider, 'contextWindow', { value: effectiveCtx, writable: false, configurable: true });
     }
     log.info({ providerId, model: resolveModel(levelConfig, track), hasCredentials, contextWindow: provider.contextWindow }, 'Provider registered');
     return provider;

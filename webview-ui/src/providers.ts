@@ -67,16 +67,43 @@ export const PROVIDER_MODELS: Record<ProviderType, ModelOption[]> = {
     { id: 'o3', label: 'o3' },
   ],
   qwen: [
+    // 🔥 旗舰
+    { id: 'qwen3.8-max', label: 'qwen3.8-max (旗舰, 1M ctx)' },
+    { id: 'qwen3.7-plus', label: 'qwen3.7-plus (均衡, 1M ctx)' },
+    { id: 'qwen3.7-flash', label: 'qwen3.7-flash (轻量, 1M ctx)' },
+    { id: 'qwen3.6-plus', label: 'qwen3.6-plus (1M ctx)' },
+    { id: 'qwen3.5-plus', label: 'qwen3.5-plus (1M ctx)' },
+    // Coder
+    { id: 'qwen3-coder-plus', label: 'qwen3-coder-plus (1M ctx)', free: true },
+    { id: 'qwen3-coder-flash', label: 'qwen3-coder-flash (1M ctx)', free: true },
+    { id: 'qwen3-coder-next', label: 'qwen3-coder-next (256k)' },
+    // Qwen3 开源
     { id: 'qwen3-235b-a22b', label: 'qwen3-235b-a22b (Thinking)' },
+    { id: 'qwen3-next-80b-a3b-thinking', label: 'qwen3-next-80b (Thinking)' },
     { id: 'qwen3-32b', label: 'qwen3-32b (Thinking)' },
+    { id: 'qwen3-30b-a3b', label: 'qwen3-30b-a3b (MoE)' },
+    { id: 'qwen3-14b', label: 'qwen3-14b' },
+    { id: 'qwen3-8b', label: 'qwen3-8b' },
+    // 闭源 API
     { id: 'qwen-plus-latest', label: 'qwen-plus-latest' },
     { id: 'qwen-plus', label: 'qwen-plus' },
     { id: 'qwen-turbo-latest', label: 'qwen-turbo-latest' },
     { id: 'qwen-turbo', label: 'qwen-turbo' },
     { id: 'qwen-max-latest', label: 'qwen-max-latest' },
     { id: 'qwen-max', label: 'qwen-max' },
-    { id: 'qwen3-coder-plus', label: 'qwen3-coder-plus (1M ctx)', free: true },
-    { id: 'qwen3-coder-flash', label: 'qwen3-coder-flash (1M ctx)', free: true },
+    // 💎 三方模型（百炼托管）
+    { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (1M ctx)' },
+    { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (1M ctx)' },
+    { id: 'deepseek-v3.2', label: 'DeepSeek V3.2' },
+    { id: 'deepseek-v3', label: 'DeepSeek V3' },
+    { id: 'deepseek-r1', label: 'DeepSeek R1 (推理)' },
+    { id: 'glm-5.2', label: 'GLM-5.2 (1M ctx)' },
+    { id: 'glm-5.1', label: 'GLM-5.1' },
+    { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code (256k)' },
+    { id: 'kimi-k2.5', label: 'Kimi K2.5 (256k)' },
+    { id: 'MiniMax-M3', label: 'MiniMax M3 (192k)' },
+    { id: 'MiniMax-M2.5', label: 'MiniMax M2.5 (192k)' },
+    { id: 'mimo-v2.5-pro', label: 'Mimo V2.5 Pro (1M ctx)' },
   ],
   'qwen-code': [
     { id: 'qwen3-coder-plus', label: 'qwen3-coder-plus (1M ctx)', free: true },
@@ -137,7 +164,7 @@ export interface ProviderDefaults {
 export const PROVIDER_DEFAULTS: Record<ProviderType, ProviderDefaults> = {
   deepseek: {
     baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-flash',
   },
   openai: {
     baseUrl: 'https://api.openai.com/v1',
@@ -146,7 +173,7 @@ export const PROVIDER_DEFAULTS: Record<ProviderType, ProviderDefaults> = {
   },
   qwen: {
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-plus',
+    model: 'qwen3.7-plus',
     vllmModel: 'qwen-vl-plus',
   },
   'qwen-code': {

@@ -17,17 +17,17 @@
  * - 默认 reasoningModel = deepseek-v4-pro（V4-Pro，复杂推理/编码任务）
  *
  * 注：DeepSeek 于 2026-04-24 上线 V4 系列，旧名 deepseek-chat / deepseek-reasoner
- * 已于 2026-07-24 停止服务；V4 通过 enable_thinking 参数切换思考/非思考模式。
+ * 已于 2026-07-24 停止服务。V4 正式支持 reasoning_effort 参数和 thinking 模式切换。
  * 旧模型名自动映射由 normalizeDeepSeekModel（model-config）统一处理。
  *
  * 三坑由基类兜底：
  * - K1 reasoning_content 双路径（stream-parser）
  * - K2 content:null → ""（sanitizeMessages）
- * - K3 reasoning_effort 参数过滤（forbiddenKeys）
+ * - K3 reasoning_effort 在 V4 中已不再被拒绝，本类覆盖 forbiddenKeys() 放行
  */
 
 import { OpenAICompatibleProvider, type OpenAICompatibleConfig } from './openai-compatible.js';
-import type { Capability, Pricing, ProviderId } from './types.js';
+import type { Capability, Pricing, ProviderId, CreateMessageOptions } from './types.js';
 
 export type DeepSeekConfig = OpenAICompatibleConfig;
 
@@ -52,6 +52,23 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
   protected readonly defaultModel = DEFAULT_MODEL;
 
   protected _defaultId(): ProviderId { return 'deepseek-v4'; }
+
+  // V4 正式支持 reasoning_effort 参数，不再需要过滤
+  protected override forbiddenKeys(): Set<string> {
+    return new Set(['seed_mode']);
+  }
+
+  // V4 需要显式传 thinking 参数才能启用思考模式
+  protected override enrichRequestBody(
+    body: Record<string, unknown>,
+    model: string,
+    _options: CreateMessageOptions,
+  ): void {
+    // reasoning 模型或显式切到 v4-pro → 启用思考模式
+    if (model === this.reasoningModel || model === 'deepseek-v4-pro') {
+      body.thinking = { type: 'enabled' };
+    }
+  }
 
   constructor(cfg: DeepSeekConfig) {
     super({
