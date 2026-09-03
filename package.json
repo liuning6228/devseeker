@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.3.7",
+  "version": "0.4.0",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -768,35 +768,40 @@
           "enum": [
             "local-bert",
             "dashscope",
+            "ollama",
             "bm25"
           ],
           "default": "local-bert",
-          "description": "Embedding 引擎：local-bert（默认，离线，Xenova/multilingual-e5-small，384 维）/ dashscope（需 API Key，text-embedding-v3，1024 维）/ bm25（零模型 lexical 保底，无需下载模型，冷启动 <1s，适合低配置机器 / CI / 隐私场景）。切换后会重建索引（向量库与 BM25 快照互不干扰）。"
+          "description": "Embedding 引擎：local-bert（默认，离线，Xenova/multilingual-e5-small，384 维）/ dashscope（需 API Key，text-embedding-v3，1024 维）/ ollama（本地 Ollama 服务，nomic-embed-text，768 维，零成本）/ bm25（零模型 lexical 保底，无需下载模型，冷启动 <1s，适合低配置机器 / CI / 隐私场景）。切换后会重建索引（向量库与 BM25 快照互不干扰）。"
+        },
+        "devSeeker.codebaseIndex.embedBaseUrl": {
+          "type": "string",
+          "description": "嵌入服务端点（可选）。dashscope 未配置时回退 devSeeker.qwenVl.baseUrl；ollama 默认 http://127.0.0.1:11434。留空使用各自默认。"
         },
         "devSeeker.codebaseIndex.embedModel": {
           "type": "string",
           "default": "text-embedding-v3",
-          "description": "DashScope provider 专用：代码库索引使用的 Embedding 模型名（共用 DashScope key）。local-bert provider 忽略该项。"
+          "description": "Embedding 模型名。dashscope 默认 text-embedding-v3（共用 DashScope key）；ollama 未配置时默认 nomic-embed-text。local-bert provider 忽略该项。"
         },
         "devSeeker.codebaseIndex.embedDimension": {
           "type": "integer",
           "default": 1024,
           "minimum": 1,
-          "description": "Embedding 向量维度（text-embedding-v3 为 1024）"
+          "description": "Embedding 向量维度。dashscope 默认 1024；ollama 未配置时默认 768（nomic-embed-text）。切换维度差异会自动失效旧索引并触发重建。"
         },
         "devSeeker.codebaseIndex.embedBatchSize": {
           "type": "integer",
           "default": 10,
           "minimum": 1,
           "maximum": 25,
-          "description": "代码库索引单次调用 embedding 接口的批大小（DashScope text-embedding-v3 服务端 2026-Q1 起上限 10；若频繁遇到超时可降到 5 绕过 DashScope 慢路径）"
+          "description": "代码库索引单次调用 embedding 接口的批大小。dashscope 默认 10（服务端 2026-Q1 起上限 10；频繁超时可降到 5）；ollama 默认 4。"
         },
         "devSeeker.codebaseIndex.embedTimeoutMs": {
           "type": "integer",
           "default": 60000,
           "minimum": 5000,
           "maximum": 300000,
-          "description": "单次 embedding HTTP 请求超时时间（毫秒）。默认 60s；网络慢 / DashScope 冷启动频繁超时可调至 90000-120000"
+          "description": "单次 embedding HTTP 请求超时时间（毫秒）。dashscope 默认 60s；ollama 默认 30s。网络慢 / DashScope 冷启动频繁超时可调至 90000-120000"
         },
         "devSeeker.webResearch.defaultProvider": {
           "type": "string",

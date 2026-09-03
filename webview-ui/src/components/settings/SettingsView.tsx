@@ -8,13 +8,15 @@ import { AutoApproveBar } from './AutoApproveBar.js';
 import { Tab } from '../common/Tab.js';
 import { PROVIDER_DEFAULTS } from '../../providers.js';
 import { postToHost } from '../../vscode-api.js';
-import type { ModelConfigPayload, ModelLevelConfigPayload, SearchConfigPayload } from '../../protocol.js';
+import type { ModelConfigPayload, ModelLevelConfigPayload, SearchConfigPayload, EmbedConfigPayload } from '../../protocol.js';
 
 type SettingsViewProps = {
   /** 从 extension host 推送的当前模型配置 */
   config?: ModelConfigPayload | null;
   /** 从 extension host 推送的联网搜索配置 */
   searchConfig?: SearchConfigPayload | null;
+  /** 从 extension host 推送的索引（Embedding）配置 */
+  embedConfig?: EmbedConfigPayload | null;
   onBack?: () => void;
   className?: string;
 };
@@ -22,6 +24,7 @@ type SettingsViewProps = {
 const SETTINGS_TABS = [
   { id: 'llm', label: 'LLM' },
   { id: 'vllm', label: '视觉模型' },
+  { id: 'index', label: '索引配置' },
   { id: 'general', label: '通用' },
   { id: 'approval', label: '审批' },
 ];
@@ -58,7 +61,19 @@ type LevelState = {
 
 const EMPTY_LEVEL: LevelState = { provider: '', model: '', apiKey: '', apiKeySet: false, baseUrl: '', contextWindow: '', contextWindowEffective: 0 };
 
-export function SettingsView({ config, searchConfig, onBack, className }: SettingsViewProps) {
+// ─── 索引配置本地编辑态（数字字段字符串化；空串 = 未显式配置，使用引擎默认） ───
+type EmbedState = {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  dimension: string;
+  batchSize: string;
+  timeoutMs: string;
+};
+
+const INITIAL_EMBED: EmbedState = { provider: 'local-bert', baseUrl: '', model: '', dimension: '', batchSize: '', timeoutMs: '' };
+
+export function SettingsView({ config, searchConfig, embedConfig, onBack, className }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState('llm');
   // Step 21: 配置搜索
   const [searchQuery, setSearchQuery] = useState('');
@@ -182,6 +197,68 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
     },
     [],
   );
+
+  // ─── 索引配置：本地态 + 宿主回推同步（ECHO_GUARD 防覆盖）+ 按字段防抖持久化 ───
+  const [embedState, setEmbedState] = useState<EmbedState>(INITIAL_EMBED);
+  const embedEditedAtRef = useRef<Map<string, number>>(new Map());
+  const markEmbedEdited = useCallback((field: string) => {
+    embedEditedAtRef.current.set(field, Date.now());
+  }, []);
+  const embedRecentlyEdited = useCallback((field: string) => {
+    const at = embedEditedAtRef.current.get(field);
+    if (at === undefined) return false;
+    if (Date.now() - at > ECHO_GUARD_MS) {
+      embedEditedAtRef.current.delete(field);
+      return false;
+    }
+    return true;
+  }, []);
+  const embedFieldTimers = useRef<Record<string, ReturnType<typeof setTimeout> | null>>({});
+  // 本地态字段 → 协议字段名映射（state 短名 vs 配置节键名）
+  const EMBED_FIELD_TO_CONFIG = useRef<
+    Record<keyof EmbedState, 'embedProvider' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs'>
+  >({
+    provider: 'embedProvider',
+    baseUrl: 'embedBaseUrl',
+    model: 'embedModel',
+    dimension: 'embedDimension',
+    batchSize: 'embedBatchSize',
+    timeoutMs: 'embedTimeoutMs',
+  }).current;
+  const persistEmbedField = useCallback((field: 'embedProvider' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs', value: string) => {
+    if (embedFieldTimers.current[field]) clearTimeout(embedFieldTimers.current[field]);
+    embedFieldTimers.current[field] = setTimeout(() => {
+      postToHost({ type: 'update_embed_config', field, value });
+    }, 500);
+  }, []);
+  const updateEmbedField = useCallback((field: keyof EmbedState, value: string) => {
+    markEmbedEdited(field);
+    setEmbedState((prev) => ({ ...prev, [field]: value }));
+    if (field === 'provider') {
+      // select 即时提交（触发宿主侧切换重索引）
+      postToHost({ type: 'update_embed_config', field: 'embedProvider', value });
+    } else {
+      persistEmbedField(EMBED_FIELD_TO_CONFIG[field], value);
+    }
+  }, [markEmbedEdited, persistEmbedField, EMBED_FIELD_TO_CONFIG]);
+
+  useEffect(() => {
+    if (!embedConfig) return;
+    setEmbedState((prev) => {
+      const next: EmbedState = {
+        provider: embedConfig.embedProvider || 'local-bert',
+        baseUrl: embedConfig.embedBaseUrl ?? '',
+        model: embedConfig.embedModel ?? '',
+        dimension: embedConfig.embedDimension ? String(embedConfig.embedDimension) : '',
+        batchSize: embedConfig.embedBatchSize ? String(embedConfig.embedBatchSize) : '',
+        timeoutMs: embedConfig.embedTimeoutMs ? String(embedConfig.embedTimeoutMs) : '',
+      };
+      for (const f of ['provider', 'baseUrl', 'model', 'dimension', 'batchSize', 'timeoutMs'] as const) {
+        if (embedRecentlyEdited(f)) next[f] = prev[f];
+      }
+      return next;
+    });
+  }, [embedConfig, embedRecentlyEdited]);
 
   // ─── 连接测试（宿主真实探测，按 track+level 粒度） ───
   type TestState = { status: 'idle' | 'testing' | 'success' | 'error'; error?: string };
@@ -437,21 +514,123 @@ export function SettingsView({ config, searchConfig, onBack, className }: Settin
           </div>
         )}
 
+        {/* ────────── 索引配置 ────────── */}
+        {activeTab === 'index' && (
+          <div className="space-y-5">
+            <p className="text-xs text-vscode-fg/50">
+              配置代码库索引的嵌入引擎。三种引擎向量维度不同（384 / 1024 / 768），切换后旧向量自动失效，后台约 3 秒后自动重建索引。
+            </p>
+            <Section title="嵌入引擎">
+              <SettingRow label="嵌入引擎" description="默认 local-bert，完全离线、零成本">
+                <select
+                  className="px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border"
+                  value={embedState.provider}
+                  onChange={(e) => updateEmbedField('provider', e.target.value)}
+                >
+                  <option value="local-bert">local-bert（本地，默认）</option>
+                  <option value="dashscope">dashscope（云端）</option>
+                  <option value="ollama">ollama（本地服务）</option>
+                  <option value="bm25">bm25（无模型，词法）</option>
+                </select>
+              </SettingRow>
+
+              {embedState.provider === 'dashscope' && (
+                <>
+                  <p className="text-xs text-vscode-fg/40 border rounded p-2 bg-vscode-sidebar-bg/50">
+                    云端模式：需 API Key（devSeeker.qwenVl.apiKey，与 Qwen-VL 共用）；代码片段将上传至阿里云 DashScope。
+                    建索引快（1-3 分钟），语义更丰富（1024 维）。
+                  </p>
+                  <SettingRow label="Base URL" description="留空使用默认百炼兼容端点">
+                    <input
+                      type="text"
+                      className="w-72 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
+                      value={embedState.baseUrl}
+                      onChange={(e) => updateEmbedField('baseUrl', e.target.value)}
+                      placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                    />
+                  </SettingRow>
+                  <SettingRow label="模型名" description="留空使用默认 text-embedding-v3">
+                    <input
+                      type="text"
+                      className="w-72 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
+                      value={embedState.model}
+                      onChange={(e) => updateEmbedField('model', e.target.value)}
+                      placeholder="text-embedding-v3"
+                    />
+                  </SettingRow>
+                </>
+              )}
+
+              {embedState.provider === 'ollama' && (
+                <>
+                  <p className="text-xs text-vscode-fg/40 border rounded p-2 bg-vscode-sidebar-bg/50">
+                    Ollama 模式：需本地已启动 Ollama 服务并拉取嵌入模型（默认 nomic-embed-text）。完全离线、零成本，查询毫秒级。
+                  </p>
+                  <SettingRow label="Base URL" description="留空使用默认本机地址">
+                    <input
+                      type="text"
+                      className="w-72 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
+                      value={embedState.baseUrl}
+                      onChange={(e) => updateEmbedField('baseUrl', e.target.value)}
+                      placeholder="http://127.0.0.1:11434"
+                    />
+                  </SettingRow>
+                  <SettingRow label="模型名" description="留空使用默认 nomic-embed-text">
+                    <input
+                      type="text"
+                      className="w-72 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
+                      value={embedState.model}
+                      onChange={(e) => updateEmbedField('model', e.target.value)}
+                      placeholder="nomic-embed-text"
+                    />
+                  </SettingRow>
+                </>
+              )}
+
+              {(embedState.provider === 'dashscope' || embedState.provider === 'ollama') && (
+                <>
+                  <SettingRow label="向量维度" description="留空使用引擎默认">
+                    <input
+                      type="number"
+                      className="w-28 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
+                      value={embedState.dimension}
+                      onChange={(e) => updateEmbedField('dimension', e.target.value)}
+                      placeholder={embedState.provider === 'dashscope' ? '1024' : '768'}
+                    />
+                  </SettingRow>
+                  <SettingRow label="批大小" description="留空使用引擎默认">
+                    <input
+                      type="number"
+                      className="w-28 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
+                      value={embedState.batchSize}
+                      onChange={(e) => updateEmbedField('batchSize', e.target.value)}
+                      placeholder={embedState.provider === 'dashscope' ? '10' : '4'}
+                    />
+                  </SettingRow>
+                  <SettingRow label="超时（ms）" description="留空使用引擎默认">
+                    <input
+                      type="number"
+                      className="w-28 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
+                      value={embedState.timeoutMs}
+                      onChange={(e) => updateEmbedField('timeoutMs', e.target.value)}
+                      placeholder={embedState.provider === 'dashscope' ? '60000' : '30000'}
+                    />
+                  </SettingRow>
+                </>
+              )}
+
+              <div className="mt-3 space-y-1 text-xs text-vscode-fg/40">
+                <div>• 维度：local-bert 384 / dashscope 1024（text-embedding-v3）/ ollama 768（nomic-embed-text）</div>
+                <div>• 切换引擎后旧向量自动失效（不会计算错误），约 3 秒后后台自动重建索引</div>
+                <div>• 云端模式代码片段会上传至所选服务商；local-bert / ollama 完全离线</div>
+              </div>
+            </Section>
+          </div>
+        )}
+
         {/* ────────── 通用 ────────── */}
         {activeTab === 'general' && (
           <div className="space-y-5">
-            <Section title="嵌入引擎">
-              <SettingRow label="嵌入引擎" description="代码库索引使用的嵌入模型">
-                <select className="px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border">
-                  <option>local-bert（本地）</option>
-                  <option>dashscope（在线）</option>
-                  <option>bm25（无模型）</option>
-                </select>
-              </SettingRow>
-            </Section>
-
-            <Separator />
-
             <Section title="联网搜索">
               <SettingRow label="默认搜索 Provider" description="按查询语言自动路由">
                 <select

@@ -24,11 +24,13 @@ import * as vscode from 'vscode';
 import {
   maybeAutoReindex,
   anyMarkerExists,
+  defaultBuildEmbedder,
   AUTO_INDEX_MARKER_KEY,
   AUTO_INDEX_RERUN_MS,
   type AutoIndexerDeps,
 } from '../../src/core/index/auto-indexer.js';
 import type { Embedder, EmbedResult } from '../../src/core/index/embedder.js';
+import { DashScopeEmbedder, OllamaEmbedder } from '../../src/core/index/embedder.js';
 
 /** 最简 fake logger：吞掉所有调用。 */
 const fakeLogger = {
@@ -501,5 +503,77 @@ describe('maybeAutoReindex · BM25 provider', () => {
     expect(states.some((x) => x.s === 'error')).toBe(true);
     // marker 失败时不更新，保留下次重试能力
     expect(ctx.workspaceState.get<number>(AUTO_INDEX_MARKER_KEY)).toBeUndefined();
+  });
+});
+
+// Ollama provider 接线：defaultBuildEmbedder 按 embedProvider 正确分派（构造无 IO，可安全单测）
+describe('defaultBuildEmbedder · provider 分派', () => {
+  let origGetConfiguration: typeof vscode.workspace.getConfiguration;
+
+  beforeEach(() => {
+    origGetConfiguration = vscode.workspace.getConfiguration;
+  });
+
+  afterEach(() => {
+    (vscode.workspace as { getConfiguration: unknown }).getConfiguration =
+      origGetConfiguration;
+  });
+
+  /** 覆写 mock：给定键返回显式值，其余回落默认参数（与真实 WorkspaceConfiguration.get 一致） */
+  const mockConfig = (values: Record<string, unknown>): void => {
+    (vscode.workspace as { getConfiguration: unknown }).getConfiguration = () => ({
+      get: <T>(k: string, def?: T): T | undefined =>
+        (k in values ? values[k] : def) as T | undefined,
+    });
+  };
+
+  it('ollama: 未显式配置时构造带引擎默认参数的 OllamaEmbedder（nomic-embed-text / 768 维）', async () => {
+    mockConfig({ 'codebaseIndex.embedProvider': 'ollama' });
+    const embedder = await defaultBuildEmbedder(
+      vscode.workspace.getConfiguration('devSeeker'),
+      '/x',
+    );
+    expect(embedder).toBeInstanceOf(OllamaEmbedder);
+    expect(embedder?.dimension).toBe(768);
+    expect(embedder?.modelId).toBe('nomic-embed-text');
+  });
+
+  it('ollama: 显式配置 model/dimension/baseUrl 生效，不污染 dashscope 默认值', async () => {
+    mockConfig({
+      'codebaseIndex.embedProvider': 'ollama',
+      'codebaseIndex.embedModel': 'bge-m3',
+      'codebaseIndex.embedDimension': 1024,
+      'codebaseIndex.embedBaseUrl': 'http://localhost:11435',
+      'codebaseIndex.embedBatchSize': 8,
+      'codebaseIndex.embedTimeoutMs': 120000,
+    });
+    const embedder = await defaultBuildEmbedder(
+      vscode.workspace.getConfiguration('devSeeker'),
+      '/x',
+    );
+    expect(embedder).toBeInstanceOf(OllamaEmbedder);
+    expect(embedder?.dimension).toBe(1024);
+    expect(embedder?.modelId).toBe('bge-m3');
+  });
+
+  it('dashscope: 无 API Key 软跳过；embedBaseUrl 优先于 qwenVl.baseUrl 回退', async () => {
+    mockConfig({ 'codebaseIndex.embedProvider': 'dashscope' });
+    expect(
+      await defaultBuildEmbedder(vscode.workspace.getConfiguration('devSeeker'), '/x'),
+    ).toBeUndefined();
+
+    mockConfig({
+      'codebaseIndex.embedProvider': 'dashscope',
+      'qwenVl.apiKey': 'sk-test',
+      'qwenVl.baseUrl': 'https://qwen.example/v1',
+      'codebaseIndex.embedBaseUrl': 'https://embed.example/v1',
+    });
+    const embedder = await defaultBuildEmbedder(
+      vscode.workspace.getConfiguration('devSeeker'),
+      '/x',
+    );
+    expect(embedder).toBeInstanceOf(DashScopeEmbedder);
+    expect(embedder?.dimension).toBe(1024);
+    expect(embedder?.modelId).toBe('text-embedding-v3');
   });
 });

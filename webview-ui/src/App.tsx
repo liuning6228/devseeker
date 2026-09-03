@@ -16,6 +16,7 @@ import type {
   ToolDiffPayload,
   TodoListPayload,
   SearchConfigPayload,
+  EmbedConfigPayload,
 } from './protocol';
 import { MessageList } from './components/MessageList';
 import { Composer } from './components/Composer';
@@ -108,6 +109,8 @@ function AppWithNav(): JSX.Element {
   const [settingsModelConfig, setSettingsModelConfig] = useState<ModelConfigPayload | null>(null);
   // SettingsView 需要的联网搜索配置
   const [settingsSearchConfig, setSettingsSearchConfig] = useState<SearchConfigPayload | null>(null);
+  // SettingsView 需要的索引配置
+  const [settingsEmbedConfig, setSettingsEmbedConfig] = useState<EmbedConfigPayload | null>(null);
   // ask_user_question 弹窗状态（提升到 AppWithNav 层级，确保所有视图下都能弹窗）
   const [askQuestion, setAskQuestion] = useState<AskQuestionPayload | null>(null);
   // approval_request 审批弹窗状态（非聊天视图时展示独立覆盖层）
@@ -122,6 +125,9 @@ function AppWithNav(): JSX.Element {
       }
       if (msg?.type === 'search_config') {
         setSettingsSearchConfig(msg.payload as SearchConfigPayload);
+      }
+      if (msg?.type === 'embed_config') {
+        setSettingsEmbedConfig(msg.payload as EmbedConfigPayload);
       }
       if (msg?.type === 'ask_question') {
         setAskQuestion(msg.payload as AskQuestionPayload);
@@ -213,7 +219,7 @@ function AppWithNav(): JSX.Element {
             <AppInner onNavigate={handleNavigate} currentView={currentView} />
           )}
           {currentView === 'settings' && (
-            <SettingsView config={settingsModelConfig} searchConfig={settingsSearchConfig} onBack={() => handleNavigate('chat')} />
+            <SettingsView config={settingsModelConfig} searchConfig={settingsSearchConfig} embedConfig={settingsEmbedConfig} onBack={() => handleNavigate('chat')} />
           )}
           {currentView === 'history' && (
             <HistoryView

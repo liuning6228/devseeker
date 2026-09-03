@@ -121,6 +121,7 @@ import {
   CodebaseIndex,
   Bm25CodebaseIndex,
   DashScopeEmbedder,
+  OllamaEmbedder,
   WorkerEmbedder,
   defaultIndexStorePath,
   defaultBm25IndexStorePath,
@@ -128,6 +129,7 @@ import {
   type Embedder,
   type IndexProgress,
 } from '../core/index/index.js';
+import { maybeAutoReindex, AUTO_INDEX_MARKER_KEY } from '../core/index/auto-indexer.js';
 import { FusionSearcher, type SearchSource } from '../core/index/fusion-searcher.js';
 import { GraphIndex, GraphSearchSource } from '../core/index/graph-index.js';
 import { defaultIndexSqlitePath } from '../core/storage/sqlite-db.js';
@@ -617,9 +619,19 @@ export class DualMindChatPanel {
 
     // 配置变更 → 重建 Provider Registry + Router（防抖 300ms，避免 ModelConfigPanel 连续写入时 Registry 风暴）
     let configDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+    // 索引配置变更 → 推送 webview + 防抖 3s 后触发一次自动重索引（嵌入引擎/维度切换后旧向量已失效）
+    let embedReindexTimer: ReturnType<typeof setTimeout> | undefined;
     vscode.workspace.onDidChangeConfiguration(
       (e) => {
         if (!e.affectsConfiguration('devSeeker')) return;
+        if (e.affectsConfiguration('devSeeker.codebaseIndex')) {
+          this.pushEmbedConfig();
+          if (embedReindexTimer) clearTimeout(embedReindexTimer);
+          embedReindexTimer = setTimeout(() => {
+            void this.triggerReindexOnEmbedChange();
+            embedReindexTimer = undefined;
+          }, 3000);
+        }
         if (configDebounceTimer) clearTimeout(configDebounceTimer);
         configDebounceTimer = setTimeout(() => {
           const cfg = vscode.workspace.getConfiguration('devSeeker');
@@ -1256,6 +1268,76 @@ export class DualMindChatPanel {
     );
   }
 
+  // ─── 索引配置：推送 & 更新 ───
+
+  /** 推送当前索引配置到 webview（显式配置用 inspect 读取，区分 vs package.json 默认值） */
+  private pushEmbedConfig(): void {
+    const cfg = vscode.workspace.getConfiguration('devSeeker');
+    const explicit = (key: string): string | undefined =>
+      cfg.inspect<string>(`codebaseIndex.${key}`)?.globalValue ??
+      cfg.inspect<string>(`codebaseIndex.${key}`)?.workspaceValue;
+    this.post({
+      type: 'embed_config',
+      payload: {
+        embedProvider: (cfg.get<string>('codebaseIndex.embedProvider', 'local-bert') || 'local-bert').trim(),
+        embedBaseUrl: explicit('embedBaseUrl') ?? '',
+        embedModel: explicit('embedModel') ?? '',
+        embedDimension: Number(explicit('embedDimension')) || 0,
+        embedBatchSize: Number(explicit('embedBatchSize')) || 0,
+        embedTimeoutMs: Number(explicit('embedTimeoutMs')) || 0,
+      },
+    });
+  }
+
+  /** 处理 webview 发来的索引配置单字段变更（空串 = 清除显式配置回落引擎默认；数字做合法性校验） */
+  private handleUpdateEmbedConfig(
+    field: 'embedProvider' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs',
+    value: string | number,
+  ): void {
+    const cfg = vscode.workspace.getConfiguration('devSeeker.codebaseIndex');
+    let writeValue: unknown = value;
+    if (field === 'embedDimension' || field === 'embedBatchSize' || field === 'embedTimeoutMs') {
+      const n = typeof value === 'number' ? value : parseInt(value, 10);
+      if (!Number.isFinite(n) || n <= 0) {
+        log.warn({ field, value }, 'Ignoring invalid embed config input');
+        this.pushEmbedConfig();
+        return;
+      }
+      writeValue = n;
+    } else if (typeof value === 'string') {
+      writeValue = value.trim() || undefined;
+    }
+    log.info({ field, writeValue }, 'Updating embed config');
+    cfg.update(field, writeValue, vscode.ConfigurationTarget.Global).then(
+      () => {
+        this.pushEmbedConfig();
+      },
+      (err: unknown) => {
+        log.error({ err: String(err), field }, 'Failed to update embed config');
+        this.pushEmbedConfig();
+      },
+    );
+  }
+
+  /**
+   * 索引配置变更后触发一次自动重索引：
+   * 清除 24h 防重跑 marker（嵌入引擎/维度已变，旧 marker 失效），
+   * 交由 maybeAutoReindex 立即重建（modelId 不匹配时 SQLite 已自动清空旧向量）。
+   */
+  private async triggerReindexOnEmbedChange(): Promise<void> {
+    try {
+      await this.context.workspaceState.update(AUTO_INDEX_MARKER_KEY, 0);
+      const outcome = await maybeAutoReindex({
+        context: this.context,
+        log,
+        onStateChange: (state, info) => setIndexStatusBar(state, info),
+      });
+      log.info({ outcome }, 'autoIndex: triggered by embed config change');
+    } catch (e) {
+      log.warn({ err: String(e) }, 'autoIndex: embed config change trigger failed');
+    }
+  }
+
   /** W11.4 · 推送 run_preview 请求给 webview */
   private pushPreviewRequest(req: PreviewRequest): void {
     this.post({
@@ -1332,6 +1414,7 @@ export class DualMindChatPanel {
         this.pushProviderStatus();
         this.pushModelConfig(); // 首次就绪即推送模型配置，避免 ModelConfigPanel 显示空白
         this.pushSearchConfig(); // 推送联网搜索配置，避免设置页 API Key 显示空白
+        this.pushEmbedConfig(); // 推送索引配置，避免设置页索引配置显示空白
         this.pushCostSummary();
         this.pushSessionList();
         this.pushIndexStatus();
@@ -1377,6 +1460,7 @@ export class DualMindChatPanel {
       case 'open_model_config':
         this.pushModelConfig();
         this.pushSearchConfig();
+        this.pushEmbedConfig();
         break;
 
       case 'update_model_config':
@@ -1393,6 +1477,10 @@ export class DualMindChatPanel {
 
       case 'update_search_config':
         this.handleUpdateSearchConfig(msg.field, msg.value);
+        break;
+
+      case 'update_embed_config':
+        this.handleUpdateEmbedConfig(msg.field, msg.value);
         break;
 
       case 'new_session':
@@ -3562,7 +3650,7 @@ export class DualMindChatPanel {
 
   /**
    * 异步构造 embedder（reindex / 手动检索路径专用）。
-   * 根据 `codebaseIndex.embedProvider` 分派：local-bert / dashscope。
+   * 根据 `codebaseIndex.embedProvider` 分派：local-bert / dashscope / ollama。
    */
   private async buildEmbedderAsync(
     config: vscode.WorkspaceConfiguration,
@@ -3576,6 +3664,11 @@ export class DualMindChatPanel {
       // 真实模型路径：<ext>/models/Xenova/multilingual-e5-small/
       const modelDir = path.join(this.context.extensionPath, 'models');
       const embedder = await WorkerEmbedder.create({ modelDir, extensionPath: this.context.extensionPath });
+      this._embedderCache = embedder;
+      return embedder;
+    }
+    if (provider === 'ollama') {
+      const embedder = this.buildOllamaEmbedder(config);
       this._embedderCache = embedder;
       return embedder;
     }
@@ -3598,14 +3691,31 @@ export class DualMindChatPanel {
     const provider = (
       config.get<string>('codebaseIndex.embedProvider', 'local-bert') || 'local-bert'
     ).trim();
-    if (provider !== 'dashscope') return undefined;
+    if (provider !== 'dashscope' && provider !== 'ollama') return undefined;
     try {
-      const embedder = this.buildDashScopeEmbedder(config);
+      const embedder =
+        provider === 'ollama' ? this.buildOllamaEmbedder(config) : this.buildDashScopeEmbedder(config);
       this._embedderCache = embedder;
       return embedder;
     } catch {
       return undefined;
     }
+  }
+
+  /** 同步构造 OllamaEmbedder（本地服务，无 IO 副作用）。未显式配置的参数使用引擎默认值。 */
+  private buildOllamaEmbedder(config: vscode.WorkspaceConfiguration): OllamaEmbedder {
+    const baseUrl = config.get<string>('codebaseIndex.embedBaseUrl', '').trim();
+    const model = config.get<string>('codebaseIndex.embedModel')?.trim() || undefined;
+    const dimension = config.get<number>('codebaseIndex.embedDimension');
+    const batchSize = config.get<number>('codebaseIndex.embedBatchSize');
+    const timeoutMs = config.get<number>('codebaseIndex.embedTimeoutMs');
+    return new OllamaEmbedder({
+      baseUrl: baseUrl || undefined,
+      model,
+      dimension: dimension ?? undefined,
+      batchSize: batchSize ?? undefined,
+      timeoutMs: timeoutMs ?? undefined,
+    });
   }
 
   private buildDashScopeEmbedder(
@@ -3619,7 +3729,9 @@ export class DualMindChatPanel {
           '建立代码库索引需要 DashScope API Key。请在 VSCode 设置中填入 devSeeker.qwenVl.apiKey（与 Qwen-VL 共用同一密钥）。',
       });
     }
-    const baseUrl = config.get<string>('qwenVl.baseUrl', '').trim();
+    const baseUrl =
+      config.get<string>('codebaseIndex.embedBaseUrl', '').trim() ||
+      config.get<string>('qwenVl.baseUrl', '').trim();
     const model = config.get<string>('codebaseIndex.embedModel', 'text-embedding-v3').trim();
     const dimension = config.get<number>('codebaseIndex.embedDimension', 1024);
     const batchSize = config.get<number>('codebaseIndex.embedBatchSize', 10);

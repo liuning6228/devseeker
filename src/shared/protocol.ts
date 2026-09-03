@@ -282,6 +282,12 @@ export type WebviewInboundMessage =
       type: 'update_search_config';
       field: 'tavilyKeys' | 'bochaKeys' | 'defaultProvider';
       value: string | string[];
+    }
+  /** 索引配置：Webview 提交单字段变更（嵌入引擎 / 端点 / 模型 / 维度 / 批次 / 超时） */
+  | {
+      type: 'update_embed_config';
+      field: 'embedProvider' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs';
+      value: string | number;
     };
 
 // ─────────── Todo（W7e4 ·   todo_write 对齐） ───────────
@@ -347,6 +353,22 @@ export interface SearchConfigPayload {
   bochaKeys: string[];
   /** 默认搜索 Provider */
   defaultProvider: string;
+}
+
+/** 代码库索引（Embedding）配置推送 payload。数字字段 0/空串 = 未显式配置（使用各引擎默认值）。 */
+export interface EmbedConfigPayload {
+  /** 嵌入引擎：local-bert / dashscope / ollama / bm25 */
+  embedProvider: string;
+  /** 嵌入服务端点（可选，空 = 使用引擎默认） */
+  embedBaseUrl: string;
+  /** 模型名（可选，空 = 使用引擎默认，如 nomic-embed-text） */
+  embedModel: string;
+  /** 向量维度（0 = 未显式配置） */
+  embedDimension: number;
+  /** 批次大小（0 = 未显式配置） */
+  embedBatchSize: number;
+  /** 超时毫秒（0 = 未显式配置） */
+  embedTimeoutMs: number;
 }
 
 // ─────────── Extension → Webview ───────────
@@ -640,4 +662,6 @@ export type WebviewOutboundMessage =
   /** Step 22: 记忆已删除 */
   | { type: 'memory_deleted'; memoryId: string }
   /** 联网搜索配置推送（Extension → Webview） */
-  | { type: 'search_config'; payload: SearchConfigPayload };
+  | { type: 'search_config'; payload: SearchConfigPayload }
+  /** 索引配置推送（Extension → Webview） */
+  | { type: 'embed_config'; payload: EmbedConfigPayload };

@@ -39,7 +39,7 @@ import {
   defaultBm25IndexStorePath,
   type Bm25CodebaseIndexOptions,
 } from './bm25-codebase-index.js';
-import { DashScopeEmbedder, type Embedder } from './embedder.js';
+import { DashScopeEmbedder, OllamaEmbedder, type Embedder } from './embedder.js';
 import { WorkerEmbedder } from './worker-embedder.js';
 import type { Logger } from 'pino';
 
@@ -434,9 +434,11 @@ async function defaultExists(p: string): Promise<boolean> {
  * v1.2.0：
  *   - local-bert（默认）：加载打进 VSIX 的 multilingual-e5-small 离线模型
  *   - dashscope：复用原有 DashScope 路径，API Key 缺失软跳过
+ *   - ollama：本地 Ollama 服务（nomic-embed-text，768 维），未配置参数时使用引擎默认值
  * 任何异常都返回 undefined（静默跳过），**不抛错**。
+ * 导出供单测直接验证分派逻辑。
  */
-async function defaultBuildEmbedder(
+export async function defaultBuildEmbedder(
   config: vscode.WorkspaceConfiguration,
   extensionPath: string,
 ): Promise<Embedder | undefined> {
@@ -455,11 +457,32 @@ async function defaultBuildEmbedder(
     }
   }
 
+  if (provider === 'ollama') {
+    try {
+      // 各参数显式配置才生效；未配置时传 undefined 由 OllamaEmbedder 使用引擎默认
+      // （nomic-embed-text / 768 维 / batch 4 / 30s），避免与 dashscope 默认值互污染。
+      const baseUrl = config.get<string>('codebaseIndex.embedBaseUrl', '').trim();
+      const model = config.get<string>('codebaseIndex.embedModel')?.trim() || undefined;
+      const dimension = config.get<number>('codebaseIndex.embedDimension');
+      const batchSize = config.get<number>('codebaseIndex.embedBatchSize');
+      const timeoutMs = config.get<number>('codebaseIndex.embedTimeoutMs');
+      return new OllamaEmbedder({
+        baseUrl: baseUrl || undefined,
+        model,
+        dimension: dimension ?? undefined,
+        batchSize: batchSize ?? undefined,
+        timeoutMs: timeoutMs ?? undefined,
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
   // dashscope
   const apiKey = config.get<string>('qwenVl.apiKey', '').trim();
   if (!apiKey) return undefined;
 
-  const baseUrl = config.get<string>('qwenVl.baseUrl', '').trim();
+  const baseUrl = config.get<string>('codebaseIndex.embedBaseUrl', '').trim() || config.get<string>('qwenVl.baseUrl', '').trim();
   const model = config.get<string>('codebaseIndex.embedModel', 'text-embedding-v3').trim();
   const dimension = config.get<number>('codebaseIndex.embedDimension', 1024);
   const batchSize = config.get<number>('codebaseIndex.embedBatchSize', 10);
