@@ -5,27 +5,35 @@
  */
 
 /**
- * trace_error 工具（Debug 模式 P0 §2.1）
+ * trace_error 工具（Debug 模式 P0 §2.1，P0-2 升级为一步取证复合工具）
  *
- * 高层工具封装"错误分析"完整流程，一次调用返回结构化追溯报告。
- *
- * 执行逻辑：
- * 1. 读失败文件 ±15 行上下文
- * 2. 对失败行上的符号做 goto_definition → 找到定义
- * 3. 对定义做 call_hierarchy('incoming') → 谁调用了它
- * 4. 对每个上游递归追溯 depth 层
- * 5. 对失败行的变量做 find_references → 看值从哪设的
+ * 高层工具封装“错误分析”完整流程，一次调用返回四节结构化报告：
+ * 1. 失败点：失败文件 ±15 行上下文 + 错误信息/调用栈
+ * 2. 调用链：对失败行上的符号做 goto_definition → call_hierarchy 反向追溯 +
+ *    find_references 数据流追溯
+ * 3. 文件诊断：附带该文件 error 级诊断（get_problems 桥接，未就绪时跳过）
+ * 4. 测试线索：按命名约定 fs 探测相关测试文件（或测试文件反向提示被测源文件）
  *
  * 依赖：LspBridge + fs（直接读文件，不与 ReadFileTool 耦合）
  */
 
 import { promises as fs } from 'node:fs';
-import { resolve as resolvePath, isAbsolute } from 'node:path';
+import {
+  resolve as resolvePath,
+  isAbsolute,
+  join as joinPath,
+  basename,
+  dirname,
+  extname,
+} from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';
 import type { LspBridge, LspPosition } from '../lsp/bridge.js';
+import type { ProblemsBridge } from '../problems/index.js';
 import { ErrorCodes, AgentError } from '../errors/index.js';
 
 const MAX_CONTEXT_LINES = 15;
+/** P0-2 · 诊断附注上限（控制上下文预算） */
+const MAX_PROBLEMS = 10;
 
 export interface TraceErrorArgs {
   /** 错误信息（必填） */
@@ -74,12 +82,14 @@ const parameters = {
 export interface TraceErrorDeps {
   /** 懒获取 LSP 桥接器；未就绪时返回 undefined */
   getBridge(): LspBridge | undefined;
+  /** P0-2 · 可选：诊断桥接器；未传或取不到时诊断节降级为跳过而非失败 */
+  getProblemsBridge?(): ProblemsBridge | undefined;
 }
 
 export class TraceErrorTool implements ITool<TraceErrorArgs, ToolResult> {
   readonly name = 'trace_error';
   readonly description =
-    '高层错误分析工具：给定错误信息/文件/行号，自动追溯调用链（goto_definition → call_hierarchy → find_references），返回结构化追溯报告。一次调用替代多次 LSP 手动跳转。仅在 Debug 模式下使用。';
+    '高层错误分析工具：给定错误信息/文件/行号，一次调用返回四节报告——失败上下文、调用链追溯（goto_definition → call_hierarchy → find_references）、该文件 error 级诊断、相关测试文件线索。替代多次 LSP/诊断工具调用。仅在 Debug 模式下使用。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'read_only';
 
@@ -189,12 +199,49 @@ export class TraceErrorTool implements ITool<TraceErrorArgs, ToolResult> {
       reports.push('\n**追溯过程出错：** ' + (e instanceof Error ? e.message : String(e)));
     }
 
-    // ── Step 3: 根因假设 ──
-    reports.push('\n### 3. 根因假设');
-    reports.push('（基于以上证据自动生成，仅供参考）');
-    reports.push('- **错误点**：' + filePath + ':' + args.failingLine);
-    reports.push('- **直接原因**：' + args.errorMessage);
-    reports.push('- **建议**：请结合上述调用链和数据流追溯，定位根本原因。');
+    // ── Step 3: 文件诊断（P0-2 · 自动附带，无需 LLM 另调 get_problems）──
+    reports.push('\n### 3. 文件诊断');
+    const problemsBridge = this.deps.getProblemsBridge?.();
+    if (!problemsBridge) {
+      reports.push('（诊断桥接器未就绪，跳过）');
+    } else {
+      try {
+        const diags = await problemsBridge.getDiagnostics({
+          filePaths: [filePath],
+          minSeverity: 'error',
+        });
+        if (diags.length === 0) {
+          reports.push('该文件无 error 级诊断。');
+        } else {
+          for (const d of diags.slice(0, MAX_PROBLEMS)) {
+            const src = [d.source, d.code !== undefined ? String(d.code) : undefined]
+              .filter(Boolean)
+              .join(' ');
+            reports.push(
+              `- [${d.severity}] ${d.filePath}:${d.line}:${d.character} — ${d.message.replace(/\s+/g, ' ').trim()}${src ? ` (${src})` : ''}`,
+            );
+          }
+          if (diags.length > MAX_PROBLEMS) {
+            reports.push(`- … 还有 ${diags.length - MAX_PROBLEMS} 条未列出`);
+          }
+        }
+      } catch (e) {
+        reports.push('（诊断读取失败：' + (e instanceof Error ? e.message : String(e)) + '）');
+      }
+    }
+
+    // ── Step 4: 测试线索（P0-2 · fs 命名约定探测，轻量不 spawn 子进程）──
+    reports.push('\n### 4. 测试线索');
+    const related = await findRelatedTestFiles(filePath, ctx.workspaceRoot);
+    if (related.files.length === 0) {
+      reports.push('未发现相关测试文件（按命名约定探测）。');
+    } else if (related.kind === 'source') {
+      reports.push('当前文件是测试文件，推测被测源文件：');
+      for (const f of related.files) reports.push(`- ${f}`);
+    } else {
+      reports.push('疑似相关测试文件：');
+      for (const f of related.files) reports.push(`- ${f}`);
+    }
 
     return ok(reports.join('\n') + '\n');
   }
@@ -309,6 +356,64 @@ async function traceCallHierarchy(
 
 function formatPos(pos: LspPosition): string {
   return `${pos.line}:${pos.character}`;
+}
+
+/** 判断文件名是否为测试命名约定（*.test.* / *.spec.* / test_*.py） */
+function isTestFileName(base: string): boolean {
+  return (
+    /\.test\.[a-zA-Z0-9]+$/.test(base) ||
+    /\.spec\.[a-zA-Z0-9]+$/.test(base) ||
+    /^test_[a-zA-Z0-9_-]+\.py$/.test(base)
+  );
+}
+
+/** 从测试文件名剥离测试标记（foo.test.ts → foo.ts；test_foo.py → foo.py） */
+function stripTestMarker(base: string): string {
+  return base
+    .replace(/\.test\./i, '.')
+    .replace(/\.spec\./i, '.')
+    .replace(/^test_/i, '');
+}
+
+/**
+ * P0-2 · 探测失败文件的相关测试文件（或测试文件反向提示被测源文件）。
+ * 仅返回磁盘上真实存在的文件：fs.access 探测，不 spawn 子进程。
+ */
+async function findRelatedTestFiles(
+  filePath: string,
+  workspaceRoot: string | undefined,
+): Promise<{ kind: 'tests' | 'source'; files: string[] }> {
+  if (!workspaceRoot) return { kind: 'tests', files: [] };
+  const abs = isAbsolute(filePath) ? resolvePath(filePath) : resolvePath(workspaceRoot, filePath);
+  const dir = dirname(abs);
+  const base = basename(abs);
+  const ext = extname(base);
+  const stem = ext ? base.slice(0, base.length - ext.length) : base;
+
+  const candidates: string[] = [];
+  if (isTestFileName(base)) {
+    // 失败文件是测试文件 → 反向提示被测源文件
+    candidates.push(joinPath(dir, stripTestMarker(base)));
+  } else {
+    candidates.push(joinPath(dir, stem + '.test' + ext));
+    candidates.push(joinPath(dir, stem + '.spec' + ext));
+    candidates.push(joinPath(dir, '__tests__', stem + '.test' + ext));
+    candidates.push(joinPath(dir, '__tests__', stem + '.spec' + ext));
+    if (ext === '.py') {
+      candidates.push(joinPath(dir, 'test_' + stem + '.py'));
+    }
+  }
+
+  const found: string[] = [];
+  for (const c of [...new Set(candidates)]) {
+    try {
+      await fs.access(c);
+      found.push(c);
+    } catch {
+      // 文件不存在，跳过
+    }
+  }
+  return { kind: isTestFileName(base) ? 'source' : 'tests', files: found };
 }
 
 function ok(content: string, display?: Record<string, unknown>): ToolResult {

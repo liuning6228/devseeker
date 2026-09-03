@@ -5,15 +5,23 @@
  */
 
 /**
- * trace_error 工具单测（Debug Mode 优化方案 S1）
+ * trace_error 工具单测（Debug Mode 优化方案 S1；P0-2 升级为四节一步取证报告）
  *
- * 通过 Fake LspBridge 注入，不依赖 VSCode / 真实语言服务器。
+ * 通过 Fake LspBridge / Fake ProblemsBridge 注入，不依赖 VSCode / 真实语言服务器。
  */
 
 import { describe, it, expect } from 'vitest';
 import { TraceErrorTool } from '../../src/core/tools/index.js';
 import type { LspBridge, LspLocation, CallHierarchyEntry } from '../../src/core/lsp/bridge.js';
+import type {
+  DiagnosticItem,
+  GetDiagnosticsOptions,
+  ProblemsBridge,
+} from '../../src/core/problems/index.js';
 import { ErrorCodes } from '../../src/core/errors/index.js';
+import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 function range(sl: number, sc: number, el: number, ec: number) {
   return {
@@ -60,6 +68,17 @@ class FakeBridge implements LspBridge {
   async goToImplementation(): Promise<never[]> { return []; }
 }
 
+/** P0-2 · 假问题桥接器：注入预设诊断，记录查询选项 */
+class FakeProblemsBridge implements ProblemsBridge {
+  diags: DiagnosticItem[] = [];
+  calls: GetDiagnosticsOptions[] = [];
+
+  async getDiagnostics(opts?: GetDiagnosticsOptions): Promise<DiagnosticItem[]> {
+    if (opts) this.calls.push(opts);
+    return this.diags;
+  }
+}
+
 function ctx() {
   return {
     signal: new AbortController().signal,
@@ -103,7 +122,7 @@ describe('TraceErrorTool', () => {
     expect(r.errorCode).toBe(ErrorCodes.TOOL_ARGS_INVALID);
   });
 
-  it('returns structured report when bridge returns empty', async () => {
+  it('returns structured four-section report when bridge returns empty', async () => {
     const bridge = new FakeBridge();
     const tool = new TraceErrorTool({ getBridge: () => bridge });
     const r = await tool.execute(
@@ -113,10 +132,14 @@ describe('TraceErrorTool', () => {
     expect(r.ok).toBe(true);
     expect(r.content).toContain('Trace Report for src/x.ts:42');
     expect(r.content).toContain('Cannot read properties of undefined');
-    expect(r.content).toContain('失败点');
-    expect(r.content).toContain('调用链');
-    expect(r.content).toContain('数据流');
-    expect(r.content).toContain('根因假设');
+    // P0-2 · 四节固定结构：失败点 → 调用链 → 诊断 → 测试线索
+    expect(r.content).toContain('### 1. 失败点');
+    expect(r.content).toContain('### 2. 调用链');
+    expect(r.content).toContain('### 3. 文件诊断');
+    expect(r.content).toContain('### 4. 测试线索');
+    // 无 problems bridge → 诊断节降级为提示而非失败
+    expect(r.content).toContain('（诊断桥接器未就绪，跳过）');
+    expect(r.content).not.toContain('根因假设');
     // 验证调用了 LSP
     expect(bridge.calls.length).toBeGreaterThanOrEqual(1);
   });
@@ -170,5 +193,126 @@ describe('TraceErrorTool', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.errorCode).toBe(ErrorCodes.TASK_LOOP_ABORTED);
+  });
+
+  it('appends file diagnostics section from problems bridge', async () => {
+    const bridge = new FakeBridge();
+    const pbridge = new FakeProblemsBridge();
+    pbridge.diags = [
+      {
+        filePath: 'src/x.ts',
+        severity: 'error',
+        message: "Cannot find name 'foo'",
+        line: 42,
+        character: 5,
+        endLine: 42,
+        endCharacter: 8,
+        source: 'ts',
+        code: 2304,
+      },
+      {
+        filePath: 'src/x.ts',
+        severity: 'error',
+        message: "Type 'number' is not assignable",
+        line: 43,
+        character: 7,
+        endLine: 43,
+        endCharacter: 10,
+      },
+    ];
+
+    const tool = new TraceErrorTool({
+      getBridge: () => bridge,
+      getProblemsBridge: () => pbridge,
+    });
+    const r = await tool.execute(
+      { errorMessage: 'err', failingFile: 'src/x.ts', failingLine: 42 },
+      ctx(),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('### 3. 文件诊断');
+    expect(r.content).toContain("Cannot find name 'foo'");
+    expect(r.content).toContain('(ts 2304)');
+    expect(r.content).toContain('src/x.ts:43:7');
+    // 诊断查询按失败文件过滤 + error 级
+    expect(pbridge.calls).toHaveLength(1);
+    expect(pbridge.calls[0].filePaths).toEqual(['src/x.ts']);
+    expect(pbridge.calls[0].minSeverity).toBe('error');
+  });
+
+  it('diagnostics section degrades gracefully when problems bridge read fails', async () => {
+    const tool = new TraceErrorTool({
+      getBridge: () => new FakeBridge(),
+      getProblemsBridge: () => ({
+        async getDiagnostics(): Promise<DiagnosticItem[]> {
+          throw new Error('bridge exploded');
+        },
+      }),
+    });
+    const r = await tool.execute(
+      { errorMessage: 'err', failingFile: 'src/x.ts', failingLine: 10 },
+      ctx(),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('诊断读取失败：bridge exploded');
+  });
+
+  it('finds related test files by naming convention (source file input)', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'trace-err-test-'));
+    try {
+      await fs.writeFile(path.join(tmp, 'foo.ts'), 'export function foo() {}\n');
+      await fs.writeFile(
+        path.join(tmp, 'foo.test.ts'),
+        "import { foo } from './foo';\nit('works', () => expect(foo()).toBe(1));\n",
+      );
+
+      const tool = new TraceErrorTool({ getBridge: () => new FakeBridge() });
+      const r = await tool.execute(
+        { errorMessage: 'err', failingFile: 'foo.ts', failingLine: 1 },
+        { ...ctx(), workspaceRoot: tmp },
+      );
+      expect(r.ok).toBe(true);
+      expect(r.content).toContain('### 4. 测试线索');
+      expect(r.content).toContain('foo.test.ts');
+      expect(r.content).not.toContain('未发现相关测试文件');
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('hints the covered source file when failing file is a test file', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'trace-err-test-'));
+    try {
+      await fs.writeFile(path.join(tmp, 'bar.ts'), 'export const bar = 1;\n');
+      await fs.writeFile(path.join(tmp, 'bar.spec.ts'), "import { bar } from './bar';\n");
+
+      const tool = new TraceErrorTool({ getBridge: () => new FakeBridge() });
+      const r = await tool.execute(
+        { errorMessage: 'assertion failed', failingFile: 'bar.spec.ts', failingLine: 2 },
+        { ...ctx(), workspaceRoot: tmp },
+      );
+      expect(r.ok).toBe(true);
+      expect(r.content).toContain('当前文件是测试文件，推测被测源文件');
+      expect(r.content).toContain('bar.ts');
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('reports no test clues when nothing matches on disk', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'trace-err-test-'));
+    try {
+      await fs.writeFile(path.join(tmp, 'only.ts'), 'export const only = 1;\n');
+
+      const tool = new TraceErrorTool({ getBridge: () => new FakeBridge() });
+      const r = await tool.execute(
+        { errorMessage: 'err', failingFile: 'only.ts', failingLine: 1 },
+        { ...ctx(), workspaceRoot: tmp },
+      );
+      expect(r.ok).toBe(true);
+      expect(r.content).toContain('未发现相关测试文件');
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 });

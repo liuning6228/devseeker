@@ -226,38 +226,50 @@ describe('detectDebugNeed', () => {
     expect(detectDebugNeed('').needed).toBe(false);
   });
 
-  it('stack trace → needed=true, high confidence', () => {
+  it('stack trace → needed=true, high confidence, tier=L2', () => {
     const r = detectDebugNeed(
       'TypeError: Cannot read property "x" of undefined\n  at foo (src/a.ts:10:5)',
     );
     expect(r.needed).toBe(true);
     expect(r.signals).toContain('error-log');
     expect(r.confidence).toBeGreaterThanOrEqual(0.6);
+    // P1-4 · 有堆栈 → L2（跳过 REPRODUCE）
+    expect(r.tier).toBe('L2');
   });
 
-  it('Chinese bug report → needed=true', () => {
+  it('Chinese bug report → needed=true, tier=L3 (no stack)', () => {
     const r = detectDebugNeed('这个功能报错了，点击提交后页面崩溃');
     expect(r.needed).toBe(true);
     expect(r.signals).toContain('bug-keyword');
+    // P1-4 · 无堆栈 → L3（可由调用方经 IDE 诊断升级 L1）
+    expect(r.tier).toBe('L3');
   });
 
-  it('simple feature request → needed=false', () => {
+  it('simple feature request → needed=false, no tier', () => {
     const r = detectDebugNeed('帮我添加一个暗色模式切换按钮');
     expect(r.needed).toBe(false);
+    expect(r.tier).toBeUndefined();
   });
 
-  it('error code → needed=true', () => {
+  it('error code → needed=true, tier=L3', () => {
     const r = detectDebugNeed('API returns HTTP 500 when calling /users');
     expect(r.needed).toBe(true);
     expect(r.signals).toContain('error-code');
+    expect(r.tier).toBe('L3');
   });
 
-  it('multiple signals → high confidence (auto_debug)', () => {
-    const r = detectDebugNeed(
-      '程序崩溃了\nError: something went wrong\n  at handler (src/x.ts:5:3)',
-    );
+  it('multiple signals without stack → high confidence but tier=L3', () => {
+    const r = detectDebugNeed('程序崩溃了\nError: something went wrong\n  at handler (src/x.ts:5:3)');
     expect(r.signals.length).toBeGreaterThanOrEqual(2);
     expect(r.confidence).toBeGreaterThanOrEqual(0.8);
+    // 含 ERROR_LOG_STRONG_RE 堆栈特征 → L2
+    expect(r.tier).toBe('L2');
+  });
+
+  it('bug keywords only (no stack, no code) → tier=L3', () => {
+    const r = detectDebugNeed('提交按钮不工作，点了没反应');
+    expect(r.needed).toBe(true);
+    expect(r.tier).toBe('L3');
   });
 });
 
@@ -280,11 +292,12 @@ function createMockProvider(response: string): IProvider {
 }
 
 describe('detectDebugNeedSemantic', () => {
-  it('LLM returns "yes" → needed=true', async () => {
+  it('LLM returns "yes" → needed=true, tier=L3', async () => {
     const provider = createMockProvider('yes');
     const r = await detectDebugNeedSemantic('api key 设置后消失了', provider);
     expect(r.needed).toBe(true);
     expect(r.signals).toContain('semantic-llm');
+    expect(r.tier).toBe('L3');
   });
 
   it('LLM returns "no" → needed=false', async () => {

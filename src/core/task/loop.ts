@@ -50,6 +50,7 @@ import { getLogger } from '../../infra/logger.js';
 import { StreamingFileWriter } from '../tools/streaming-file-writer.js';
 import { sleepWithAbort } from '../retry/backoff.js';
 import { StreamingDiffViewProvider } from '../../ui/streaming-diff-view.js';
+import { runConcurrent } from '../subagent/thread-pool.js';
 
 const log = getLogger('task.loop');
 
@@ -119,6 +120,25 @@ const DEFAULT_MAX_TURNS = 150;
 export type TaskLoopToolFilter = (
   tool: Pick<ITool<unknown, ToolResult>, 'name' | 'safetyLevel'>,
 ) => boolean;
+
+/** P0-1 · 单个工具调用的执行结果（供归并段统一处理） */
+interface ToolOutcome {
+  call: ToolCall;
+  args: Record<string, unknown>;
+  /** 失败阶段：空参数 / Mode 过滤 / JSON 解析失败 / 已执行 */
+  phase: 'empty-args' | 'filtered' | 'parse-error' | 'executed';
+  ok: boolean;
+  content: string;
+  errorCode?: string;
+  /** phase='parse-error' 时的原始解析错误 */
+  parseError?: string;
+}
+
+/** P0-1 · 一轮内的执行分组：并行组（只读/网络）或串行单调用 */
+interface ToolExecGroup {
+  kind: 'parallel' | 'serial';
+  calls: ToolCall[];
+}
 
 export interface TaskLoopConfig {
   provider: IProvider;
@@ -227,6 +247,8 @@ export class TaskLoop {
   private isDegraded = false;
   /** DebugModeGate hasEvidence：本轮 send() 生命周期内是否调过取证工具 */
   private evidenceToolCalled = false;
+  /** P0-1 · 同轮并行执行的最大工具数（read_only/network 级并发上限） */
+  private static readonly MAX_PARALLEL_TOOLS = 4;
   private static readonly MAX_DEGRADE = 2;
   private static readonly DEGRADE_THRESHOLD = 3;
   private static readonly REASONING_MODEL = 'deepseek-v4-pro';
@@ -881,260 +903,73 @@ export class TaskLoop {
       this.history.addSystemSuffix(editContextXml);
     }
 
-    // 执行工具调用（顺序执行，MVP 简化）
-    const healingTracker = this.healingTracker;
+    // ─── P0-1 · 工具调用执行（并行 + 串行混合）───
+    // 分组规则（基于 ToolSafetyLevel，见 src/core/tools/types.ts）：
+    // - read_only / network 级工具（无副作用）在第一个写工具出现前可并行执行
+    // - 遇到第一个写工具（workspace_write / destructive / external，含 bash 审批门）后
+    //   恢复串行，保证 diff 顺序确定性；审批门只经过串行通道
+    const execGroups: ToolExecGroup[] = [];
+    let parallelBuffer: ToolCall[] = [];
+    let serialMode = false;
     for (const call of rawCalls) {
+      if (!serialMode && this.isParallelCapable(call.name)) {
+        parallelBuffer.push(call);
+      } else {
+        if (parallelBuffer.length > 0) {
+          execGroups.push({ kind: 'parallel', calls: parallelBuffer });
+          parallelBuffer = [];
+        }
+        serialMode = true;
+        execGroups.push({ kind: 'serial', calls: [call] });
+      }
+    }
+    if (parallelBuffer.length > 0) {
+      execGroups.push({ kind: 'parallel', calls: parallelBuffer });
+    }
+
+    for (const group of execGroups) {
       if (signal.aborted) return 'aborted';
 
-      const parsed = parseToolArgs(call.argsRaw);
-      const args = parsed.ok ? parsed.args : {};
-
-      // W15.9 · 空参数保护：SSE 断裂后非流式 fallback 可能返回 args 为空的 tool call，
-      // 导致 write_file 执行时 file_path 为空、resolveWriteTarget 返回 undefined、
-      // pendingDiff 未设置 → Accept/Reject UI 消失。
-      // 对于已知的必填参数工具，空 args 直接返回错误，不执行。
-      const REQUIRED_ARGS_TOOLS = new Set(['write_file', 'append_file', 'search_replace', 'delete_file']);
-      if (parsed.ok && REQUIRED_ARGS_TOOLS.has(call.name) && Object.keys(args).length === 0) {
-        const emptyMsg = `Error: 工具 ${call.name} 收到空参数。这通常是因为 SSE 流断裂后重试返回了不完整的 tool call。请重新生成完整的参数再调用。`;
-        this.history.addToolResult(call.id, emptyMsg, call.name);
-      this.emit({
-        type: 'tool_exec_start',
-        taskId: this.taskId,
-        toolCallId: call.id,
-        name: call.name,
-        args,
-        startTime: Date.now(),
-      });
-      this.emit({
-        type: 'tool_exec_end',
-        taskId: this.taskId,
-        toolCallId: call.id,
-        name: call.name,
-        ok: false,
-        contentPreview: truncate(emptyMsg, 500),
-        errorCode: ErrorCodes.TOOL_ARGS_INVALID,
-        endTime: Date.now(),
-      });
+      if (group.kind === 'serial') {
+        const outcome = await this.runOneToolCall(group.calls[0], signal);
+        this.applyToolOutcome(outcome);
         continue;
       }
 
-      // 先检查 Mode 白名单和 JSON 合法性，这些同步检查不需要审批
-      const tool = this.toolRegistry.get(call.name);
-      // Mode 白名单二次校验
-      if (this.toolFilter && tool && !this.toolFilter(tool)) {
-        const blockedMsg = `Error: 工具 "${call.name}" 在当前 Mode 下不可用，已阻止执行。请切换到合适的 Mode 或改用允许的工具。`;
-        this.history.addToolResult(call.id, blockedMsg, call.name);
-        this.emit({
-          type: 'tool_exec_end',
-          taskId: this.taskId,
-          toolCallId: call.id,
-          name: call.name,
-          ok: false,
-          contentPreview: blockedMsg,
-          errorCode: ErrorCodes.TOOL_EXEC_UNSAFE_BLOCKED,
-          endTime: Date.now(),
-        });
-        continue;
-      }
-      // 工具侧自愈场景 1：arguments JSON 解析失败
-      if (!parsed.ok) {
-        const baseMsg = `Error: 工具 ${call.name} 的 arguments 不是合法 JSON：${parsed.error}`;
-        const healed =
-          tryHealTool(
-            healingTracker,
-            {
-              toolName: call.name,
-              errorCode: ErrorCodes.TOOL_ARGS_INVALID_JSON,
-              errorMessage: parsed.error,
-            },
-            baseMsg,
-          ) ?? baseMsg;
-        this.promptModifier.record(call.name, ErrorCodes.TOOL_ARGS_INVALID_JSON);
-        this.history.addToolResult(call.id, healed, call.name);
-        this.emit({
-          type: 'tool_exec_end',
-          taskId: this.taskId,
-          toolCallId: call.id,
-          name: call.name,
-          ok: false,
-          contentPreview: truncate(healed, 500),
-          errorCode: ErrorCodes.TOOL_ARGS_INVALID_JSON,
-          endTime: Date.now(),
-        });
-        continue;
-      }
-
-      // ─── tool_exec_start 推迟到同步校验之后、ToolRunner.run() 之前 ───
-      // 这样当 ToolRunner.run() 内部遇到 approvalGate 阻塞时，
-      // webview 已经收到 tool_exec_start，ToolCard 状态为 running，
-      // 随后的 approval_request 会追加到 pendingApprovalToolIds，
-      // ToolCard 能同时显示"正在处理..."和审批按钮。
-      this.emit({
-        type: 'tool_exec_start',
-        taskId: this.taskId,
-        toolCallId: call.id,
-        name: call.name,
-        args,
-        startTime: Date.now(),
-      });
-
-      // 累积中间输出，用于 tool_exec_output 事件
-      // 增量 emit：每次只发新增的部分，webview 端自行追加
-      let toolOutputBuffer = '';
-      let toolOutputLastLen = 0;
-      // 空闲 flush 定时器：当终端输出无换行（进度条/长单行）时，
-      // 每隔 200ms 强制推送一次 buffer，确保 UI 能实时看到输出
-      let outputFlushTimer: ReturnType<typeof setInterval> | undefined;
-      const startOutputFlush = () => {
-        if (outputFlushTimer) return;
-        outputFlushTimer = setInterval(() => {
-          if (toolOutputBuffer.length > toolOutputLastLen) {
-            const delta = toolOutputBuffer.slice(toolOutputLastLen);
-            if (delta.length > 0) {
-              toolOutputLastLen = toolOutputBuffer.length;
-              this.emit({
-                type: 'tool_exec_output',
-                taskId: this.taskId,
-                toolCallId: call.id,
-                contentPreview: delta,
-                isDelta: true,
-              });
-            }
-          }
-        }, 200);
-        outputFlushTimer.unref?.();
-      };
-      // 发送一条初始占位 output，让 UI 立即看到 ToolCard 的 body（CommandOutputRow）
-      // 这对 bash 工具尤其重要——approvalGate 阻塞期间无任何输出，
-      // 此占位让用户知道"命令已就绪，等待执行/审批"
-      if (call.name === 'bash') {
-        const commandStr = typeof (args as Record<string, unknown>)?.command === 'string'
-          ? (args as Record<string, unknown>).command as string
-          : '';
-        toolOutputBuffer = `$ ${commandStr}\n`;
-        toolOutputLastLen = toolOutputBuffer.length;
-        this.emit({
-          type: 'tool_exec_output',
-          taskId: this.taskId,
-          toolCallId: call.id,
-          contentPreview: toolOutputBuffer,
-          isDelta: false,
-        });
-      }
-      // 在 tool_exec_start 之后立即启动 flush 定时器，不等待首次 onOutput。
-      // 即使工具在 approvalGate 上阻塞，UI 也能每 200ms 收到一次心跳推送。
-      startOutputFlush();
-      const stopOutputFlush = () => {
-        if (outputFlushTimer) {
-          clearInterval(outputFlushTimer);
-          outputFlushTimer = undefined;
-        }
-      };
-      const result = await this.toolRunner.run({
-        toolCallId: call.id,
-        name: call.name,
-        args,
-        workspaceRoot: this.workspaceRoot,
-        signal,
-        taskId: this.taskId,
-        fileStateCache: this.fileStateCache,
-        onOutput: (output: string) => {
-          toolOutputBuffer += output;
-          // 只 emit 新增部分，避免全量截断导致的"相同长度跳过更新"
-          const delta = toolOutputBuffer.slice(toolOutputLastLen);
-          if (delta.length > 0) {
-            toolOutputLastLen = toolOutputBuffer.length;
-            this.emit({
-              type: 'tool_exec_output',
-              taskId: this.taskId,
-              toolCallId: call.id,
-              contentPreview: delta,
-              isDelta: true,
-            });
-          }
-        },
-      });
-      // 工具执行完毕，停止空闲 flush 并推送最后剩余的 buffer
-      stopOutputFlush();
-      if (toolOutputBuffer.length > toolOutputLastLen) {
-        const delta = toolOutputBuffer.slice(toolOutputLastLen);
-        if (delta.length > 0) {
-          this.emit({
-            type: 'tool_exec_output',
-            taskId: this.taskId,
-            toolCallId: call.id,
-            contentPreview: delta,
-            isDelta: true,
+      // 并行组：并发执行（上限 MAX_PARALLEL_TOOLS），全部完成后按声明顺序归并——
+      // history 写入顺序必须与 tool_calls 声明顺序一致，否则 LLM 读到错位上下文
+      const results = await runConcurrent<ToolOutcome>(
+        group.calls.map((call) => ({ id: call.id, run: () => this.runOneToolCall(call, signal) })),
+        TaskLoop.MAX_PARALLEL_TOOLS,
+      );
+      const byId = new Map<string, ToolOutcome>();
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) {
+          byId.set(r.id, r.value);
+        } else {
+          // 防御：toolRunner.run 契约不 throw，此处仅兜底超预期异常
+          const call = group.calls.find((c) => c.id === r.id);
+          const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          byId.set(r.id, {
+            call: call ?? { id: r.id, name: 'unknown', argsRaw: '' },
+            args: {},
+            phase: 'executed',
+            ok: false,
+            content: `Error: 工具并行执行异常：${reason}`,
+            errorCode: ErrorCodes.TOOL_EXEC_FAILED,
           });
         }
       }
-
-      // ─── DebugModeGate：工具执行完毕后更新取证状态 ───
-      // 无论结果如何，只要 LLM 尝试了取证工具即视为已取证
-      // （即使失败，LLM 也可以通过输出判断失败原因）
-      if (isEvidenceTool(call.name)) {
-        this.evidenceToolCalled = true;
+      for (const call of group.calls) {
+        const outcome = byId.get(call.id);
+        if (outcome) this.applyToolOutcome(outcome);
       }
-
-      // ─── 工具侧自愈场景 2/3：工具返回失败 + 命中 healing table → 注入 hint ───
-      let finalContent = result.content;
-      if (!result.ok && result.errorCode) {
-        const healed = tryHealTool(
-          healingTracker,
-          {
-            toolName: call.name,
-            errorCode: result.errorCode,
-            errorMessage: result.content,
-          },
-          result.content,
-        );
-        if (healed) finalContent = healed;
-        // W15.3 · 记录工具执行失败模式
-        this.promptModifier.record(call.name, result.errorCode);
-        // §8.12.2 · 编辑工具失败计数
-        if (TaskLoop.EDIT_TOOLS.has(call.name)) {
-          this.editToolFailures++;
-        }
-      } else if (result.ok) {
-        // 成功即重置该 (tool, *) 所有 healing 计数不安全（需枚举），
-        // 这里仅重置当前任务中最常见的几个错误码以释放预算
-        healingTracker.reset(call.name, ErrorCodes.TOOL_ARGS_INVALID_JSON);
-        healingTracker.reset(call.name, ErrorCodes.TOOL_PATCH_UNIQUE_FAIL);
-        healingTracker.reset(call.name, ErrorCodes.TOOL_PATCH_NO_MATCH);
-        // W15.3 · 成功执行后清除该工具的动态约束
-        this.promptModifier.clear(call.name);
-        // §8.12.2 · 编辑工具成功 → 重置降级计数和标志
-        if (TaskLoop.EDIT_TOOLS.has(call.name)) {
-          this.editToolFailures = 0;
-          this.isDegraded = false;
-        }
-      }
-
-      this.history.addToolResult(call.id, finalContent, call.name);
-
-      // tool_exec_end 的 contentPreview：
-      // - 失败时传 finalContent（含可能的 healing hint 或原始错误文本），
-      //   让 webview 显示错误信息给用户看到
-      // - 成功时传空，由 webview 保留已有的流式终端输出
-      const endContentPreview = !result.ok ? truncate(finalContent, 500) : '';
-      this.emit({
-        type: 'tool_exec_end',
-        taskId: this.taskId,
-        toolCallId: call.id,
-        name: call.name,
-        ok: result.ok,
-        contentPreview: endContentPreview,
-        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
-        endTime: Date.now(),
-      });
-      // W15.8 · 工具正常执行完毕，通知 StreamingFileWriter 清理临时文件
-      // （工具本身的 writeFile 已写入真实文件，临时文件不再需要）
-      void this.streamingWriter?.onToolExecComplete(call.id).catch((e) => {
-        log.warn({ err: String(e), toolCallId: call.id }, 'streamingWriter onToolExecComplete failed');
-      });
-      // P0-7 · 工具执行完毕，关闭 Diff 编辑器
-      this.streamingDiffView?.close(call.id);
     }
+
+
+
+
+
 
     // §8.12.2 · 降级触发判断：编辑工具连续失败 ≥ threshold 且未超降级次数
     if (this.editToolFailures >= TaskLoop.DEGRADE_THRESHOLD
@@ -1160,6 +995,289 @@ export class TaskLoop {
     }
 
     return { kind: 'continue', assistantText, toolCallCount: rawCalls.length };
+  }
+
+  /**
+   * P0-1 · 该工具是否可并行执行：仅 read_only / network 级（无副作用）。
+   * 未注册工具返回 false 走串行，保持原有错误路径。
+   */
+  private isParallelCapable(name: string): boolean {
+    const tool = this.toolRegistry.get(name);
+    if (!tool) return false;
+    return tool.safetyLevel === 'read_only' || tool.safetyLevel === 'network';
+  }
+
+  /**
+   * P0-1 · 执行单个工具调用（不触碰任何共享可变状态）。
+   *
+   * 职责：同步前置校验（空参数 / Mode 白名单 / JSON 合法性）+ 实际执行 +
+   * 发射 tool_exec_start / tool_exec_output 事件。
+   *
+   * 共享状态（healingTracker / promptModifier / editToolFailures /
+   * evidenceToolCalled）、history 写入与 tool_exec_end 发射统一由
+   * applyToolOutcome 在归并段按声明顺序处理，保证并行安全。
+   */
+  private async runOneToolCall(call: ToolCall, signal: AbortSignal): Promise<ToolOutcome> {
+    const parsed = parseToolArgs(call.argsRaw);
+    const args = parsed.ok ? parsed.args : {};
+
+    // W15.9 · 空参数保护：SSE 断裂后非流式 fallback 可能返回 args 为空的 tool call，
+    // 导致 write_file 执行时 file_path 为空、resolveWriteTarget 返回 undefined、
+    // pendingDiff 未设置 → Accept/Reject UI 消失。
+    // 对于已知的必填参数工具，空 args 直接返回错误，不执行。
+    const REQUIRED_ARGS_TOOLS = new Set(['write_file', 'append_file', 'search_replace', 'delete_file']);
+    if (parsed.ok && REQUIRED_ARGS_TOOLS.has(call.name) && Object.keys(args).length === 0) {
+      const emptyMsg = `Error: 工具 ${call.name} 收到空参数。这通常是因为 SSE 流断裂后重试返回了不完整的 tool call。请重新生成完整的参数再调用。`;
+      this.emit({
+        type: 'tool_exec_start',
+        taskId: this.taskId,
+        toolCallId: call.id,
+        name: call.name,
+        args,
+        startTime: Date.now(),
+      });
+      return {
+        call,
+        args,
+        phase: 'empty-args',
+        ok: false,
+        content: emptyMsg,
+        errorCode: ErrorCodes.TOOL_ARGS_INVALID,
+      };
+    }
+
+    // 先检查 Mode 白名单和 JSON 合法性，这些同步检查不需要审批
+    const tool = this.toolRegistry.get(call.name);
+    // Mode 白名单二次校验
+    if (this.toolFilter && tool && !this.toolFilter(tool)) {
+      const blockedMsg = `Error: 工具 "${call.name}" 在当前 Mode 下不可用，已阻止执行。请切换到合适的 Mode 或改用允许的工具。`;
+      return {
+        call,
+        args,
+        phase: 'filtered',
+        ok: false,
+        content: blockedMsg,
+        errorCode: ErrorCodes.TOOL_EXEC_UNSAFE_BLOCKED,
+      };
+    }
+    // 工具侧自愈场景 1：arguments JSON 解析失败
+    if (!parsed.ok) {
+      return {
+        call,
+        args,
+        phase: 'parse-error',
+        ok: false,
+        content: `Error: 工具 ${call.name} 的 arguments 不是合法 JSON：${parsed.error}`,
+        errorCode: ErrorCodes.TOOL_ARGS_INVALID_JSON,
+        parseError: parsed.error,
+      };
+    }
+
+    // ─── tool_exec_start 推迟到同步校验之后、ToolRunner.run() 之前 ───
+    // 这样当 ToolRunner.run() 内部遇到 approvalGate 阻塞时，
+    // webview 已经收到 tool_exec_start，ToolCard 状态为 running，
+    // 随后的 approval_request 会追加到 pendingApprovalToolIds，
+    // ToolCard 能同时显示"正在处理..."和审批按钮。
+    this.emit({
+      type: 'tool_exec_start',
+      taskId: this.taskId,
+      toolCallId: call.id,
+      name: call.name,
+      args,
+      startTime: Date.now(),
+    });
+
+    // 累积中间输出，用于 tool_exec_output 事件
+    // 增量 emit：每次只发新增的部分，webview 端自行追加
+    let toolOutputBuffer = '';
+    let toolOutputLastLen = 0;
+    // 空闲 flush 定时器：当终端输出无换行（进度条/长单行）时，
+    // 每隔 200ms 强制推送一次 buffer，确保 UI 能实时看到输出
+    let outputFlushTimer: ReturnType<typeof setInterval> | undefined;
+    const startOutputFlush = () => {
+      if (outputFlushTimer) return;
+      outputFlushTimer = setInterval(() => {
+        if (toolOutputBuffer.length > toolOutputLastLen) {
+          const delta = toolOutputBuffer.slice(toolOutputLastLen);
+          if (delta.length > 0) {
+            toolOutputLastLen = toolOutputBuffer.length;
+            this.emit({
+              type: 'tool_exec_output',
+              taskId: this.taskId,
+              toolCallId: call.id,
+              contentPreview: delta,
+              isDelta: true,
+            });
+          }
+        }
+      }, 200);
+      outputFlushTimer.unref?.();
+    };
+    // 发送一条初始占位 output，让 UI 立即看到 ToolCard 的 body（CommandOutputRow）
+    // 这对 bash 工具尤其重要——approvalGate 阻塞期间无任何输出，
+    // 此占位让用户知道"命令已就绪，等待执行/审批"
+    if (call.name === 'bash') {
+      const commandStr = typeof (args as Record<string, unknown>)?.command === 'string'
+        ? (args as Record<string, unknown>).command as string
+        : '';
+      toolOutputBuffer = `$ ${commandStr}\n`;
+      toolOutputLastLen = toolOutputBuffer.length;
+      this.emit({
+        type: 'tool_exec_output',
+        taskId: this.taskId,
+        toolCallId: call.id,
+        contentPreview: toolOutputBuffer,
+        isDelta: false,
+      });
+    }
+    // 在 tool_exec_start 之后立即启动 flush 定时器，不等待首次 onOutput。
+    // 即使工具在 approvalGate 上阻塞，UI 也能每 200ms 收到一次心跳推送。
+    startOutputFlush();
+    const stopOutputFlush = () => {
+      if (outputFlushTimer) {
+        clearInterval(outputFlushTimer);
+        outputFlushTimer = undefined;
+      }
+    };
+    const result = await this.toolRunner.run({
+      toolCallId: call.id,
+      name: call.name,
+      args,
+      workspaceRoot: this.workspaceRoot,
+      signal,
+      taskId: this.taskId,
+      fileStateCache: this.fileStateCache,
+      onOutput: (output: string) => {
+        toolOutputBuffer += output;
+        // 只 emit 新增部分，避免全量截断导致的"相同长度跳过更新"
+        const delta = toolOutputBuffer.slice(toolOutputLastLen);
+        if (delta.length > 0) {
+          toolOutputLastLen = toolOutputBuffer.length;
+          this.emit({
+            type: 'tool_exec_output',
+            taskId: this.taskId,
+            toolCallId: call.id,
+            contentPreview: delta,
+            isDelta: true,
+          });
+        }
+      },
+    });
+    // 工具执行完毕，停止空闲 flush 并推送最后剩余的 buffer
+    stopOutputFlush();
+    if (toolOutputBuffer.length > toolOutputLastLen) {
+      const delta = toolOutputBuffer.slice(toolOutputLastLen);
+      if (delta.length > 0) {
+        this.emit({
+          type: 'tool_exec_output',
+          taskId: this.taskId,
+          toolCallId: call.id,
+          contentPreview: delta,
+          isDelta: true,
+        });
+      }
+    }
+
+    return {
+      call,
+      args,
+      phase: 'executed',
+      ok: result.ok,
+      content: result.content,
+      errorCode: result.errorCode,
+    };
+  }
+
+  /**
+   * P0-1 · 按声明顺序归并单个工具调用的执行结果。
+   *
+   * 所有共享可变状态（healingTracker / promptModifier / editToolFailures /
+   * evidenceToolCalled）只在此处更新；history 与 tool_exec_end 也按声明顺序写入，
+   * 保证并行执行与串行执行对外观察语义一致。
+   */
+  private applyToolOutcome(o: ToolOutcome): void {
+    let finalContent = o.content;
+
+    if (o.phase === 'parse-error') {
+      // 工具侧自愈场景 1：arguments JSON 解析失败
+      const healed =
+        tryHealTool(
+          this.healingTracker,
+          {
+            toolName: o.call.name,
+            errorCode: ErrorCodes.TOOL_ARGS_INVALID_JSON,
+            errorMessage: o.parseError ?? '',
+          },
+          o.content,
+        ) ?? o.content;
+      this.promptModifier.record(o.call.name, ErrorCodes.TOOL_ARGS_INVALID_JSON);
+      finalContent = healed;
+    } else if (o.phase === 'executed') {
+      // ─── 工具侧自愈场景 2/3：工具返回失败 + 命中 healing table → 注入 hint ───
+      if (!o.ok && o.errorCode) {
+        const healed = tryHealTool(
+          this.healingTracker,
+          {
+            toolName: o.call.name,
+            errorCode: o.errorCode,
+            errorMessage: o.content,
+          },
+          o.content,
+        );
+        if (healed) finalContent = healed;
+        // W15.3 · 记录工具执行失败模式
+        this.promptModifier.record(o.call.name, o.errorCode);
+        // §8.12.2 · 编辑工具失败计数
+        if (TaskLoop.EDIT_TOOLS.has(o.call.name)) {
+          this.editToolFailures++;
+        }
+      } else if (o.ok) {
+        // 成功即重置该 (tool, *) 所有 healing 计数不安全（需枚举），
+        // 这里仅重置当前任务中最常见的几个错误码以释放预算
+        this.healingTracker.reset(o.call.name, ErrorCodes.TOOL_ARGS_INVALID_JSON);
+        this.healingTracker.reset(o.call.name, ErrorCodes.TOOL_PATCH_UNIQUE_FAIL);
+        this.healingTracker.reset(o.call.name, ErrorCodes.TOOL_PATCH_NO_MATCH);
+        // W15.3 · 成功执行后清除该工具的动态约束
+        this.promptModifier.clear(o.call.name);
+        // §8.12.2 · 编辑工具成功 → 重置降级计数和标志
+        if (TaskLoop.EDIT_TOOLS.has(o.call.name)) {
+          this.editToolFailures = 0;
+          this.isDegraded = false;
+        }
+      }
+
+      // ─── DebugModeGate：工具执行完毕后更新取证状态 ───
+      // 无论结果如何，只要 LLM 尝试了取证工具即视为已取证
+      // （即使失败，LLM 也可以通过输出判断失败原因）
+      if (isEvidenceTool(o.call.name)) {
+        this.evidenceToolCalled = true;
+      }
+    }
+
+    this.history.addToolResult(o.call.id, finalContent, o.call.name);
+
+    // tool_exec_end 的 contentPreview：
+    // - 失败时传 finalContent（含可能的 healing hint 或原始错误文本），
+    //   让 webview 显示错误信息给用户看到
+    // - 成功时传空，由 webview 保留已有的流式终端输出
+    const endContentPreview = !o.ok ? truncate(finalContent, 500) : '';
+    this.emit({
+      type: 'tool_exec_end',
+      taskId: this.taskId,
+      toolCallId: o.call.id,
+      name: o.call.name,
+      ok: o.ok,
+      contentPreview: endContentPreview,
+      ...(o.errorCode ? { errorCode: o.errorCode } : {}),
+      endTime: Date.now(),
+    });
+    // W15.8 · 工具正常执行完毕，通知 StreamingFileWriter 清理临时文件
+    // （工具本身的 writeFile 已写入真实文件，临时文件不再需要）
+    void this.streamingWriter?.onToolExecComplete(o.call.id).catch((e) => {
+      log.warn({ err: String(e), toolCallId: o.call.id }, 'streamingWriter onToolExecComplete failed');
+    });
+    // P0-7 · 工具执行完毕，关闭 Diff 编辑器
+    this.streamingDiffView?.close(o.call.id);
   }
 
   private emit(event: TaskEvent): void {

@@ -138,6 +138,7 @@ const FIX_BUG_BODY = `
 1. **理解症状**：读取 \`$ARGS\` 中的 bug 描述 / 错误日志 / 复现步骤。如信息不足，用 \`ask_user_question\` 问清楚**最小复现**。
 2. **定位根因**：
    - **第一步**：用 \`trace_error\` 追踪错误传播链（传入错误信息/堆栈），这是最高效的定位手段；
+   - **批量取证（P1-5）**：多个相互独立的取证动作（\`get_problems\` + \`search_codebase\` + 多个 \`read_file\` + \`goto_definition\` 等）要在**同一轮一次全部发出**——运行器会并发执行只读工具，不要等一个结果回来才发起下一个；
    - 用 \`search_codebase\` 语义搜索相关逻辑；
    - 用 \`read_file\` / \`goto_definition\` / \`find_references\` 追踪调用链；
    - 用 \`get_problems\` 读取编译器/Linter 诊断。

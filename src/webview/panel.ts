@@ -17,6 +17,7 @@
  */
 
 import * as vscode from 'vscode';
+import { exec } from 'node:child_process';
 import * as path from 'node:path';
 import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -49,6 +50,7 @@ import {
 } from '../providers/model-config.js';
 import { ModelRouter, shouldKeepVisionPolicy, hasVisionContent } from '../core/router/router.js';
 import { detectReasoningNeed, detectDebugNeed, detectDebugNeedSemantic } from '../core/router/reasoning-probe.js';
+import type { DebugTier } from '../core/router/reasoning-probe.js';
 import { CostTracker } from '../core/cost/tracker.js';
 import { UsageJsonlStore } from '../core/cost/usage-store.js';
 import {
@@ -254,6 +256,14 @@ export class DualMindChatPanel {
   }> = [];
   /** B-P1-11 · 外部命令预先收集的 git 上下文块（已格式化） */
   private pendingGitContext: string | undefined;
+  /** P1-4 · 最近一次 debug 探测（T6）判定的证据分档；非 debug 场景为 undefined */
+  private debugTier: DebugTier | undefined;
+  /** P1-4 · debugTier 是否来自最近一轮探测：仅在下一次注入时有效，消费/跨轮/手动切模式后失效 */
+  private debugTierFresh = false;
+  /** P0-3 · debug 信号命中轮预注入标记：buildSystemPrompt 消费一次后清除 */
+  private debugCollectPending = false;
+  /** P2-7 · 会话级语义探测节流：同一会话最多触发一次 detectDebugNeedSemantic */
+  private semanticDebugProbeDone = false;
   /** 当前任务所用 provider（Router 选出） */
   private activeProviderId: ProviderId | undefined;
   /** 代码库语义索引（懒加载） */
@@ -457,12 +467,13 @@ export class DualMindChatPanel {
     this.toolRegistry.register(new CallHierarchyTool({ getBridge: getLspBridge }));
     // B-P2-5 · 聚合 lsp 入口（分发到以上 6 个内部实现）
     this.toolRegistry.register(new LspTool({ getBridge: getLspBridge }));
-    // S1 · trace_error 高层错误追溯工具（Debug Mode 优化）
-    this.toolRegistry.register(new TraceErrorTool({ getBridge: getLspBridge }));
+    // S1 · trace_error 高层错误追溯工具（Debug Mode 优化；P0-2 附带诊断节）
+    // getProblemsBridge 需在 GetProblemsTool 注册前准备，供两者共用
+    const getProblemsBridge = () => this.getProblemsBridge();
+    this.toolRegistry.register(new TraceErrorTool({ getBridge: getLspBridge, getProblemsBridge }));
     // D5 · grep_code 工具：精确文本搜索（开箱即用，不需 LSP/索引）
     this.toolRegistry.register(new GrepCodeTool());
     // Problems 工具（W7e1）：懒获取 bridge（打开工作区时才可用）
-    const getProblemsBridge = () => this.getProblemsBridge();
     this.toolRegistry.register(new GetProblemsTool({ getBridge: getProblemsBridge }));
     // 分类记忆工具：懒获取 manager（Phase 5 Phase A Step 3）
     const getMemoryManager = () => this.getMemoryManager() as any;
@@ -1839,6 +1850,11 @@ export class DualMindChatPanel {
     this.pendingDiffs.clear();
     this.restoredDiffKeys.clear();
     this.setTodosAndPush([]);
+    // P2-7 · 新会话重置语义探测节流（同一新会话允许再探测一次）
+    this.semanticDebugProbeDone = false;
+    // P1-4 · 清空历史后的 debug 分档为陈旧状态，复位避免误注入
+    this.debugTier = undefined;
+    this.debugTierFresh = false;
 
     // 清空 session store
     this.sessionStore.clearAll();
@@ -1994,10 +2010,15 @@ export class DualMindChatPanel {
     // ── T6 · Debug 模式自动决策（必须在 reasoning probe 之前执行！）──
     // 仅在 agent 模式下触发（debug 模式已激活则不重复判断）
     if (this.modeManager.getCurrent() === 'agent') {
+      // P1-4 · 每轮探测开始先使旧档位失效：未命中则上一轮的 tier 不得再注入
+      this.debugTierFresh = false;
       let debugProbe = detectDebugNeed(userInput);
 
       // T10 · 关键词未命中时，用 LLM 语义判定兜底
-      if (!debugProbe.needed && defaultProvider) {
+      // P2-7 · 会话级节流：普通会话每轮命中关键词未命中都白付一次 LLM 往返（1-3s），
+      // 同一会话最多做一次语义探测（命中与否均不再重复），关键词判定继续每轮零成本生效。
+      if (!this.semanticDebugProbeDone && !debugProbe.needed && defaultProvider) {
+        this.semanticDebugProbeDone = true;
         try {
           const semanticProbe = await detectDebugNeedSemantic(userInput, defaultProvider);
           if (semanticProbe.needed) {
@@ -2014,6 +2035,31 @@ export class DualMindChatPanel {
       }
 
       if (debugProbe.needed) {
+        // P0-3 · debug 信号命中 → 置位预注入标记（本轮 buildSystemPrompt 采集扩展上下文一次）
+        this.debugCollectPending = true;
+        // P1-4 · Debug 分档：L2（有堆栈）直接判定；L3 尝试用 IDE 诊断升级为 L1（编译/类型错误），否则保持 L3
+        let debugTier: DebugTier = debugProbe.tier ?? 'L3';
+        if (debugTier !== 'L2') {
+          try {
+            const problemsBridge = this.getProblemsBridge();
+            const files = extractFilePathCandidates(userInput);
+            if (problemsBridge && files.length > 0) {
+              const diags = await problemsBridge.getDiagnostics({
+                filePaths: files,
+                minSeverity: 'error',
+              });
+              if (diags.length > 0) debugTier = 'L1';
+            }
+          } catch {
+            // 诊断确认失败 → 保持原档位
+          }
+        }
+        this.debugTier = debugTier;
+        this.debugTierFresh = true;
+        log.info(
+          { tier: debugTier, signals: debugProbe.signals },
+          '[debug-probe] tier assigned',
+        );
         if (debugProbe.confidence >= 0.8) {
           // 高置信度 → 自动切换 debug 模式（在 reasoning probe 之前，确保 T2 强制 reasoning 生效）
           this.modeManager.setMode('debug', `auto-debug: ${debugProbe.signals.join(',')}`);
@@ -3362,9 +3408,28 @@ export class DualMindChatPanel {
       }
     }
 
-    // T7 · Debug 上下文自动采集（诊断信息/堆栈/错误日志）
+    // T7 · Debug 上下文自动采集（P0-3：诊断块 debug 模式每轮保留，扩展块仅命中轮预注入）
     let debugContext: string | undefined;
-    if (this.modeManager.getCurrent() === 'debug') {
+    const isDebugModeNow = this.modeManager.getCurrent() === 'debug';
+    const collectExtendedDebug = this.debugCollectPending;
+    if (collectExtendedDebug) {
+      // 增量策略：只在“本轮用户输入含 debug 信号”时采集一次，消费后立即清除
+      this.debugCollectPending = false;
+    }
+    if (isDebugModeNow || collectExtendedDebug) {
+      // P1-4 · 注入证据分档：L1/L2 提示 SKIP REPRODUCE，L3 走完整流程
+      const tierHints: Record<DebugTier, string> = {
+        L1: 'compile/type errors with IDE diagnostics — SKIP REPRODUCE: locate the error, fix it, then verify',
+        L2: 'runtime error, stack trace already available — SKIP REPRODUCE: evidence is sufficient, locate & fix, then verify',
+        L3: 'vague description without stack/diagnostics — follow the full 6-step flow (REPRODUCE first)',
+      };
+      // P1-4 · 档位仅在“最近一轮探测命中且当前处于 debug 模式”时注入一次，消费即失效：
+      // 避免 debug 会话内跨任务复用旧档位，误导 LLM 跳过 REPRODUCE
+      const tierFresh = isDebugModeNow && this.debugTier && this.debugTierFresh;
+      const blocks: string[] = tierFresh
+        ? [`<debug_tier>${this.debugTier!} — ${tierHints[this.debugTier!]}</debug_tier>`]
+        : [];
+      if (tierFresh) this.debugTierFresh = false;
       try {
         const bridge = this.getProblemsBridge();
         if (bridge) {
@@ -3372,15 +3437,44 @@ export class DualMindChatPanel {
           if (diagnostics.length > 0) {
             const lines = ['<debug_context>', 'Current diagnostics:'];
             for (const d of diagnostics.slice(0, 10)) {
-              lines.push(`- ${d.filePath}:${d.line} [${d.source || 'unknown'}] ${d.message}`);
+              lines.push(`- [${d.severity}] ${d.filePath}:${d.line} [${d.source || 'unknown'}] ${d.message}`);
             }
             lines.push('</debug_context>');
-            debugContext = lines.join('\n');
+            blocks.push(lines.join('\n'));
+          }
+          // P0-3 · 命中轮附带 warning 级诊断（上限 10 条）
+          if (collectExtendedDebug) {
+            const all = await bridge.getDiagnostics({ minSeverity: 'warning' });
+            const warnings = all.filter((d) => d.severity === 'warning').slice(0, 10);
+            if (warnings.length > 0) {
+              const wlines = ['<debug_warnings>', 'Current warnings:'];
+              for (const d of warnings) {
+                wlines.push(`- ${d.filePath}:${d.line} [${d.source || 'unknown'}] ${d.message}`);
+              }
+              wlines.push('</debug_warnings>');
+              blocks.push(wlines.join('\n'));
+            }
           }
         }
       } catch (e) {
         log.warn({ err: String(e) }, 'buildSystemPrompt(debugContext) failed; continue');
       }
+      // P0-3 · 扩展块（仅命中轮）：活跃文件 ±30 行 / 最近 git diff / 终端尾部，均限额
+      if (collectExtendedDebug) {
+        try {
+          const activeFile = collectActiveFileContext();
+          if (activeFile) blocks.push(activeFile);
+          if (workspaceRoot2) {
+            const diff = await collectRecentGitDiff(workspaceRoot2);
+            if (diff) blocks.push(diff);
+          }
+          const termTail = collectTerminalTail(this.terminalManager);
+          if (termTail) blocks.push(termTail);
+        } catch (e) {
+          log.warn({ err: String(e) }, 'buildSystemPrompt(debugExtendedContext) failed; continue');
+        }
+      }
+      debugContext = blocks.length > 0 ? blocks.join('\n') : undefined;
     }
 
     // B-P1-13 · M10.1 框架自动注入 4 块（current_open_file / open_tabs /
@@ -3765,6 +3859,11 @@ export class DualMindChatPanel {
 
   /** 用户从 Webview 下拉手动切 Mode */
   private handleSetModeFromUser(mode: Mode): void {
+    if (mode === 'debug') {
+      // P1-4 · 手动进入 debug 模式无本轮探测：陈旧档位必须失效，避免误注入 SKIP REPRODUCE
+      this.debugTier = undefined;
+      this.debugTierFresh = false;
+    }
     const changed = this.modeManager.setMode(mode, 'user_selected');
     if (changed) {
       log.info({ mode }, 'mode switched by user');
@@ -5113,6 +5212,80 @@ export class DualMindChatPanel {
 }
 
 // ─────────── W7b4b · helpers ───────────
+
+/**
+ * P1-4 · 从用户输入中提取候选报错文件路径（相对/绝对，常见源码扩展名）。
+ * 用于 IDE 诊断升级 L1 判定；无命中返回空数组。
+ */
+function extractFilePathCandidates(text: string): string[] {
+  const RE =
+    /(?:^|[\s"'`(:])([\w./@-]+\.(?:tsx?|jsx?|mjs|cjs|py|go|rs|java|kt|swift|cs|c|cpp|h|hpp|php|rb|vue|svelte))\b/gi;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = RE.exec(text)) !== null) {
+    const p = m[1];
+    // 过滤 URL 路径（http/https 开头）与明显的模板噪音
+    if (!/^(?:https?:|www\.)/i.test(p) && !out.includes(p)) {
+      out.push(p);
+    }
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+/** P0-3 · 活跃文件光标附近 ±30 行（用户正在看的文件最可能相关；超大文件跳过） */
+function collectActiveFileContext(): string | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return undefined;
+  const doc = editor.document;
+  const total = doc.lineCount;
+  if (total > 5000) return undefined;
+  const cursorLine = editor.selection.active.line;
+  const start = Math.max(0, cursorLine - 30);
+  const end = Math.min(total - 1, cursorLine + 30);
+  const rel = vscode.workspace.asRelativePath(doc.uri, false);
+  const lines: string[] = [];
+  for (let i = start; i <= end; i++) {
+    lines.push(`${i + 1}\t${doc.lineAt(i).text}`);
+  }
+  return `<debug_active_file>${rel}（光标行 ${cursorLine + 1}，此处 ±30 行）\n${lines.join('\n')}</debug_active_file>`;
+}
+
+/** P0-3 · 最近一次提交的 diff（git diff HEAD~1）前 50 行；无提交/非 git 仓库返回 undefined */
+function collectRecentGitDiff(cwd: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    exec('git diff HEAD~1', { cwd, timeout: 3000, maxBuffer: 128 * 1024 }, (err, stdout) => {
+      if (err || !stdout || !stdout.trim()) {
+        resolve(undefined);
+        return;
+      }
+      const lines = stdout.split('\n').slice(0, 50);
+      resolve(
+        `<debug_git_diff>最近一次提交（HEAD~1）改动，前 ${lines.length} 行\n${lines.join('\n')}</debug_git_diff>`,
+      );
+    });
+  });
+}
+
+/** P0-3 · 后台终端最近输出尾部 30 行（复现命令的错误日志）；无输出返回 undefined */
+function collectTerminalTail(manager: VscodeTerminalManager): string | undefined {
+  try {
+    const snaps = manager.list();
+    if (snaps.length === 0) return undefined;
+    const parts: string[] = [];
+    for (const s of snaps.slice(-3)) {
+      const tail = (s.output ?? '').split('\n').slice(-30).join('\n');
+      if (tail.trim()) {
+        parts.push(`--- terminal ${s.id} [${s.status}] ${s.command || 'unknown'} ---\n${tail}`);
+      }
+    }
+    return parts.length > 0
+      ? `<debug_terminal>后台终端最近输出（尾部）\n${parts.join('\n')}</debug_terminal>`
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * 从工具 args 解析写入目标（复用 checkpoints/coordinator.ts 的 extractFilePath 语义）。

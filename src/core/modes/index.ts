@@ -212,6 +212,7 @@ export function renderModePromptSection(mode: Mode): string {
         'Behavior: Evidence-first troubleshooting loop. Follow these steps IN ORDER:',
         '',
         'Step 1 — REPRODUCE: Run the failing test or command to confirm the error.',
+        '  - P1-4 fast path: IF the exact error message / stack trace / compile diagnostics are ALREADY available (injected <debug_context>/<debug_tier> L1/L2, or pasted by the user): SKIP running anything and go straight to Step 2. Do not re-reproduce an error you already have evidence for.',
         '  - Detect test runner: read package.json for "test" script / devDependencies (vitest/jest/mocha/pytest/go test/cargo test).',
         '  - Run: `bash({ command: "<runner> <filter>", is_background: true })` then poll `get_terminal_output`.',
         '  - For compilation errors: `bash({ command: "npx tsc --noEmit" })` or equivalent.',

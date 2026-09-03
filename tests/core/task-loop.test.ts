@@ -31,6 +31,7 @@ import {
   ToolRegistry,
   type ITool,
   type ToolResult,
+  type ToolContext,
 } from '../../src/core/tools/index.js';
 import { initLogger } from '../../src/infra/logger.js';
 import { ErrorCodes } from '../../src/core/errors/index.js';
@@ -65,6 +66,10 @@ class ScriptedProvider implements IProvider {
 
   async probe(): Promise<ProbeResult> {
     return { ok: true, latencyMs: 0 };
+  }
+
+  updateApiKey(): void {
+    // no-op：测试 provider 不维护 key 池
   }
 
   async countTokens(): Promise<number> {
@@ -218,6 +223,7 @@ describe('TaskLoop', () => {
       pricing: { inputPerMillion: 0, outputPerMillion: 0, currency: 'CNY' },
       countTokens: async () => 0,
       probe: async () => ({ ok: true, latencyMs: 0 }),
+      updateApiKey: () => {},
       createMessage: ({ signal }) =>
         (async function* (): AsyncGenerator<StreamEvent> {
           // 等取消
@@ -566,6 +572,7 @@ describe('TaskLoop abort 语义（P0-8 回归）', () => {
       pricing: { inputPerMillion: 0, outputPerMillion: 0, currency: 'CNY' },
       countTokens: async () => 0,
       probe: async () => ({ ok: true, latencyMs: 0 }),
+      updateApiKey: () => {},
       createMessage: ({ signal }) =>
         (async function* (): AsyncGenerator<StreamEvent> {
           await new Promise<void>((resolve) => {
@@ -653,5 +660,225 @@ describe('TaskLoop abort 语义（P0-8 回归）', () => {
 
     expect(result.ok).toBe(true);
     expect(loop.isAbortedByUser()).toBe(false);
+  });
+});
+
+// ─────────── P0-1 · 工具并行执行（debug-analysis-speed-optimization-plan.md）───────────
+// 背景：同轮多工具调用中，read_only / network 级工具可并发执行（上限 MAX_PARALLEL_TOOLS），
+// 遇写工具后恢复串行以保证 diff 顺序确定性；history 写入与 tool_exec_end 按声明顺序归并，
+// 对外观察语义与串行执行完全一致。
+describe('TaskLoop · P0-1 工具并行执行', () => {
+  /** 可配置延迟的回声工具（read_only → 可进入并行组），响应 abort 快速返回 */
+  class DelayedEchoTool implements ITool<{ text: string; delayMs?: number }, ToolResult> {
+    readonly name = 'echo';
+    readonly description = 'returns the text back after a delay';
+    readonly parameters = {
+      type: 'object',
+      properties: { text: { type: 'string' }, delayMs: { type: 'number' } },
+      required: ['text'],
+    };
+    readonly safetyLevel = 'read_only' as const;
+    async execute(
+      args: { text: string; delayMs?: number },
+      ctx: ToolContext,
+    ): Promise<ToolResult> {
+      const delayMs = args.delayMs ?? 0;
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => {
+          if (ctx.signal?.aborted) return resolve();
+          ctx.signal?.addEventListener(
+            'abort',
+            () => resolve(),
+            { once: true },
+          );
+          const t = setTimeout(resolve, delayMs);
+          t.unref?.();
+        });
+      }
+      return { ok: true, content: `ECHO: ${args.text}` };
+    }
+  }
+
+  /** 假写文件工具（workspace_write → 强制串行），不真正落盘 */
+  class FakeWriteTool implements ITool<{ file_path: string; content: string }, ToolResult> {
+    readonly name = 'write_file';
+    readonly description = 'fake write (no-op)';
+    readonly parameters = {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string' },
+        content: { type: 'string' },
+      },
+      required: ['file_path', 'content'],
+    };
+    readonly safetyLevel = 'workspace_write' as const;
+    async execute(args: { file_path: string; content: string }): Promise<ToolResult> {
+      return { ok: true, content: `WROTE: ${args.file_path}` };
+    }
+  }
+
+  /** 工具执行事件的事件流索引（按发射顺序） */
+  function execEventIdx(events: TaskEvent[]) {
+    const withIdx = events.map((e, i) => ({ e, i }));
+    return {
+      starts: withIdx.filter((x) => x.e.type === 'tool_exec_start').map((x) => x.i),
+      ends: withIdx.filter((x) => x.e.type === 'tool_exec_end').map((x) => x.i),
+    };
+  }
+
+  it('同轮多个 read_only 工具并发执行：两个 start 都早于第一个 end', async () => {
+    const provider = new ScriptedProvider();
+    // turn 1: 两个带 50ms 延迟的 echo（若串行，第二个 start 必然晚于第一个 end）
+    provider.push([
+      { type: 'tool_start', id: 'c1', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c1', partial: '{"text":"a","delayMs":50}' },
+      { type: 'tool_end', id: 'c1' },
+      { type: 'tool_start', id: 'c2', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c2', partial: '{"text":"b","delayMs":50}' },
+      { type: 'tool_end', id: 'c2' },
+      { type: 'done', reason: 'tool_use' },
+    ]);
+    // turn 2: 收尾
+    provider.push([
+      { type: 'text_delta', text: 'done' },
+      { type: 'done', reason: 'stop' },
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(new DelayedEchoTool());
+
+    const events: TaskEvent[] = [];
+    const loop = new TaskLoop({
+      provider,
+      toolRegistry: registry,
+      systemPrompt: 'x',
+      onEvent: (e) => events.push(e),
+    });
+    await loop.send('parallel');
+
+    const { starts, ends } = execEventIdx(events);
+    expect(starts).toHaveLength(2);
+    expect(ends).toHaveLength(2);
+    // 两个 start 都发生在第一个 end 之前 → 两个工具执行时间窗重叠 → 并发
+    expect(starts[0]).toBeLessThan(ends[0]);
+    expect(starts[1]).toBeLessThan(ends[0]);
+  });
+
+  it('并行组 history 按声明顺序写入（工具乱序完成也不错位）', async () => {
+    const provider = new ScriptedProvider();
+    // 完成顺序：c2(10ms) → c3(40ms) → c1(80ms)，声明顺序却是 c1 → c2 → c3
+    provider.push([
+      { type: 'tool_start', id: 'c1', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c1', partial: '{"text":"slow","delayMs":80}' },
+      { type: 'tool_end', id: 'c1' },
+      { type: 'tool_start', id: 'c2', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c2', partial: '{"text":"fast","delayMs":10}' },
+      { type: 'tool_end', id: 'c2' },
+      { type: 'tool_start', id: 'c3', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c3', partial: '{"text":"mid","delayMs":40}' },
+      { type: 'tool_end', id: 'c3' },
+      { type: 'done', reason: 'tool_use' },
+    ]);
+    provider.push([
+      { type: 'text_delta', text: 'done' },
+      { type: 'done', reason: 'stop' },
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(new DelayedEchoTool());
+
+    const loop = new TaskLoop({
+      provider,
+      toolRegistry: registry,
+      systemPrompt: 'x',
+    });
+    await loop.send('parallel');
+
+    expect(provider.calls).toHaveLength(2);
+    const toolMsgs = provider.calls[1].messages.filter((m) => m.role === 'tool');
+    expect(toolMsgs).toHaveLength(3);
+    // 历史中 tool 消息必须与 tool_calls 声明顺序一致
+    expect(toolMsgs.map((m) => m.toolCallId)).toEqual(['c1', 'c2', 'c3']);
+  });
+
+  it('写工具出现后恢复串行，diff 事件顺序确定', async () => {
+    const provider = new ScriptedProvider();
+    // echo(50ms) → write_file → echo(50ms)：分组应为 [echo] 串行、[write] 串行、[echo] 串行
+    provider.push([
+      { type: 'tool_start', id: 'c1', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c1', partial: '{"text":"a","delayMs":50}' },
+      { type: 'tool_end', id: 'c1' },
+      { type: 'tool_start', id: 'c2', name: 'write_file' },
+      {
+        type: 'tool_args_delta',
+        id: 'c2',
+        partial: '{"file_path":"/tmp/p0-1-write.txt","content":"x"}',
+      },
+      { type: 'tool_end', id: 'c2' },
+      { type: 'tool_start', id: 'c3', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c3', partial: '{"text":"b","delayMs":50}' },
+      { type: 'tool_end', id: 'c3' },
+      { type: 'done', reason: 'tool_use' },
+    ]);
+    provider.push([
+      { type: 'text_delta', text: 'done' },
+      { type: 'done', reason: 'stop' },
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(new DelayedEchoTool());
+    registry.register(new FakeWriteTool());
+
+    const events: TaskEvent[] = [];
+    const loop = new TaskLoop({
+      provider,
+      toolRegistry: registry,
+      systemPrompt: 'x',
+      onEvent: (e) => events.push(e),
+    });
+    await loop.send('serial after write');
+
+    const { starts, ends } = execEventIdx(events);
+    const startNames = starts.map((i) =>
+      events[i].type === 'tool_exec_start' ? events[i].name : '',
+    );
+    expect(startNames).toEqual(['echo', 'write_file', 'echo']);
+    // write_file 的 start 必须严格晚于第一个 echo 的 end（写工具不并行）
+    expect(starts[1]).toBeGreaterThan(ends[0]);
+    // 第二个 echo 的 start 必须严格晚于 write_file 的 end
+    expect(starts[2]).toBeGreaterThan(ends[1]);
+  });
+
+  it('abort 中断并行组：send() 返回 TASK_LOOP_ABORTED', async () => {
+    const provider = new ScriptedProvider();
+    // 两个 500ms 慢工具，20ms 后中止 → 并行组应尽快让路
+    provider.push([
+      { type: 'tool_start', id: 'c1', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c1', partial: '{"text":"slow","delayMs":500}' },
+      { type: 'tool_end', id: 'c1' },
+      { type: 'tool_start', id: 'c2', name: 'echo' },
+      { type: 'tool_args_delta', id: 'c2', partial: '{"text":"slow2","delayMs":500}' },
+      { type: 'tool_end', id: 'c2' },
+      { type: 'done', reason: 'tool_use' },
+    ]);
+
+    const registry = new ToolRegistry();
+    registry.register(new DelayedEchoTool());
+
+    const events: TaskEvent[] = [];
+    const loop = new TaskLoop({
+      provider,
+      toolRegistry: registry,
+      systemPrompt: 'x',
+      onEvent: (e) => events.push(e),
+    });
+
+    const done = loop.send('parallel');
+    setTimeout(() => loop.abort(), 20);
+    const result = await done;
+
+    expect(result.ok).toBe(false);
+    expect(result.errorCode).toBe(ErrorCodes.TASK_LOOP_ABORTED);
+    expect(events[events.length - 1]).toMatchObject({ type: 'task_end', reason: 'aborted' });
   });
 });

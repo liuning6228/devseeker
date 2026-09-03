@@ -120,7 +120,12 @@ export interface DebugProbeResult {
   /** 0-1，用于区分 auto_debug vs suggest_debug */
   confidence: number;
   signals: string[];
+  /** P1-4 · 证据充分度分档：L2=有堆栈（跳过 REPRODUCE）；L3=模糊描述（调用方可经 IDE 诊断升级为 L1）；L1 由调用方确认 */
+  tier?: DebugTier;
 }
+
+/** P1-4 · Debug 分档：L1 编译/类型错误（IDE 诊断） | L2 运行时错误有堆栈 | L3 模糊描述 */
+export type DebugTier = 'L1' | 'L2' | 'L3';
 
 const BUG_EXPLICIT_RE =
   /(报错|出错了|不工作了?|不生效|失效|崩溃|卡死|无响应|白屏|黑屏|闪退|怎么回事|为什么不行|无法启动|加载失败|出了(个|一)个?bug|调试|排错)|\b(fix (the )?bug|it'?s broken|doesn'?t work|won'?t work|crash|crashed|failing test|test failed|exit code \d|error code)\b/i;
@@ -144,7 +149,14 @@ export function detectDebugNeed(userInput: string): DebugProbeResult {
   // 多信号叠加 = 高置信度
   const confidence = signals.length >= 2 ? 0.9 : signals.length === 1 ? 0.6 : 0;
 
-  return { needed, confidence, signals };
+  // P1-4 · 分档：有堆栈 → L2（证据充分，跳过 REPRODUCE）；否则 L3（等待调用方 IDE 诊断确认升级 L1）
+  const tier: DebugTier | undefined = needed
+    ? signals.includes('error-log')
+      ? 'L2'
+      : 'L3'
+    : undefined;
+
+  return { needed, confidence, signals, tier };
 }
 
 // ── T10 · LLM 语义 BUG 判定 ──
@@ -211,6 +223,7 @@ export async function detectDebugNeedSemantic(
       needed: isBug,
       confidence: isBug ? 0.7 : 0,
       signals: isBug ? ['semantic-llm'] : [],
+      tier: isBug ? 'L3' : undefined,
     };
   } catch (e) {
     clearTimeout(timeoutId);

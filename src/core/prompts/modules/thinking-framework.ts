@@ -42,4 +42,11 @@ export const THINKING_FRAMEWORK_MODULE = [
   '</thinking>',
   '',
   'After forming hypotheses, use `trace_error` or `get_problems` to gather evidence BEFORE proposing fixes.',
+  '',
+  '## Gather Evidence In Parallel (P1-5)',
+  '',
+  'When multiple independent read/search/probe tool calls are needed, issue them ALL in ONE turn:',
+  'the runner executes read-only/network tools (read_file, search_codebase, grep_code, get_problems,',
+  'goto_definition, git_*, web_*, ...) CONCURRENTLY. Do NOT wait for one result before issuing the next',
+  'independent lookup — batch them. Serialize only when a later call depends on an earlier result.',
 ].join('\n');
