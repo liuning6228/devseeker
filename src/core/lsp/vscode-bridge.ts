@@ -21,6 +21,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import type {
   LspBridge,
+  LspHover,
   LspLocation,
   LspPosition,
   LspRange,
@@ -47,6 +48,9 @@ const CMD = {
   PREPARE_CALL_HIERARCHY: 'vscode.prepareCallHierarchy',
   INCOMING_CALLS: 'vscode.provideIncomingCalls',
   OUTGOING_CALLS: 'vscode.provideOutgoingCalls',
+  // T2 · 检索差距弥补计划
+  HOVER: 'vscode.executeHoverProvider',
+  TYPE_DEFINITION: 'vscode.executeTypeDefinitionProvider',
 } as const;
 
 type RawLocation = vscode.Location | vscode.LocationLink;
@@ -156,6 +160,38 @@ export class VSCodeLspBridge implements LspBridge {
       }
     }
     return allEntries;
+  }
+
+  // ─── T2 · Hover + TypeDefinition（检索差距弥补计划） ───
+
+  async hover(filePath: string, pos: LspPosition): Promise<LspHover[]> {
+    const uri = this.toUri(filePath);
+    const vscodePos = toVscodePosition(pos);
+    const hovers = await this.exec<vscode.Hover[]>(CMD.HOVER, [uri, vscodePos]);
+    if (!hovers) return [];
+    const out: LspHover[] = [];
+    for (const h of hovers) {
+      const contents = Array.isArray(h.contents) ? h.contents : [h.contents];
+      for (const c of contents) {
+        if (out.length >= 3) break;
+        const seg = hoverContentToString(c);
+        if (!seg.value || !seg.value.trim()) continue;
+        out.push({
+          ...(seg.language ? { language: seg.language } : {}),
+          value: seg.value.length > 500 ? `${seg.value.slice(0, 500)}…` : seg.value,
+          ...(h.range ? { range: toLspRange(h.range) } : {}),
+        });
+      }
+      if (out.length >= 3) break;
+    }
+    return out;
+  }
+
+  async typeDefinition(filePath: string, pos: LspPosition): Promise<LspLocation[]> {
+    const uri = this.toUri(filePath);
+    const vscodePos = toVscodePosition(pos);
+    const locations = await this.exec<RawLocation[]>(CMD.TYPE_DEFINITION, [uri, vscodePos]);
+    return (locations ?? []).map((l) => this.fromRawLocation(l));
   }
 
   // ─────────── internals ───────────
@@ -283,6 +319,23 @@ function withTimeout<T>(p: Thenable<T>, ms: number, cmd: string): Promise<T> {
       },
     );
   });
+}
+
+/**
+ * Hover 内容段扁平化（T2）：
+ * - string：原样
+ * - vscode.MarkdownString：取 .value
+ * - MarkedString（{ language, value }）：取 language + value
+ * - 其它：String() 兜底
+ */
+function hoverContentToString(c: unknown): { language?: string; value: string } {
+  if (typeof c === 'string') return { value: c };
+  if (c instanceof vscode.MarkdownString) return { value: c.value };
+  const obj = c as { language?: unknown; value?: unknown };
+  if (obj && typeof obj === 'object' && typeof obj.value === 'string') {
+    return { language: typeof obj.language === 'string' ? obj.language : undefined, value: obj.value };
+  }
+  return { value: String(c) };
 }
 
 // ─────────── §8.13 · 编辑后 Diagnostics 拉取 ───────────

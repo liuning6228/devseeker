@@ -19,9 +19,12 @@ import {
   WorkspaceSymbolTool,
   GoToImplementationTool,
   CallHierarchyTool,
+  HoverTool,
+  TypeDefinitionTool,
 } from '../../src/core/tools/index.js';
 import type {
   LspBridge,
+  LspHover,
   LspLocation,
   LspPosition,
   LspSymbol,
@@ -43,6 +46,8 @@ class FakeBridge implements LspBridge {
   wsSyms: LspSymbol[] = [];
   impls: LspLocation[] = [];
   callHier: CallHierarchyEntry[] = [];
+  hovers: LspHover[] = [];
+  typeDefs: LspLocation[] = [];
   calls: Array<{ kind: string; args: unknown[] }> = [];
   throwErr?: unknown;
 
@@ -79,6 +84,16 @@ class FakeBridge implements LspBridge {
     this.calls.push({ kind: 'callHier', args: [filePath, pos, direction] });
     if (this.throwErr) throw this.throwErr;
     return this.callHier;
+  }
+  async hover(filePath: string, pos: LspPosition): Promise<LspHover[]> {
+    this.calls.push({ kind: 'hover', args: [filePath, pos] });
+    if (this.throwErr) throw this.throwErr;
+    return this.hovers;
+  }
+  async typeDefinition(filePath: string, pos: LspPosition): Promise<LspLocation[]> {
+    this.calls.push({ kind: 'typeDef', args: [filePath, pos] });
+    if (this.throwErr) throw this.throwErr;
+    return this.typeDefs;
   }
 }
 
@@ -402,5 +417,115 @@ describe('CallHierarchyTool', () => {
       ctx(),
     );
     expect(bridge.calls[0].args[2]).toBe('outgoing');
+  });
+});
+
+describe('HoverTool', () => {
+  it('fails on empty file_path', async () => {
+    const t = new HoverTool({ getBridge: () => new FakeBridge() });
+    const r = await t.execute({ file_path: ' ', line: 1, character: 1 }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.TOOL_ARGS_INVALID);
+  });
+
+  it('fails with LSP_SERVER_NOT_RUNNING when bridge is undefined', async () => {
+    const t = new HoverTool({ getBridge: () => undefined });
+    const r = await t.execute({ file_path: 'a.ts', line: 1, character: 1 }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.LSP_SERVER_NOT_RUNNING);
+  });
+
+  it('returns 0 results when no hover', async () => {
+    const bridge = new FakeBridge();
+    const t = new HoverTool({ getBridge: () => bridge });
+    const r = await t.execute({ file_path: 'api.ts', line: 5, character: 3 }, ctx());
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('Hover for api.ts:5:3');
+    expect(r.content).toContain('0 results');
+    expect(bridge.calls[0].kind).toBe('hover');
+  });
+
+  it('formats plain-text hover sections', async () => {
+    const bridge = new FakeBridge();
+    bridge.hovers = [{ value: 'Number of retries before giving up.' }];
+    const t = new HoverTool({ getBridge: () => bridge });
+    const r = await t.execute({ file_path: 'lib.ts', line: 2, character: 4 }, ctx());
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('1 sections');
+    expect(r.content).toContain('Number of retries before giving up.');
+    expect(r.display?.count).toBe(1);
+  });
+
+  it('formats language-tagged hover with code fence', async () => {
+    const bridge = new FakeBridge();
+    bridge.hovers = [
+      { language: 'typescript', value: '(property) retries: number' },
+      { value: 'Read timeout in ms.' },
+    ];
+    const t = new HoverTool({ getBridge: () => bridge });
+    const r = await t.execute({ file_path: 'lib.ts', line: 2, character: 4 }, ctx());
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('--- [1] (typescript)');
+    expect(r.content).toContain('```typescript');
+    expect(r.content).toContain('(property) retries: number');
+    expect(r.content).toContain('```');
+    expect(r.content).toContain('Read timeout in ms.');
+  });
+
+  it('propagates AgentError from bridge', async () => {
+    const bridge = new FakeBridge();
+    bridge.throwErr = new AgentError({ code: ErrorCodes.LSP_TIMEOUT, message: 'timeout' });
+    const t = new HoverTool({ getBridge: () => bridge });
+    const r = await t.execute({ file_path: 'a.ts', line: 1, character: 1 }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.LSP_TIMEOUT);
+  });
+});
+
+describe('TypeDefinitionTool', () => {
+  it('fails on non-integer character', async () => {
+    const t = new TypeDefinitionTool({ getBridge: () => new FakeBridge() });
+    const r = await t.execute({ file_path: 'a.ts', line: 1, character: 0 }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.TOOL_ARGS_INVALID);
+  });
+
+  it('fails with LSP_SERVER_NOT_RUNNING when bridge is undefined', async () => {
+    const t = new TypeDefinitionTool({ getBridge: () => undefined });
+    const r = await t.execute({ file_path: 'a.ts', line: 1, character: 1 }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.LSP_SERVER_NOT_RUNNING);
+  });
+
+  it('returns 0 results when no type definition', async () => {
+    const bridge = new FakeBridge();
+    const t = new TypeDefinitionTool({ getBridge: () => bridge });
+    const r = await t.execute({ file_path: 'use.ts', line: 9, character: 2 }, ctx());
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('Type definitions for use.ts:9:2');
+    expect(r.content).toContain('0 results');
+  });
+
+  it('formats type definition locations', async () => {
+    const bridge = new FakeBridge();
+    bridge.typeDefs = [{ filePath: 'types/model.ts', range: range(12, 1, 12, 30) }];
+    const t = new TypeDefinitionTool({ getBridge: () => bridge });
+    const r = await t.execute({ file_path: 'use.ts', line: 1, character: 1 }, ctx());
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('1 results');
+    expect(r.content).toContain('types/model.ts:12:1-12:30');
+    expect(r.display?.count).toBe(1);
+  });
+
+  it('passes position to bridge and propagates AgentError', async () => {
+    const bridge = new FakeBridge();
+    const t = new TypeDefinitionTool({ getBridge: () => bridge });
+    await t.execute({ file_path: 'a.ts', line: 7, character: 3 }, ctx());
+    expect(bridge.calls[0].kind).toBe('typeDef');
+    expect(bridge.calls[0].args[1]).toEqual({ line: 7, character: 3 });
+    bridge.throwErr = new AgentError({ code: ErrorCodes.LSP_TIMEOUT, message: 'timeout' });
+    const r2 = await t.execute({ file_path: 'a.ts', line: 7, character: 3 }, ctx());
+    expect(r2.ok).toBe(false);
+    expect(r2.errorCode).toBe(ErrorCodes.LSP_TIMEOUT);
   });
 });

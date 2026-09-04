@@ -33,6 +33,8 @@ import { DocumentSymbolTool, type DocumentSymbolDeps } from './document_symbol.j
 import { WorkspaceSymbolTool, type WorkspaceSymbolDeps } from './workspace_symbol.js';
 import { GoToImplementationTool, type GoToImplementationDeps } from './goto_implementation.js';
 import { CallHierarchyTool, type CallHierarchyDeps } from './call_hierarchy.js';
+import { HoverTool, type HoverDeps } from './hover.js';
+import { TypeDefinitionTool, type TypeDefinitionDeps } from './type_definition.js';
 
 export type LspOperation =
   | 'goto_definition'
@@ -40,7 +42,9 @@ export type LspOperation =
   | 'document_symbol'
   | 'workspace_symbol'
   | 'goto_implementation'
-  | 'call_hierarchy';
+  | 'call_hierarchy'
+  | 'hover'
+  | 'type_definition';
 
 export const LSP_OPERATIONS: readonly LspOperation[] = [
   'goto_definition',
@@ -49,6 +53,8 @@ export const LSP_OPERATIONS: readonly LspOperation[] = [
   'workspace_symbol',
   'goto_implementation',
   'call_hierarchy',
+  'hover',
+  'type_definition',
 ] as const;
 
 export interface LspToolArgs {
@@ -69,7 +75,7 @@ const parameters = {
       type: 'string',
       enum: LSP_OPERATIONS as unknown as string[],
       description:
-        'LSP 操作：goto_definition / find_references / document_symbol / workspace_symbol / goto_implementation / call_hierarchy。',
+        'LSP 操作：goto_definition / find_references / document_symbol / workspace_symbol / goto_implementation / call_hierarchy / hover / type_definition。',
     },
     file_path: {
       type: 'string',
@@ -103,12 +109,14 @@ export interface LspToolDeps
     DocumentSymbolDeps,
     WorkspaceSymbolDeps,
     GoToImplementationDeps,
-    CallHierarchyDeps {}
+    CallHierarchyDeps,
+    HoverDeps,
+    TypeDefinitionDeps {}
 
 export class LspTool implements ITool<LspToolArgs, ToolResult> {
   readonly name = 'lsp';
   readonly description =
-    'LSP 聚合入口：按 operation 分发到 goto_definition / find_references / document_symbol / workspace_symbol / goto_implementation / call_hierarchy。其余参数透传。';
+    'LSP 聚合入口：按 operation 分发到 goto_definition / find_references / document_symbol / workspace_symbol / goto_implementation / call_hierarchy / hover / type_definition。其余参数透传。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'read_only';
 
@@ -118,6 +126,8 @@ export class LspTool implements ITool<LspToolArgs, ToolResult> {
   private readonly wsSym: WorkspaceSymbolTool;
   private readonly gotoImpl: GoToImplementationTool;
   private readonly callH: CallHierarchyTool;
+  private readonly hov: HoverTool;
+  private readonly typeDef: TypeDefinitionTool;
 
   constructor(deps: LspToolDeps) {
     this.gotoDef = new GoToDefinitionTool(deps);
@@ -126,6 +136,8 @@ export class LspTool implements ITool<LspToolArgs, ToolResult> {
     this.wsSym = new WorkspaceSymbolTool(deps);
     this.gotoImpl = new GoToImplementationTool(deps);
     this.callH = new CallHierarchyTool(deps);
+    this.hov = new HoverTool(deps);
+    this.typeDef = new TypeDefinitionTool(deps);
   }
 
   async execute(args: LspToolArgs, ctx: ToolContext): Promise<ToolResult> {
@@ -187,6 +199,24 @@ export class LspTool implements ITool<LspToolArgs, ToolResult> {
             line: args.line ?? 0,
             character: args.character ?? 0,
             direction: args.direction ?? 'incoming',
+          },
+          ctx,
+        );
+      case 'hover':
+        return this.hov.execute(
+          {
+            file_path: args.file_path ?? '',
+            line: args.line ?? 0,
+            character: args.character ?? 0,
+          },
+          ctx,
+        );
+      case 'type_definition':
+        return this.typeDef.execute(
+          {
+            file_path: args.file_path ?? '',
+            line: args.line ?? 0,
+            character: args.character ?? 0,
           },
           ctx,
         );

@@ -21,7 +21,12 @@ import { spawn } from 'node:child_process';
 import { platform } from 'node:os';
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';
 import { ErrorCodes } from '../errors/index.js';
-import { collectEnvironment } from '../prompts/environment-probe.js';
+import {
+  probeRgAvailable,
+  resolveEngine,
+  runRg,
+  type RgLine,
+} from './rg-search.js';
 
 export interface GrepCodeArgs {
   /** 要搜索的文本模式（精确字符串，非正则） */
@@ -30,6 +35,8 @@ export interface GrepCodeArgs {
   path?: string;
   /** 可选：最大返回匹配行数，默认 50，最大 200 */
   max_lines?: number;
+  /** 可选：每个匹配的上下文行数（上下各 N 行），默认 0，最大 5；只对 rg/grep 引擎生效 */
+  context_lines?: number;
 }
 
 const parameters = {
@@ -48,6 +55,12 @@ const parameters = {
       minimum: 1,
       maximum: 200,
       description: '最大返回匹配行数，默认 50，最大 200。超出的部分会被截断并标注。',
+    },
+    context_lines: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 5,
+      description: '每个匹配附带上下文行数（匹配行上下各 N 行，用行号标注），默认 0。适合需要了解函数体/调用点上下文时开启。',
     },
   },
   required: ['query'],
@@ -84,33 +97,36 @@ export class GrepCodeTool implements ITool<GrepCodeArgs> {
     }
 
     const maxLines = args.max_lines ?? 50;
+    const contextLines = args.context_lines ?? 0;
     const isWin = platform() === 'win32';
 
     try {
-      const result = await runGrep(rootDir, query, maxLines, isWin, ctx.signal);
+      // 检索差距弥补计划 T1 · 引擎自动选择：rg 可用 → rg（含原生 -A/-B 上下文），
+      // 否则回退既有 grep/findstr（零回归）；findstr 不支持上下文参数（忽略 contextLines）
+      const engine = resolveEngine(probeRgAvailable(), isWin);
+      const out =
+        engine === 'rg'
+          ? await runRgAsRows(rootDir, query, maxLines, ctx.signal, contextLines)
+          : await runLegacyAsRows(rootDir, query, maxLines, isWin, ctx.signal, contextLines);
 
       if (ctx.signal.aborted) {
         return { ok: false, content: '任务已取消', errorCode: ErrorCodes.TASK_LOOP_ABORTED };
       }
 
-      if (result.code !== 0 && result.code !== 1) {
+      if (out.code !== 0 && out.code !== 1) {
         return {
           ok: false,
-          content: `grep 执行失败（exit code=${result.code}）：${result.stderr || 'unknown error'}`,
+          content: `grep 执行失败（exit code=${out.code}）：${out.stderr || 'unknown error'}`,
           errorCode: ErrorCodes.TOOL_EXEC_FAILED,
         };
       }
 
-      const lines = result.stdout
-        .split('\n')
-        .filter((l) => l.trim().length > 0);
-
-      if (lines.length === 0) {
-        return { ok: true, content: `grep "${query}" 未找到匹配项。` };
+      if (out.count === 0) {
+        return { ok: true, content: `grep "${query}" 未找到匹配项。`, display: { engine, count: 0 } };
       }
 
-      const output = [`grep "${query}" 共找到 ${lines.length} 处匹配：`, '', ...lines].join('\n');
-      return { ok: true, content: output };
+      const output = [`grep "${query}" 共找到 ${out.count} 处匹配：`, '', ...out.rows].join('\n');
+      return { ok: true, content: output, display: { engine, count: out.count } };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       return {
@@ -120,6 +136,46 @@ export class GrepCodeTool implements ITool<GrepCodeArgs> {
       };
     }
   }
+}
+
+// ─────────── 引擎行组装 ───────────
+
+interface GrepOut {
+  /** 展示行（match + context 全量） */
+  rows: string[];
+  /** 命中条数（kind=match / legacy 的匹配行数） */
+  count: number;
+  stderr: string;
+  code: number;
+}
+
+/** rg 分支：--json 解析为行序列，统一 `path:line:text` 格式（上下文行同格式，行号自明） */
+async function runRgAsRows(
+  cwd: string,
+  query: string,
+  maxLines: number,
+  signal: AbortSignal,
+  contextLines: number,
+): Promise<GrepOut> {
+  const res = await runRg(cwd, query, maxLines, signal, contextLines);
+  const rows = res.lines.map((l: RgLine) => `${l.path}:${l.line}:${l.text}`);
+  // 64KB 截断时补一条可见标注（code 已归一为 0，部分结果可展示）
+  if (res.truncated) rows.push('... (输出截断，超过 64KB)');
+  return { rows, count: res.matchCount, stderr: res.stderr, code: res.code };
+}
+
+/** legacy 分支：既有 grep/findstr；POSIX grep 在 context>0 时追加 -A/-B */
+async function runLegacyAsRows(
+  cwd: string,
+  query: string,
+  maxLines: number,
+  isWin: boolean,
+  signal: AbortSignal,
+  contextLines: number,
+): Promise<GrepOut> {
+  const res = await runGrep(cwd, query, maxLines, isWin, signal, contextLines);
+  const lines = res.stdout.split('\n').filter((l) => l.trim().length > 0);
+  return { rows: lines, count: lines.length, stderr: res.stderr, code: res.code };
 }
 
 function joinPath(a: string, b: string): string {
@@ -142,6 +198,7 @@ function runGrep(
   maxLines: number,
   isWin: boolean,
   signal: AbortSignal,
+  contextLines = 0,
 ): Promise<GrepResult> {
   return new Promise((resolve) => {
     // 转义特殊字符：--fixed-strings 模式也需要 shell-safe 的 query
@@ -153,12 +210,13 @@ function runGrep(
       ? '/d /s'
       : `--exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=out --exclude-dir=.devseeker`;
 
-    // 搜索源代码文件（常见扩展名 + 无扩展名）
-    const includeExts = isWin ? '' : `--include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.json' --include='*.md' --include='*.css' --include='*.html' --include='*.yaml' --include='*.yml'`;
+    // 搜索源代码文件（常见扩展名 + 无扩展名）。注意：spawn 数组模式不经 shell，
+    // 不能写 --include='*.ts'（引号是 shell 语法，残留会给 grep 造成字面匹配）
+    const includeExts = isWin ? '' : `--include=*.ts --include=*.tsx --include=*.js --include=*.jsx --include=*.json --include=*.md --include=*.css --include=*.html --include=*.yaml --include=*.yml`;
 
     let child;
     if (isWin) {
-      // Windows: findstr /s /n 固定字符串
+      // Windows: findstr /s /n 固定字符串（不支持上下文参数，contextLines 忽略）
       child = spawn('findstr', ['/s', '/n', '/c:' + escapedQuery, '*'], {
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -166,11 +224,16 @@ function runGrep(
         shell: true,
       });
     } else {
-      // POSIX: grep -rn -F --fixed-strings
+      // POSIX: grep -rn -F；`-e query` 显式传 pattern（既有缺陷：query 从未
+      // 进入参数数组，grep 会把 '.' 当 pattern 并从 stdin 读取 → 恒无匹配）；
+      // context>0 时追加 -A/-B（对齐 rg 分支语义）
+      const ctxArgs = contextLines > 0 ? ['-A', String(contextLines), '-B', String(contextLines)] : [];
       const grepArgs = [
         '-rn',           // 递归 + 行号
         '-F',            // 固定字符串
+        '-e', query,     // 显式 pattern（-e 同时保护以 '-' 开头的 query）
         '-m', String(maxLines), // 每文件最大匹配数
+        ...ctxArgs,
         ...excludeDirs.split(' '),
         ...includeExts.split(' '),
         '.',
@@ -185,18 +248,19 @@ function runGrep(
       child.kill();
     }, 30_000);
 
-    signal.addEventListener('abort', () => {
-      child.kill();
-    }, { once: true });
+    const onAbort = () => child.kill();
+    signal.addEventListener('abort', onAbort, { once: true });
 
     let stdout = '';
     let stderr = '';
+    let truncated = false;
 
     child.stdout.on('data', (d: Buffer) => {
       stdout += d.toString();
-      // 截断
+      // 截断是预期的安全行为：code 归 0 返回部分结果，不误报执行失败
       if (stdout.length > 65536) {
         stdout = stdout.slice(0, 65536) + '\n... (输出截断，超过 64KB)';
+        truncated = true;
         child.kill();
       }
     });
@@ -205,10 +269,12 @@ function runGrep(
     });
     child.on('close', (code) => {
       clearTimeout(timeout);
-      resolve({ stdout, stderr, code: code ?? -1 });
+      signal.removeEventListener('abort', onAbort);
+      resolve({ stdout, stderr, code: truncated ? 0 : (code ?? -1) });
     });
     child.on('error', (err) => {
       clearTimeout(timeout);
+      signal.removeEventListener('abort', onAbort);
       resolve({ stdout, stderr: err.message, code: -1 });
     });
   });

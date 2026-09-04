@@ -77,6 +77,16 @@ export interface CallHierarchyEntry {
   fromRanges?: LspRange[];
 }
 
+/** 悬停内容段（检索差距弥补计划 T2）——对齐 VSCode Hover.contents 扁平化 */
+export interface LspHover {
+  /** 代码块语言（MarkedString 形态）；纯文本时为空 */
+  language?: string;
+  /** 内容文本（单段截断 500 字符） */
+  value: string;
+  /** 悬停覆盖范围（可选） */
+  range?: LspRange;
+}
+
 /**
  * 桥接器接口：所有 LSP 能力的抽象入口。
  */
@@ -97,6 +107,10 @@ export interface LspBridge {
     position: LspPosition,
     direction: 'incoming' | 'outgoing',
   ): Promise<CallHierarchyEntry[]>;
+  /** T2 · 悬停：返回该位置的类型/签名/文档提示（扁平化后的内容段） */
+  hover(filePath: string, position: LspPosition): Promise<LspHover[]>;
+  /** T2 · 类型定义：返回类型别名/接口/类声明位置（TypeScript 等语言强类型跳转） */
+  typeDefinition(filePath: string, position: LspPosition): Promise<LspLocation[]>;
 }
 
 /**

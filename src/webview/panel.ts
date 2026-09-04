@@ -141,6 +141,7 @@ import { KnowledgeIndex } from '../core/knowledge/index.js';
 import { VSCodeLspBridge, type LspBridge } from '../core/lsp/index.js';
 import { VSCodeProblemsBridge, type ProblemsBridge } from '../core/problems/index.js';
 import { MemoryManager, BuiltinMemoryProvider, enhanceWithVectorMatch, renderTaskContextSection, buildFrozenSnapshot, PrefetchEngine } from '../core/memory/index.js';
+import { buildMemoryTreeBlock } from '../core/memory/explore-inject.js';
 import type { MemoryExtractorFn } from '../core/memory/index.js';
 import { formatApprovedPlanXml, appendPlanToSystemPrompt, formatSpecXml, formatSpecTasksXml } from '../core/task/plan-injector.js';
 import { SpecManager, type SpecDocument } from '../core/task/spec-manager.js';
@@ -3560,13 +3561,11 @@ export class DualMindChatPanel {
 
     // B-P1-13 · M10.1 框架自动注入 4 块（current_open_file / open_tabs /
     //   workspace_tree / git_status / git_diff_staged）
+    // 首轮判定提升到函数级：workspace_tree 注入（!isFirstTurn 跳过）与
+    // T3 记忆树骨架直建（isFirstTurn || debug）都需要它，且后者在块外
+    const isFirstTurn = !this.context.workspaceState.get<boolean>(HAS_EMITTED_WORKSPACE_TREE_KEY, false);
     let frameworkContext: string | undefined;
     if (workspaceRoot2) {
-      const hasEmittedTree = this.context.workspaceState.get<boolean>(
-        HAS_EMITTED_WORKSPACE_TREE_KEY,
-        false,
-      );
-      const isFirstTurn = !hasEmittedTree;
       try {
         frameworkContext = await buildFrameworkContext({
           mode: this.modeManager.getCurrent(),
@@ -3627,15 +3626,38 @@ export class DualMindChatPanel {
       }
     }
 
-    // M4 · 消费预取结果（下一轮 user 输入命中上一轮的预取）
+    // M4 · 消费预取结果（下一轮 user 输入命中上一轮的预取）：
+    // 普通命中 → prefetchBlock；T3 记忆树骨架 → memoryTreeBlock（互斥消费同一条目）
     let prefetchBlock: string | undefined;
+    let memoryTreeBlock: string | undefined;
     if (this.prefetchEngine && options.userQuery) {
       const hit = this.prefetchEngine.consumeHit(options.userQuery);
       if (hit) prefetchBlock = hit;
+      const treeHit = this.prefetchEngine.consumeTreeHit(options.userQuery);
+      if (treeHit) memoryTreeBlock = treeHit;
     }
 
     // 冻结快照：传给 PromptBuilder 的是快照中的记录，而非全量 list()
     const snapshotMemories = this.frozenMemorySnapshot?.memories ?? [];
+
+    // T3 · 会话首轮 / debug 模式直建任务相关记忆树骨架（无上一轮可预取时兜底；
+    // 命中即跳过 —— 避免与 prefetch 产线重复注入）。
+    // 注意不用 isFirstTurn（workspace tree 的发射标志）：单文件场景无 workspace
+    // 文件夹时该标志恒 true，会导致每轮重复注入相同骨架；改由会话级内存标志控制
+    if (!memoryTreeBlock && options.userQuery) {
+      const debugMode = this.modeManager.getCurrent() === 'debug';
+      if (debugMode || !this.memoryTreeEmittedThisSession) {
+        try {
+          memoryTreeBlock = buildMemoryTreeBlock(snapshotMemories, options.userQuery, {
+            maxTitles: 6,
+          });
+        } catch {
+          // 树骨架构建失败静默（不阻断主流程）
+        }
+        // 尝试过即记一次（debug 轮的尝试不影响普通轮语义）
+        if (!debugMode) this.memoryTreeEmittedThisSession = true;
+      }
+    }
     const { full } = PromptBuilder.build({
       mode: this.modeManager.getCurrent(),
       skills,
@@ -3678,6 +3700,12 @@ export class DualMindChatPanel {
     // ── P1 补齐 · Spec 上下文注入 ──
     // 当 Spec 工作流激活时，将 spec XML + 阶段提示追加到 system prompt 末尾
     let result = full;
+
+    // M4/T3 · 预取命中与记忆树骨架注入（修复 M4 预取结果从未进入上下文的接线缺失）：
+    // 记忆树 → 任务相关记忆骨架；prefetch → 上轮讨论预取的记忆；均追加在 spec 控制信息之前
+    if (memoryTreeBlock) result = result + '\n\n' + memoryTreeBlock;
+    if (prefetchBlock) result = result + '\n\n' + prefetchBlock;
+
     if (this.specState) {
       const specContext = await this.refreshSpecContext();
       if (specContext) {
@@ -4245,6 +4273,9 @@ export class DualMindChatPanel {
 
   /** Phase 5 Phase D M4 · 后台预取引擎 */
   private prefetchEngine: PrefetchEngine | undefined;
+
+  /** T3 · 本会话是否已尝试过直建记忆树骨架（防单文件/无 workspace 时每轮重复注入） */
+  private memoryTreeEmittedThisSession = false;
 
   /**
    * 从 VSCode config 构建联网搜索 ProviderRegistry（W6b3 + W8.11）。

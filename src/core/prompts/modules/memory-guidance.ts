@@ -24,6 +24,8 @@ export const MEMORY_GUIDANCE_BLOCK = [
   '- To **write** (add/replace/remove): call `memory`.',
   '- Memory is stored as markdown files under `.devseeker/memories/.',
   '- Call `memory_search` before writing to avoid duplicates.',
+  '- A `<memory_tree>` block (if present) lists memory skeletons relevant to the',
+  '  current task; call `memory_search(fetch)` with the exact title to load details.',
   '',
 ].join('\n');
 

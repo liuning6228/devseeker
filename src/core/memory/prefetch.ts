@@ -24,8 +24,10 @@ import type { Embedder } from '../index/embedder.js';
 interface PrefetchEntry {
   /** 触发的 query */
   query: string;
-  /** 预取结果文本 */
+  /** 预取结果文本（shallow 命中） */
   result: string;
+  /** 记忆树骨架（检索差距弥补计划 T3）；无命中时为空串 */
+  treeText: string;
   /** 创建时间 */
   createdAt: number;
 }
@@ -66,15 +68,41 @@ export class PrefetchEngine {
 
   /**
    * 检查是否命中。在下一轮 send() 开始时调用。
-   * 若命中，返回预取内容并清空该条目。
+   * 若命中，返回预取内容并清空该字段（条目在 result / treeText 都消费完前保留）。
    */
   consumeHit(query: string): string {
     this.evictStale();
     const idx = this.cache.findIndex((e) => isSimilar(e.query, query));
     if (idx === -1) return '';
     const hit = this.cache[idx];
-    this.cache.splice(idx, 1);
-    return hit.result;
+    const result = hit.result;
+    hit.result = '';
+    this.maybeDropEntry(idx);
+    return result;
+  }
+
+  /**
+   * T3 · 记忆树骨架预取：与 consumeHit 同生命周期（同 TTL/去重/上限），
+   * 按字段消费——consumeHit 拿走 result 后条目仍保留，供本方法取 treeText；
+   * 两字段都消费完（或初始为空）才移除条目。
+   */
+  consumeTreeHit(query: string): string {
+    this.evictStale();
+    const idx = this.cache.findIndex((e) => isSimilar(e.query, query));
+    if (idx === -1) return '';
+    const hit = this.cache[idx];
+    const treeText = hit.treeText;
+    hit.treeText = '';
+    this.maybeDropEntry(idx);
+    return treeText;
+  }
+
+  /** 条目内两字段都为空时移除（consumeHit/consumeTreeHit 共用） */
+  private maybeDropEntry(idx: number): void {
+    const hit = this.cache[idx];
+    if (!hit || (hit.result === '' && hit.treeText === '')) {
+      this.cache.splice(idx, 1);
+    }
   }
 
   private async doPrefetch(query: string): Promise<void> {
@@ -91,20 +119,37 @@ export class PrefetchEngine {
     const results = output instanceof Promise ? await output : output;
     if (results.kind !== 'hits') return;
 
-    if (results.hits.length === 0) return;
-
-    const lines = ['<prefetch>', `(根据上一轮讨论预取的记忆)`];
-    for (const hit of results.hits) {
-      lines.push(`- [${hit.record.category}] ${hit.record.title}`);
-      if (hit.record.content) lines.push(`  ${hit.record.content.slice(0, 200)}`);
+    let result = '';
+    if (results.hits.length > 0) {
+      const lines = ['<prefetch>', `(根据上一轮讨论预取的记忆)`];
+      for (const hit of results.hits) {
+        lines.push(`- [${hit.record.category}] ${hit.record.title}`);
+        if (hit.record.content) lines.push(`  ${hit.record.content.slice(0, 200)}`);
+      }
+      lines.push('</prefetch>');
+      result = lines.join('\n');
     }
-    lines.push('</prefetch>');
-    const result = lines.join('\n');
+
+    // T3 · 记忆树骨架产线：并行构建，独立缓存字段，无命中为空串
+    let treeText = '';
+    if (query.trim()) {
+      try {
+        const { buildMemoryTreeBlock } = await import('./explore-inject.js');
+        treeText = buildMemoryTreeBlock(records, query.split(/\s+/).filter(Boolean), {
+          maxTitles: 6,
+        }) ?? '';
+      } catch {
+        // 树骨架构建失败不阻断主预取（静默降级为空）
+      }
+    }
+
+    // 两条产线都为空 → 不缓存
+    if (!result && !treeText) return;
 
     if (this.cache.length >= MAX_PREFETCH_CACHE) {
       this.cache.shift();
     }
-    this.cache.push({ query, result, createdAt: Date.now() });
+    this.cache.push({ query, result, treeText, createdAt: Date.now() });
   }
 
   private evictStale(): void {

@@ -86,6 +86,16 @@ export {
   type CallHierarchyDeps,
 } from './call_hierarchy.js';
 export {
+  HoverTool,
+  type HoverArgs,
+  type HoverDeps,
+} from './hover.js';
+export {
+  TypeDefinitionTool,
+  type TypeDefinitionArgs,
+  type TypeDefinitionDeps,
+} from './type_definition.js';
+export {
   LspTool,
   LSP_OPERATIONS,
   type LspToolArgs,

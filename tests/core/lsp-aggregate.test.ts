@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { LspTool, LSP_OPERATIONS } from '../../src/core/tools/lsp.js';
 import type {
   LspBridge,
+  LspHover,
   LspLocation,
   LspPosition,
   LspSymbol,
@@ -32,6 +33,8 @@ class FakeBridge implements LspBridge {
   wsSyms: LspSymbol[] = [];
   impls: LspLocation[] = [];
   callHier: CallHierarchyEntry[] = [];
+  hovers: LspHover[] = [];
+  typeDefs: LspLocation[] = [];
   calls: Array<{ kind: string; args: unknown[] }> = [];
 
   async goToDefinition(filePath: string, pos: LspPosition): Promise<LspLocation[]> {
@@ -66,6 +69,14 @@ class FakeBridge implements LspBridge {
     this.calls.push({ kind: 'callHier', args: [filePath, pos, direction] });
     return this.callHier;
   }
+  async hover(filePath: string, pos: LspPosition): Promise<LspHover[]> {
+    this.calls.push({ kind: 'hover', args: [filePath, pos] });
+    return this.hovers;
+  }
+  async typeDefinition(filePath: string, pos: LspPosition): Promise<LspLocation[]> {
+    this.calls.push({ kind: 'typeDef', args: [filePath, pos] });
+    return this.typeDefs;
+  }
 }
 
 function ctx() {
@@ -78,9 +89,9 @@ function ctx() {
 }
 
 describe('LspTool · 聚合分发', () => {
-  it('operation 枚举齐备（6 种）', () => {
-    expect(LSP_OPERATIONS).toHaveLength(6);
-    expect(new Set(LSP_OPERATIONS).size).toBe(6);
+  it('operation 枚举齐备（8 种）', () => {
+    expect(LSP_OPERATIONS).toHaveLength(8);
+    expect(new Set(LSP_OPERATIONS).size).toBe(8);
   });
 
   it('name/description/parameters 签名完整', () => {
@@ -201,6 +212,30 @@ describe('LspTool · 聚合分发', () => {
       ctx(),
     );
     expect(b.calls[0]?.args[2]).toBe('outgoing');
+  });
+
+  it('hover 分发 + 位置透传', async () => {
+    const b = new FakeBridge();
+    const tool = new LspTool({ getBridge: () => b });
+    const r = await tool.execute(
+      { operation: 'hover', file_path: 'a.ts', line: 4, character: 2 },
+      ctx(),
+    );
+    expect(b.calls[0]?.kind).toBe('hover');
+    expect(b.calls[0]?.args[1]).toEqual({ line: 4, character: 2 });
+    expect(r.content).toContain('Hover for a.ts:4:2');
+  });
+
+  it('type_definition 分发 + 位置透传', async () => {
+    const b = new FakeBridge();
+    const tool = new LspTool({ getBridge: () => b });
+    const r = await tool.execute(
+      { operation: 'type_definition', file_path: 'a.ts', line: 3, character: 1 },
+      ctx(),
+    );
+    expect(b.calls[0]?.kind).toBe('typeDef');
+    expect(b.calls[0]?.args[1]).toEqual({ line: 3, character: 1 });
+    expect(r.content).toContain('Type definitions for a.ts:3:1');
   });
 
   it('bridge 未就绪 → LSP_SERVER_NOT_RUNNING', async () => {
