@@ -8,11 +8,12 @@
  * Webview reducer W7b4b 新增 Action 单测
  *
  * 覆盖：
- * - ASK_QUESTION 写入 state.askQuestion
- * - ASK_CLEAR 清空 askQuestion
  * - TOOL_DIFF 写入对应 toolCallId 的 ToolCallPart.diff
  * - REVERT_RESULT ok=true/false 通过 checkpointId 找到 ToolCallPart 并写 revertState
  * - 未命中 checkpointId 不改变状态
+ *
+ * 注：ASK_QUESTION/ASK_CLEAR 不在此覆盖——ask_question 弹窗是瞬态 UI，
+ * 实现在 App.tsx 本地 state（AskQuestionPayload useState），不经过 reducer。
  */
 
 import { describe, it, expect } from 'vitest';
@@ -23,7 +24,6 @@ import {
   type ToolCallPart,
 } from '../../webview-ui/src/state/reducer.js';
 import type {
-  AskQuestionPayload,
   ToolDiffPayload,
 } from '../../src/shared/protocol.js';
 
@@ -53,46 +53,6 @@ function getToolPart(state: AppState, toolCallId: string): ToolCallPart | undefi
   }
   return undefined;
 }
-
-describe('reducer · ASK_QUESTION / ASK_CLEAR', () => {
-  it('ASK_QUESTION sets askQuestion field', () => {
-    const payload: AskQuestionPayload = {
-      requestId: 'rid-1',
-      questions: [
-        {
-          header: 'Lib',
-          question: 'Which library?',
-          options: [
-            { label: 'A', description: 'a' },
-            { label: 'B', description: 'b' },
-          ],
-        },
-      ],
-    };
-    const s = reducer(initialState, { type: 'ASK_QUESTION', payload });
-    expect(s.askQuestion).toEqual(payload);
-  });
-
-  it('ASK_CLEAR removes askQuestion', () => {
-    const payload: AskQuestionPayload = {
-      requestId: 'rid-2',
-      questions: [
-        {
-          header: 'x',
-          question: 'y?',
-          options: [
-            { label: 'a', description: 'a' },
-            { label: 'b', description: 'b' },
-          ],
-        },
-      ],
-    };
-    const s1 = reducer(initialState, { type: 'ASK_QUESTION', payload });
-    expect(s1.askQuestion).toBeDefined();
-    const s2 = reducer(s1, { type: 'ASK_CLEAR' });
-    expect(s2.askQuestion).toBeUndefined();
-  });
-});
 
 describe('reducer · TOOL_DIFF', () => {
   it('writes diff into matching ToolCallPart', () => {

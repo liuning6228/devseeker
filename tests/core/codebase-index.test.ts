@@ -14,8 +14,6 @@ import * as os from 'node:os';
 import { join } from 'node:path';
 import { CodebaseIndex } from '../../src/core/index/codebase-index.js';
 import type { Embedder, EmbedResult } from '../../src/core/index/embedder.js';
-import { openSqliteDatabase, InMemoryDb } from '../../src/core/storage/sqlite-db.js';
-import type { SqliteDatabaseLike } from '../../src/core/storage/sqlite-db.js';
 import { ErrorCodes } from '../../src/core/errors/index.js';
 
 /** 确定性伪 embedder：输出基于字符统计的 3 维向量 */
@@ -46,7 +44,6 @@ class FakeEmbedder implements Embedder {
 
 let tmpRoot: string;
 let storePath: string;
-let db: SqliteDatabaseLike;
 /** 本测试用例中创建的所有 CodebaseIndex 实例，afterEach 时 dispose 释放 SQLite 连接 */
 const idxArr: CodebaseIndex[] = [];
 
@@ -60,18 +57,12 @@ beforeEach(async () => {
   tmpRoot = await fs.mkdtemp(join(os.tmpdir(), 'cbi-'));
   storePath = join(tmpRoot, '.devseeker', 'index.json');
   idxArr.length = 0;
-  try {
-    db = await openSqliteDatabase({ dbPath: join(tmpRoot, 'test.sqlite') });
-  } catch {
-    db = new InMemoryDb();
-  }
 });
 
 afterEach(async () => {
   // 必须先 dispose 内部 SQLite 连接，否则 Windows 上文件锁不释放 → EBUSY
   for (const idx of idxArr) idx.dispose();
   idxArr.length = 0;
-  db.close();
   await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
 });
 
@@ -80,7 +71,6 @@ describe('CodebaseIndex', () => {
     const idx = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: new FakeEmbedder(),
-      db,
       storePath,
     });
     idxArr.push(idx);
@@ -95,7 +85,6 @@ describe('CodebaseIndex', () => {
     const idx = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder,
-      db,
       storePath,
     });
     idxArr.push(idx);
@@ -114,7 +103,6 @@ describe('CodebaseIndex', () => {
     const idx = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: new FakeEmbedder(),
-      db,
       storePath,
     });
     idxArr.push(idx);
@@ -130,7 +118,6 @@ describe('CodebaseIndex', () => {
     const idx = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: new FakeEmbedder(),
-      db,
       storePath,
     });
     idxArr.push(idx);
@@ -145,7 +132,6 @@ describe('CodebaseIndex', () => {
     const idx1 = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: emb1,
-      db,
       storePath,
     });
     idxArr.push(idx1);
@@ -153,12 +139,15 @@ describe('CodebaseIndex', () => {
     const sizeAfter = idx1.size();
     expect(sizeAfter).toBeGreaterThan(0);
 
+    // 先 dispose 强制数据落盘（sql.js fallback 是 debounce 200ms 写盘，
+    // 不 close 直接重开会读到空库；better-sqlite3 同步落盘无此问题）
+    idx1.dispose();
+
     // 新实例应该加载
     const emb2 = new FakeEmbedder();
     const idx2 = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: emb2,
-      db,
       storePath,
     });
     idxArr.push(idx2);
@@ -171,7 +160,6 @@ describe('CodebaseIndex', () => {
     const idx1 = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: new FakeEmbedder(),
-      db,
       storePath,
     });
     idxArr.push(idx1);
@@ -188,7 +176,6 @@ describe('CodebaseIndex', () => {
     const idx2 = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: embV2,
-      db,
       storePath,
     });
     idxArr.push(idx2);
@@ -201,7 +188,6 @@ describe('CodebaseIndex', () => {
     const idx = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: new FakeEmbedder(),
-      db,
       storePath,
       onProgress: (p) => {
         phases.push(p.phase);
@@ -224,7 +210,6 @@ describe('CodebaseIndex', () => {
     const idx = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: new FakeEmbedder(),
-      db,
       storePath,
       signal: ctl.signal,
     });
@@ -240,7 +225,6 @@ describe('CodebaseIndex', () => {
     const idx = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: new FakeEmbedder(),
-      db,
       storePath,
     });
     idxArr.push(idx);

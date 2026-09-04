@@ -100,11 +100,11 @@ describe('W15.2 · ReasoningCache', () => {
     ];
     p['reasoningCache'].set(key, cachedEvents);
 
-    // 用 modelOverride 触发 reasoning model 路径
+    // 用 modelOverride 触发 reasoning model 路径（V4 命名，旧名 deepseek-reasoner 已停服）
     const events: StreamEvent[] = [];
     for await (const ev of p.createMessage({
       messages: msgs,
-      modelOverride: 'deepseek-reasoner',
+      modelOverride: 'deepseek-v4-pro',
     })) {
       events.push(ev);
     }
@@ -137,7 +137,7 @@ describe('W15.2 · ReasoningCache', () => {
     const events: StreamEvent[] = [];
     for await (const ev of p.createMessage({
       messages: msgs,
-      modelOverride: 'deepseek-reasoner',
+      modelOverride: 'deepseek-v4-pro',
     })) {
       events.push(ev);
     }
@@ -154,7 +154,7 @@ describe('W15.2 · ReasoningCache', () => {
     const events2: StreamEvent[] = [];
     for await (const ev of p.createMessage({
       messages: msgs,
-      modelOverride: 'deepseek-reasoner',
+      modelOverride: 'deepseek-v4-pro',
     })) {
       events2.push(ev);
     }

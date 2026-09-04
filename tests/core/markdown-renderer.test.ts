@@ -96,10 +96,12 @@ describe('parseInline', () => {
     expect(link.lineEnd).toBe(7);
     expect(link.path).toBe('C:/a/b.ts');
   });
-  it('treats http link as plain link', () => {
+  it('treats malformed http link (space in URL) as plain text', () => {
+    // INLINE_LINK 的 href 不含空格（[^)\s]+?）：URL 含空格是畸形链接，
+    // 渲染为普通文本避免死链误导
     const nodes = parseInline('[ ](https:// .com)');
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].type).toBe('link');
+    expect(nodes[0].type).toBe('text');
   });
   it('parses image shorthand', () => {
     const nodes = parseInline('[/abs/img.png](/abs/img.png)');

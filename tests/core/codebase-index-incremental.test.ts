@@ -14,8 +14,6 @@ import * as os from 'node:os';
 import { join } from 'node:path';
 import { CodebaseIndex } from '../../src/core/index/codebase-index.js';
 import type { Embedder, EmbedResult } from '../../src/core/index/embedder.js';
-import { openSqliteDatabase, InMemoryDb } from '../../src/core/storage/sqlite-db.js';
-import type { SqliteDatabaseLike } from '../../src/core/storage/sqlite-db.js';
 
 class FakeEmbedder implements Embedder {
   readonly dimension = 3;
@@ -39,7 +37,6 @@ class FakeEmbedder implements Embedder {
 
 let tmpRoot: string;
 let storePath: string;
-let db: SqliteDatabaseLike;
 const idxArr: CodebaseIndex[] = [];
 
 async function mkfile(rel: string, content: string): Promise<void> {
@@ -51,18 +48,13 @@ async function mkfile(rel: string, content: string): Promise<void> {
 beforeEach(async () => {
   tmpRoot = await fs.mkdtemp(join(os.tmpdir(), 'cbi-inc-'));
   storePath = join(tmpRoot, '.devseeker', 'index.json');
-  try {
-    db = await openSqliteDatabase({ dbPath: join(tmpRoot, 'test.sqlite') });
-  } catch {
-    db = new InMemoryDb();
-  }
+  idxArr.length = 0;
 });
 
 afterEach(async () => {
   // 必须先 dispose 内部 SQLite 连接，否则 Windows 文件锁不释放 → EBUSY
   for (const idx of idxArr) idx.dispose();
   idxArr.length = 0;
-  db.close();
   await fs.rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
 });
 
@@ -71,7 +63,6 @@ async function buildIndex(): Promise<{ index: CodebaseIndex; embedder: FakeEmbed
   const index = await CodebaseIndex.create({
     workspaceRoot: tmpRoot,
     embedder,
-    db,
     storePath,
   });
   idxArr.push(index);
@@ -139,12 +130,15 @@ describe('CodebaseIndex incremental', () => {
     await mkfile('a.ts', 'bbb');
     await index.updateFile('a.ts');
 
+    // 先 dispose 强制落盘（sql.js fallback 写盘 debounce 200ms，重开前必须 flush；
+    // better-sqlite3 同步落盘不受影响）
+    index.dispose();
+
     // 重新加载应看到更新后的内容
     const index2 = await CodebaseIndex.create({
       workspaceRoot: tmpRoot,
       embedder: new FakeEmbedder(),
-      db,
-      storePath,
+        storePath,
     });
     idxArr.push(index2);
     const hits = await index2.search('bbb', 5);
