@@ -283,12 +283,21 @@ export type WebviewInboundMessage =
       field: 'tavilyKeys' | 'bochaKeys' | 'defaultProvider';
       value: string | string[];
     }
-  /** 索引配置：Webview 提交单字段变更（嵌入引擎 / 端点 / 模型 / 维度 / 批次 / 超时） */
+  /** 索引配置：Webview 提交单字段变更（嵌入引擎 / 密钥 / 端点 / 模型 / 维度 / 批次 / 超时） */
   | {
       type: 'update_embed_config';
-      field: 'embedProvider' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs';
+      field:
+        | 'embedProvider'
+        | 'embedApiKey'
+        | 'embedBaseUrl'
+        | 'embedModel'
+        | 'embedDimension'
+        | 'embedBatchSize'
+        | 'embedTimeoutMs';
       value: string | number;
-    };
+    }
+  /** 索引探活：按当前配置构造 embedder 嵌入 1 条，结果回推 embed_probe_result */
+  | { type: 'probe_embed' };
 
 // ─────────── Todo（W7e4 ·   todo_write 对齐） ───────────
 
@@ -357,8 +366,10 @@ export interface SearchConfigPayload {
 
 /** 代码库索引（Embedding）配置推送 payload。数字字段 0/空串 = 未显式配置（使用各引擎默认值）。 */
 export interface EmbedConfigPayload {
-  /** 嵌入引擎：local-bert / dashscope / ollama / bm25 */
+  /** 嵌入引擎：local-bert / dashscope / openai-compatible / ollama / bm25 */
   embedProvider: string;
+  /** 独立嵌入 API Key 是否已显式配置（明文不回传；false = 回退 qwenVl.apiKey） */
+  embedApiKeySet: boolean;
   /** 嵌入服务端点（可选，空 = 使用引擎默认） */
   embedBaseUrl: string;
   /** 模型名（可选，空 = 使用引擎默认，如 nomic-embed-text） */
@@ -369,6 +380,14 @@ export interface EmbedConfigPayload {
   embedBatchSize: number;
   /** 超时毫秒（0 = 未显式配置） */
   embedTimeoutMs: number;
+}
+
+/** 索引探活结果 payload（Extension → Webview）。 */
+export interface EmbedProbeResultPayload {
+  ok: boolean;
+  message: string;
+  /** 探测返回的向量维度（云端模式） */
+  dimension?: number;
 }
 
 // ─────────── Extension → Webview ───────────
@@ -664,4 +683,6 @@ export type WebviewOutboundMessage =
   /** 联网搜索配置推送（Extension → Webview） */
   | { type: 'search_config'; payload: SearchConfigPayload }
   /** 索引配置推送（Extension → Webview） */
-  | { type: 'embed_config'; payload: EmbedConfigPayload };
+  | { type: 'embed_config'; payload: EmbedConfigPayload }
+  /** 索引探活结果推送（Extension → Webview，回应 probe_embed） */
+  | { type: 'embed_probe_result'; payload: EmbedProbeResultPayload };

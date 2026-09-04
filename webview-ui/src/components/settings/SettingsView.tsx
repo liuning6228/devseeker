@@ -64,6 +64,8 @@ const EMPTY_LEVEL: LevelState = { provider: '', model: '', apiKey: '', apiKeySet
 // ─── 索引配置本地编辑态（数字字段字符串化；空串 = 未显式配置，使用引擎默认） ───
 type EmbedState = {
   provider: string;
+  /** 用户新输入的 API Key 明文；空 = 未输入（不回传，避免误清已存 Key），删除走「清除」按钮 */
+  apiKey: string;
   baseUrl: string;
   model: string;
   dimension: string;
@@ -71,7 +73,7 @@ type EmbedState = {
   timeoutMs: string;
 };
 
-const INITIAL_EMBED: EmbedState = { provider: 'local-bert', baseUrl: '', model: '', dimension: '', batchSize: '', timeoutMs: '' };
+const INITIAL_EMBED: EmbedState = { provider: 'local-bert', apiKey: '', baseUrl: '', model: '', dimension: '', batchSize: '', timeoutMs: '' };
 
 export function SettingsView({ config, searchConfig, embedConfig, onBack, className }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState('llm');
@@ -216,44 +218,65 @@ export function SettingsView({ config, searchConfig, embedConfig, onBack, classN
   const embedFieldTimers = useRef<Record<string, ReturnType<typeof setTimeout> | null>>({});
   // 本地态字段 → 协议字段名映射（state 短名 vs 配置节键名）
   const EMBED_FIELD_TO_CONFIG = useRef<
-    Record<keyof EmbedState, 'embedProvider' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs'>
+    Record<keyof EmbedState, 'embedProvider' | 'embedApiKey' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs'>
   >({
     provider: 'embedProvider',
+    apiKey: 'embedApiKey',
     baseUrl: 'embedBaseUrl',
     model: 'embedModel',
     dimension: 'embedDimension',
     batchSize: 'embedBatchSize',
     timeoutMs: 'embedTimeoutMs',
   }).current;
-  const persistEmbedField = useCallback((field: 'embedProvider' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs', value: string) => {
+  const persistEmbedField = useCallback((field: 'embedProvider' | 'embedApiKey' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs', value: string) => {
     if (embedFieldTimers.current[field]) clearTimeout(embedFieldTimers.current[field]);
     embedFieldTimers.current[field] = setTimeout(() => {
       postToHost({ type: 'update_embed_config', field, value });
     }, 500);
   }, []);
   const updateEmbedField = useCallback((field: keyof EmbedState, value: string) => {
+    if (field === 'apiKey') {
+      // 输入框为空只意味着「未输入新值」，不代表要清空已保存的 Key（清空走「清除」按钮），
+      // 否则失焦/防抖触发的空值提交会把已存的 Key 意外删掉（与 LLM apiKey 行为一致）
+      const next = value.trim();
+      if (!next) return;
+      markEmbedEdited(field);
+      setEmbedState((prev) => ({ ...prev, apiKey: next }));
+      postToHost({ type: 'update_embed_config', field: 'embedApiKey', value: next });
+      return;
+    }
     markEmbedEdited(field);
     setEmbedState((prev) => ({ ...prev, [field]: value }));
     if (field === 'provider') {
-      // select 即时提交（触发宿主侧切换重索引）
+      // select 即时提交（触发宿主侧切换重索引）；同时清掉上次探活结果，避免残留误导
+      setEmbedProbe({ status: 'idle' });
       postToHost({ type: 'update_embed_config', field: 'embedProvider', value });
     } else {
       persistEmbedField(EMBED_FIELD_TO_CONFIG[field], value);
     }
   }, [markEmbedEdited, persistEmbedField, EMBED_FIELD_TO_CONFIG]);
 
+  /** 清除已保存的 Embedding API Key（显式清空，对照 LLM clearApiKey；读回后 embedApiKeySet=false） */
+  const clearEmbedApiKey = useCallback(() => {
+    markEmbedEdited('apiKey');
+    setEmbedState((prev) => ({ ...prev, apiKey: '' }));
+    postToHost({ type: 'update_embed_config', field: 'embedApiKey', value: '' });
+  }, [markEmbedEdited]);
+
   useEffect(() => {
     if (!embedConfig) return;
     setEmbedState((prev) => {
       const next: EmbedState = {
         provider: embedConfig.embedProvider || 'local-bert',
+        // 明文 Key 不回传：宿主只回推 embedApiKeySet 布尔位，输入框始终从空开始
+        apiKey: '',
         baseUrl: embedConfig.embedBaseUrl ?? '',
         model: embedConfig.embedModel ?? '',
         dimension: embedConfig.embedDimension ? String(embedConfig.embedDimension) : '',
         batchSize: embedConfig.embedBatchSize ? String(embedConfig.embedBatchSize) : '',
         timeoutMs: embedConfig.embedTimeoutMs ? String(embedConfig.embedTimeoutMs) : '',
       };
-      for (const f of ['provider', 'baseUrl', 'model', 'dimension', 'batchSize', 'timeoutMs'] as const) {
+      for (const f of ['provider', 'apiKey', 'baseUrl', 'model', 'dimension', 'batchSize', 'timeoutMs'] as const) {
         if (embedRecentlyEdited(f)) next[f] = prev[f];
       }
       return next;
@@ -287,6 +310,26 @@ export function SettingsView({ config, searchConfig, embedConfig, onBack, classN
           error: msg.error,
         },
       }));
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // ─── 索引引擎探活：宿主按当前配置构造 embedder 实测 1 条（不落缓存），回推 embed_probe_result ───
+  const [embedProbe, setEmbedProbe] = useState<{ status: 'idle' | 'testing' | 'success' | 'error'; message?: string }>({ status: 'idle' });
+  const handleProbeEmbed = useCallback(() => {
+    setEmbedProbe({ status: 'testing' });
+    postToHost({ type: 'probe_embed' });
+  }, []);
+
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      const msg = ev.data;
+      if (msg?.type !== 'embed_probe_result') return;
+      setEmbedProbe({
+        status: msg.payload.ok ? 'success' : 'error',
+        message: msg.payload.message,
+      });
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
@@ -528,34 +571,58 @@ export function SettingsView({ config, searchConfig, embedConfig, onBack, classN
                   onChange={(e) => updateEmbedField('provider', e.target.value)}
                 >
                   <option value="local-bert">local-bert（本地，默认）</option>
-                  <option value="dashscope">dashscope（云端）</option>
+                  <option value="dashscope">dashscope（阿里云百炼）</option>
+                  <option value="openai-compatible">openai-compatible（OpenAI 兼容）</option>
                   <option value="ollama">ollama（本地服务）</option>
                   <option value="bm25">bm25（无模型，词法）</option>
                 </select>
               </SettingRow>
 
-              {embedState.provider === 'dashscope' && (
+              {(embedState.provider === 'dashscope' || embedState.provider === 'openai-compatible') && (
                 <>
                   <p className="text-xs text-vscode-fg/40 border rounded p-2 bg-vscode-sidebar-bg/50">
-                    云端模式：需 API Key（devSeeker.qwenVl.apiKey，与 Qwen-VL 共用）；代码片段将上传至阿里云 DashScope。
-                    建索引快（1-3 分钟），语义更丰富（1024 维）。
+                    {embedState.provider === 'dashscope' ? (
+                      '云端模式：需 API Key（优先 devSeeker.codebaseIndex.embedApiKey，留空回退 devSeeker.qwenVl.apiKey）；代码片段将上传至阿里云 DashScope。建索引快（1-3 分钟），语义更丰富（1024 维）。'
+                    ) : (
+                      '云端模式：任意 OpenAI 兼容 Embedding 接口。需 API Key（devSeeker.codebaseIndex.embedApiKey，留空回退 devSeeker.qwenVl.apiKey）；代码片段将上传至所选服务商（默认 api.openai.com）。'
+                    )}
                   </p>
-                  <SettingRow label="Base URL" description="留空使用默认百炼兼容端点">
+                  <SettingRow label="API Key" description="已保存时留空不改动；清除走右侧按钮">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="password"
+                        className="w-72 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
+                        value={embedState.apiKey}
+                        onChange={(e) => updateEmbedField('apiKey', e.target.value)}
+                        placeholder={embedConfig?.embedApiKeySet ? '已保存（输入新值覆盖）' : 'sk-…（留空回退 qwenVl.apiKey）'}
+                      />
+                      {(embedConfig?.embedApiKeySet || embedState.apiKey) && (
+                        <button
+                          className="px-2 py-1 text-xs rounded border border-vscode-input-border bg-vscode-sidebar-bg text-vscode-fg hover:bg-vscode-list-hoverBackground"
+                          onClick={clearEmbedApiKey}
+                          title="清除已保存的 API Key"
+                        >
+                          清除
+                        </button>
+                      )}
+                    </div>
+                  </SettingRow>
+                  <SettingRow label="Base URL" description={embedState.provider === 'dashscope' ? '留空使用默认百炼兼容端点' : '留空使用默认 OpenAI 端点'}>
                     <input
                       type="text"
                       className="w-72 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
                       value={embedState.baseUrl}
                       onChange={(e) => updateEmbedField('baseUrl', e.target.value)}
-                      placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                      placeholder={embedState.provider === 'dashscope' ? 'https://dashscope.aliyuncs.com/compatible-mode/v1' : 'https://api.openai.com/v1'}
                     />
                   </SettingRow>
-                  <SettingRow label="模型名" description="留空使用默认 text-embedding-v3">
+                  <SettingRow label="模型名" description={embedState.provider === 'dashscope' ? '留空使用默认 text-embedding-v3' : '留空使用默认 text-embedding-3-small'}>
                     <input
                       type="text"
                       className="w-72 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
                       value={embedState.model}
                       onChange={(e) => updateEmbedField('model', e.target.value)}
-                      placeholder="text-embedding-v3"
+                      placeholder={embedState.provider === 'dashscope' ? 'text-embedding-v3' : 'text-embedding-3-small'}
                     />
                   </SettingRow>
                 </>
@@ -587,7 +654,7 @@ export function SettingsView({ config, searchConfig, embedConfig, onBack, classN
                 </>
               )}
 
-              {(embedState.provider === 'dashscope' || embedState.provider === 'ollama') && (
+              {(embedState.provider === 'dashscope' || embedState.provider === 'openai-compatible' || embedState.provider === 'ollama') && (
                 <>
                   <SettingRow label="向量维度" description="留空使用引擎默认">
                     <input
@@ -595,7 +662,7 @@ export function SettingsView({ config, searchConfig, embedConfig, onBack, classN
                       className="w-28 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
                       value={embedState.dimension}
                       onChange={(e) => updateEmbedField('dimension', e.target.value)}
-                      placeholder={embedState.provider === 'dashscope' ? '1024' : '768'}
+                      placeholder={embedState.provider === 'dashscope' ? '1024' : embedState.provider === 'openai-compatible' ? '1536' : '768'}
                     />
                   </SettingRow>
                   <SettingRow label="批大小" description="留空使用引擎默认">
@@ -604,7 +671,7 @@ export function SettingsView({ config, searchConfig, embedConfig, onBack, classN
                       className="w-28 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
                       value={embedState.batchSize}
                       onChange={(e) => updateEmbedField('batchSize', e.target.value)}
-                      placeholder={embedState.provider === 'dashscope' ? '10' : '4'}
+                      placeholder={embedState.provider === 'ollama' ? '4' : '10'}
                     />
                   </SettingRow>
                   <SettingRow label="超时（ms）" description="留空使用引擎默认">
@@ -613,16 +680,32 @@ export function SettingsView({ config, searchConfig, embedConfig, onBack, classN
                       className="w-28 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-1 focus:ring-vscode-focus"
                       value={embedState.timeoutMs}
                       onChange={(e) => updateEmbedField('timeoutMs', e.target.value)}
-                      placeholder={embedState.provider === 'dashscope' ? '60000' : '30000'}
+                      placeholder={embedState.provider === 'ollama' ? '30000' : '60000'}
                     />
                   </SettingRow>
                 </>
               )}
 
+              {embedState.provider !== 'local-bert' && embedState.provider !== 'bm25' && (
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    className="px-3 py-1 text-xs rounded border border-vscode-input-border bg-vscode-sidebar-bg text-vscode-fg hover:bg-vscode-list-hoverBackground disabled:opacity-50"
+                    onClick={handleProbeEmbed}
+                    disabled={embedProbe.status === 'testing'}
+                  >
+                    连接测试
+                  </button>
+                  {embedProbe.status === 'testing' && <span className="text-xs text-vscode-fg/50">探测中…</span>}
+                  {embedProbe.status === 'success' && <span className="text-xs text-green-600">✓ {embedProbe.message}</span>}
+                  {embedProbe.status === 'error' && <span className="text-xs text-red-500">✗ {embedProbe.message}</span>}
+                </div>
+              )}
+
               <div className="mt-3 space-y-1 text-xs text-vscode-fg/40">
-                <div>• 维度：local-bert 384 / dashscope 1024（text-embedding-v3）/ ollama 768（nomic-embed-text）</div>
+                <div>• 维度：local-bert 384 / dashscope 1024（text-embedding-v3）/ openai-compatible 1536（text-embedding-3-small）/ ollama 768（nomic-embed-text）</div>
                 <div>• 切换引擎后旧向量自动失效（不会计算错误），约 3 秒后后台自动重建索引</div>
-                <div>• 云端模式代码片段会上传至所选服务商；local-bert / ollama 完全离线</div>
+                <div>• 成本：嵌入按 token 计费、单价远低于对话模型，以各服务商官网为准</div>
+                <div>• 隐私：API Key 仅存本机设置（界面不回显明文）；云端模式依赖代码片段上传所选服务商，local-bert / ollama / bm25 完全离线</div>
               </div>
             </Section>
           </div>

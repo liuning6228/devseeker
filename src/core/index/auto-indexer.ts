@@ -39,7 +39,7 @@ import {
   defaultBm25IndexStorePath,
   type Bm25CodebaseIndexOptions,
 } from './bm25-codebase-index.js';
-import { DashScopeEmbedder, OllamaEmbedder, type Embedder } from './embedder.js';
+import { OpenAICompatibleEmbedder, OllamaEmbedder, OPENAI_DEFAULT_BASE, type Embedder } from './embedder.js';
 import { WorkerEmbedder } from './worker-embedder.js';
 import type { Logger } from 'pino';
 
@@ -478,17 +478,29 @@ export async function defaultBuildEmbedder(
     }
   }
 
-  // dashscope
-  const apiKey = config.get<string>('qwenVl.apiKey', '').trim();
+  // dashscope / openai-compatible（OpenAI 兼容协议，T1 泛化）
+  const provider2 = provider === 'dashscope' ? 'dashscope' : 'openai-compatible';
+  const apiKey =
+    config.get<string>('codebaseIndex.embedApiKey', '').trim() ||
+    config.get<string>('qwenVl.apiKey', '').trim();
   if (!apiKey) return undefined;
 
-  const baseUrl = config.get<string>('codebaseIndex.embedBaseUrl', '').trim() || config.get<string>('qwenVl.baseUrl', '').trim();
-  const model = config.get<string>('codebaseIndex.embedModel', 'text-embedding-v3').trim();
-  const dimension = config.get<number>('codebaseIndex.embedDimension', 1024);
+  const embedBaseUrl = config.get<string>('codebaseIndex.embedBaseUrl', '').trim();
+  // dashscope 保留 qwenVl.baseUrl 回退（存量行为）；openai-compatible 默认 OpenAI 官方端点
+  const baseUrl =
+    embedBaseUrl ||
+    (provider2 === 'dashscope' ? config.get<string>('qwenVl.baseUrl', '').trim() : OPENAI_DEFAULT_BASE);
+  // T1/A · 维度自适应接线（与 panel.buildOpenAICompatibleEmbedder 保持一致）：未配置时传 undefined，
+  // 由 OpenAICompatibleEmbedder 内部按模型查 OPENAI_DIM_BY_MODEL，避免写死 1024 导致 3-small 建索引失败
+  const dimension = config.get<number>('codebaseIndex.embedDimension');
+  // T1/A · openai-compatible 分支默认 OpenAI 官方 3-small（dashscope 保留 text-embedding-v3）
+  const model =
+    config.get<string>('codebaseIndex.embedModel')?.trim() ||
+    (provider2 === 'openai-compatible' ? 'text-embedding-3-small' : 'text-embedding-v3');
   const batchSize = config.get<number>('codebaseIndex.embedBatchSize', 10);
 
   try {
-    return new DashScopeEmbedder({
+    return new OpenAICompatibleEmbedder({
       apiKey,
       baseUrl: baseUrl || undefined,
       model,

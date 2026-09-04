@@ -17,7 +17,19 @@ export {
   type ScanResult,
 } from './scanner.js';
 export { chunkText, type ChunkOptions, type TextChunk } from './chunker.js';
-export { DashScopeEmbedder, OllamaEmbedder, type Embedder, type EmbedResult, type EmbedOptions, type DashScopeEmbedderConfig, type OllamaEmbedderConfig } from './embedder.js';
+export {
+  DashScopeEmbedder,
+  OpenAICompatibleEmbedder,
+  OllamaEmbedder,
+  OPENAI_DEFAULT_BASE,
+  OPENAI_DIM_BY_MODEL,
+  type Embedder,
+  type EmbedResult,
+  type EmbedOptions,
+  type DashScopeEmbedderConfig,
+  type OpenAICompatibleEmbedderConfig,
+  type OllamaEmbedderConfig,
+} from './embedder.js';
 export { LocalBertEmbedder, type LocalBertEmbedderConfig } from './local-bert-embedder.js';
 export { WorkerEmbedder, type WorkerEmbedderConfig } from './worker-embedder.js';
 export {

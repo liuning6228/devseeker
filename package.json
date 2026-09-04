@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -768,26 +768,32 @@
           "enum": [
             "local-bert",
             "dashscope",
+            "openai-compatible",
             "ollama",
             "bm25"
           ],
           "default": "local-bert",
-          "description": "Embedding 引擎：local-bert（默认，离线，Xenova/multilingual-e5-small，384 维）/ dashscope（需 API Key，text-embedding-v3，1024 维）/ ollama（本地 Ollama 服务，nomic-embed-text，768 维，零成本）/ bm25（零模型 lexical 保底，无需下载模型，冷启动 <1s，适合低配置机器 / CI / 隐私场景）。切换后会重建索引（向量库与 BM25 快照互不干扰）。"
+          "description": "Embedding 引擎：local-bert（默认，离线，Xenova/multilingual-e5-small，384 维）/ dashscope（需 API Key，text-embedding-v3，1024 维）/ openai-compatible（任意 OpenAI 兼容 /embeddings 端点：OpenAI / MiniMax / 硅基流动 / 火山引擎等，密钥用 embedApiKey，端点用 embedBaseUrl）/ ollama（本地 Ollama 服务，nomic-embed-text，768 维，零成本）/ bm25（零模型 lexical 保底，无需下载模型，冷启动 <1s，适合低配置机器 / CI / 隐私场景）。切换后会重建索引（向量库与 BM25 快照互不干扰）。"
+        },
+        "devSeeker.codebaseIndex.embedApiKey": {
+          "type": "string",
+          "markdownDescription": "嵌入服务 API Key（可选）。dashscope / openai-compatible 专用，不再强制共用 `devSeeker.qwenVl.apiKey`；**为空时自动回退 `qwenVl.apiKey`**（兼容存量用户）。注意：DeepSeek / Kimi 无公开 embedding API，不适用。",
+          "editPresentation": "multilineText"
         },
         "devSeeker.codebaseIndex.embedBaseUrl": {
           "type": "string",
-          "description": "嵌入服务端点（可选）。dashscope 未配置时回退 devSeeker.qwenVl.baseUrl；ollama 默认 http://127.0.0.1:11434。留空使用各自默认。"
+          "description": "嵌入服务端点（可选）。dashscope 未配置时回退 devSeeker.qwenVl.baseUrl；openai-compatible 未配置时默认 https://api.openai.com/v1；ollama 默认 http://127.0.0.1:11434。留空使用各自默认。"
         },
         "devSeeker.codebaseIndex.embedModel": {
           "type": "string",
           "default": "text-embedding-v3",
-          "description": "Embedding 模型名。dashscope 默认 text-embedding-v3（共用 DashScope key）；ollama 未配置时默认 nomic-embed-text。local-bert provider 忽略该项。"
+          "description": "Embedding 模型名。dashscope 默认 text-embedding-v3；openai-compatible 可填 text-embedding-3-small/large 等；ollama 未配置时默认 nomic-embed-text。local-bert provider 忽略该项。"
         },
         "devSeeker.codebaseIndex.embedDimension": {
           "type": "integer",
           "default": 1024,
           "minimum": 1,
-          "description": "Embedding 向量维度。dashscope 默认 1024；ollama 未配置时默认 768（nomic-embed-text）。切换维度差异会自动失效旧索引并触发重建。"
+          "description": "Embedding 向量维度。默认按模型自动选择（text-embedding-v3=1024 / 3-small=1536 / 3-large=3072，local-bert=384）；dashscope/ollama 未配置时分别默认 1024 / 768。切换维度差异会自动失效旧索引并触发重建。"
         },
         "devSeeker.codebaseIndex.embedBatchSize": {
           "type": "integer",

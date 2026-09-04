@@ -5,12 +5,15 @@
  */
 
 /**
- * Embedder 抽象 + 阿里云 DashScope text-embedding-v3 客户端 + Ollama 本地客户端
+ * Embedder 抽象 + OpenAI 兼容 embedding 客户端（DashScope 为默认端点） + Ollama 本地客户端
  *
  * 来源：Plan Task 4.3（方案 B 远程，text-embedding-v3）
  * M4-Ollama：新增 OllamaEmbedder（nomic-embed-text 768 维，本地零成本）
+ * C-0/T1（2026-09-04）：DashScopeEmbedder 泛化为 OpenAICompatibleEmbedder，
+ *   支持任意 OpenAI 兼容 /embeddings 端点（OpenAI / MiniMax / 硅基流动 / 火山引擎等）；
+ *   DashScopeEmbedder 保留为向后兼容别名（同值导出，instanceof 兼容）。
  *
- * DashScope embedding 兼容 OpenAI 协议：
+ * 端到端协议（OpenAI 兼容）：
  *   POST {baseUrl}/embeddings
  *   Body: { model, input: string | string[], encoding_format?: 'float' }
  *   Resp: { data: [{ embedding: number[], index }], usage: { total_tokens } }
@@ -21,7 +24,7 @@
  *   Resp: { embedding: number[] }
  *
  * 默认：
- * - baseUrl https://dashscope.aliyuncs.com/compatible-mode/v1
+ * - baseUrl https://dashscope.aliyuncs.com/compatible-mode/v1（openai-compatible 分支用 OPENAI_DEFAULT_BASE）
  * - model text-embedding-v3（1024 维）
  * - 批次 10（DashScope 2026-Q1 起将 text-embedding-v3 服务端上限从 25 收紧到 10；
  *   报错示例：`InvalidParameter: batch size is invalid, it should not be larger than 10.`）
@@ -58,14 +61,20 @@ export interface Embedder {
   embed(inputs: string[], opts?: EmbedOptions): Promise<EmbedResult>;
 }
 
-export interface DashScopeEmbedderConfig {
+/**
+ * OpenAI 兼容 Embedder 配置（任意实现 /embeddings 协议的端点）。
+ *
+ * ⚠️ 本接口由 DashScopeEmbedderConfig 泛化而来，字段完全兼容；
+ * 旧类型名 DashScopeEmbedderConfig 保留为别名（见文件底部）。
+ */
+export interface OpenAICompatibleEmbedderConfig {
   apiKey: string;
   baseUrl?: string;
   model?: string;
   dimension?: number;
-  /** 单次请求最大条数；默认 25 */
+  /** 单次请求最大条数；默认 10 */
   batchSize?: number;
-  /** 超时毫秒；默认 60000（v1.0.2 从 30s 提升到 60s，给 DashScope 冷启动留空间） */
+  /** 超时毫秒；默认 60000（v1.0.2 从 30s 提升到 60s，给服务端冷启动留空间） */
   timeoutMs?: number;
   /** 自定义 fetch（便于单测注入） */
   fetchImpl?: typeof fetch;
@@ -75,10 +84,20 @@ const DEFAULT_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_MODEL = 'text-embedding-v3';
 const DEFAULT_DIM = 1024;
 const DEFAULT_BATCH = 10;
-// v1.0.2：30s → 60s；大仓库首次建索引 + DashScope 冷启动场景下 30s 偏紧
+// v1.0.2：30s → 60s；大仓库首次建索引 + 服务端冷启动场景下 30s 偏紧
 const DEFAULT_TIMEOUT = 60_000;
 
-export class DashScopeEmbedder implements Embedder {
+/** openai-compatible 分支未显式配置 baseUrl 时的默认端点（OpenAI 官方） */
+export const OPENAI_DEFAULT_BASE = 'https://api.openai.com/v1';
+
+/** T1 · 模型 → 默认向量维度表：未显式配置 embedDimension 时按模型自动选择 */
+export const OPENAI_DIM_BY_MODEL: Record<string, number> = {
+  'text-embedding-v3': 1024,
+  'text-embedding-3-small': 1536,
+  'text-embedding-3-large': 3072,
+};
+
+export class OpenAICompatibleEmbedder implements Embedder {
   readonly dimension: number;
   readonly modelId: string;
 
@@ -88,17 +107,18 @@ export class DashScopeEmbedder implements Embedder {
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
-  constructor(cfg: DashScopeEmbedderConfig) {
+  constructor(cfg: OpenAICompatibleEmbedderConfig) {
     if (!cfg.apiKey) {
       throw new AgentError({
         code: ErrorCodes.INDEX_EMBEDDER_UNAVAILABLE,
-        message: 'DashScope embedder 缺少 apiKey',
+        message: 'embedding 缺少 apiKey',
       });
     }
     this.apiKey = cfg.apiKey;
     this.baseUrl = (cfg.baseUrl ?? DEFAULT_BASE).replace(/\/$/, '');
     this.modelId = cfg.model ?? DEFAULT_MODEL;
-    this.dimension = cfg.dimension ?? DEFAULT_DIM;
+    // T1 · 维度自适应：显式配置优先；否则按模型查默认维度表；未知模型回落 1024
+    this.dimension = cfg.dimension ?? OPENAI_DIM_BY_MODEL[this.modelId.toLowerCase()] ?? DEFAULT_DIM;
     this.batchSize = Math.max(1, cfg.batchSize ?? DEFAULT_BATCH);
     this.timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT;
     this.fetchImpl = cfg.fetchImpl ?? globalThis.fetch;
@@ -262,6 +282,14 @@ export class DashScopeEmbedder implements Embedder {
     };
   }
 }
+
+/**
+ * 向后兼容别名：DashScopeEmbedder 即 OpenAICompatibleEmbedder（同值导出）。
+ * 存量 `new DashScopeEmbedder(...)` 调用与 instanceof 断言均不受影响。
+ */
+export const DashScopeEmbedder = OpenAICompatibleEmbedder;
+/** 向后兼容类型别名（原 DashScopeEmbedderConfig 泛化而来）。 */
+export type DashScopeEmbedderConfig = OpenAICompatibleEmbedderConfig;
 
 // ─────────── OllamaEmbedder（M4-Ollama） ───────────
 

@@ -32,6 +32,9 @@ function ensureCosineFunction(db: SqliteDatabaseLike): void {
   if (!raw || typeof (raw as unknown as { function?: unknown }).function !== 'function') return;
   raw.function('cosine_distance', (vecBlob: unknown, queryBlob: unknown, dim: unknown) => {
     if (!Buffer.isBuffer(vecBlob) || !Buffer.isBuffer(queryBlob) || typeof dim !== 'number') return 0;
+    // T3 · 维度防护：记录/查询任一侧长度与声明维度不符（损坏/陈旧记录）→ 返回 0 不参与召回，
+    // 避免越界读（NaN）污染排序
+    if (vecBlob.byteLength !== dim * 4 || queryBlob.byteLength !== dim * 4) return 0;
     const dimension = dim;
     const a = new Float32Array(vecBlob.buffer, vecBlob.byteOffset, vecBlob.byteLength / 4);
     const b = new Float32Array(queryBlob.buffer, queryBlob.byteOffset, queryBlob.byteLength / 4);
@@ -478,12 +481,17 @@ export class SqliteVectorStore {
     // 检查 SQLite 中是否已有数据
     const existingSize = store.size();
     if (existingSize > 0) {
-      // modelId / dimension 漂移检查：不匹配则清空旧数据
+      // modelId / dimension 漂移检查：任一不匹配则清空旧数据（T3 · 补 dimension 比较，
+      // 否则只改 embedDimension 时旧数据残留，reindex 的 upsert 维度校验会直接抛错）
       const storedModelId = store.getMeta('modelId');
-      if (storedModelId && storedModelId !== opts.modelId) {
+      const storedDimensionRaw = store.getMeta('dimension');
+      const storedDimension = storedDimensionRaw === null ? -1 : Number(storedDimensionRaw);
+      const dimMismatch =
+        storedDimensionRaw !== null && Number.isFinite(storedDimension) && storedDimension !== opts.dimension;
+      if ((storedModelId && storedModelId !== opts.modelId) || dimMismatch) {
         log.info(
-          { storedModelId, newModelId: opts.modelId, dimension: opts.dimension },
-          'sqlite-vector-store: modelId mismatch, clearing old data',
+          { storedModelId, newModelId: opts.modelId, storedDimension, newDimension: opts.dimension },
+          'sqlite-vector-store: modelId/dimension mismatch, clearing old data',
         );
         store.clear();
       }

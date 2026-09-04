@@ -226,4 +226,64 @@ describe('SqliteVectorStore', () => {
       expect(s.size()).toBe(0);
     });
   });
+
+  // ─── T3 · create() 漂移检查：modelId / dimension 任一不匹配则清空旧数据 ───
+  describe('漂移检查（T3）', () => {
+    it('modelId 不同时清空旧数据并更新 meta', async () => {
+      const s = await SqliteVectorStore.create({ db, dimension: 3, modelId: 'test' });
+      s.upsert([rec('a', 'foo.ts', [1, 0, 0])]);
+      expect(s.size()).toBe(1);
+
+      const s2 = await SqliteVectorStore.create({ db, dimension: 3, modelId: 'other-model' });
+      expect(s2.size()).toBe(0);
+      // getMeta 为私有方法，直接查 vec_meta 表验证 meta 已更新
+      const row = db.prepare('SELECT value FROM vec_meta WHERE key = ?').get('modelId') as { value: string } | undefined;
+      expect(row?.value).toBe('other-model');
+    });
+
+    it('dimension 不同时清空旧数据（仅改 embedDimension 的场景）', async () => {
+      const s = await SqliteVectorStore.create({ db, dimension: 3, modelId: 'test' });
+      s.upsert([rec('a', 'foo.ts', [1, 0, 0])]);
+      expect(s.size()).toBe(1);
+
+      const s2 = await SqliteVectorStore.create({ db, dimension: 5, modelId: 'test' });
+      expect(s2.size()).toBe(0);
+      const dim = db.prepare('SELECT value FROM vec_meta WHERE key = ?').get('dimension') as { value: string } | undefined;
+      expect(dim?.value).toBe('5');
+    });
+
+    it('modelId 与 dimension 都一致时保留数据', async () => {
+      const s = await SqliteVectorStore.create({ db, dimension: 3, modelId: 'test' });
+      s.upsert([rec('a', 'foo.ts', [1, 0, 0])]);
+
+      const s2 = await SqliteVectorStore.create({ db, dimension: 3, modelId: 'test' });
+      expect(s2.size()).toBe(1);
+    });
+  });
+
+  // ─── T3 · C 层 cosine_distance 维度防护（better-sqlite3 专属路径） ───
+  describe('C 层 cosine 防护（T3）', () => {
+    it('长度失配的向量记录返回 0 分且不抛错（防 NaN 污染排序）', async () => {
+      // 仅当底层是 better-sqlite3（C 层 cosine_distance 已注册）时执行；
+      // sql.js / InMemoryDb fallback 下走 JS 层 try/catch 跳过损坏记录（同样安全）
+      const raw = (db as unknown as { db?: { function?: unknown } }).db;
+      if (!raw || typeof raw.function !== 'function') return;
+
+      const s = await SqliteVectorStore.create({ db, dimension: 3, modelId: 'test' });
+      s.upsert([rec('a', 'foo.ts', [1, 0, 0])]);
+
+      // 绕过 upsert 的维度校验：注入一条 vector 仅 8 字节（期望 dim*4=12）的损坏记录
+      db.exec(
+        "INSERT INTO vec_records (id, filePath, startLine, endLine, vector) VALUES ('bad', 'bad.ts', 1, 10, X'0000803F00000000')",
+      );
+
+      const hits = s.search([1, 0, 0]);
+      // 不抛异常；损坏记录得 0 分（而非 NaN 崩坏排序）
+      const bad = hits.find((h) => h.record.id === 'bad');
+      expect(bad).toBeDefined();
+      expect(bad!.score).toBe(0);
+      // 正常记录不受影响
+      expect(hits.find((h) => h.record.id === 'a')!.score).toBeCloseTo(1, 5);
+    });
+  });
 });

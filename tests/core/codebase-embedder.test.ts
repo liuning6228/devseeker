@@ -9,7 +9,12 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { DashScopeEmbedder } from '../../src/core/index/embedder.js';
+import {
+  DashScopeEmbedder,
+  OpenAICompatibleEmbedder,
+  OPENAI_DIM_BY_MODEL,
+  OPENAI_DEFAULT_BASE,
+} from '../../src/core/index/embedder.js';
 import { AgentError, ErrorCodes } from '../../src/core/errors/index.js';
 
 function makeResponse(body: unknown, status = 200): Response {
@@ -236,5 +241,69 @@ describe('DashScopeEmbedder', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ─── T1 · DashScopeEmbedder 泛化为 OpenAICompatibleEmbedder 后的回归 ───
+describe('OpenAICompatibleEmbedder 泛化（T1）', () => {
+  it('DashScopeEmbedder 是 OpenAICompatibleEmbedder 的别名（instanceof 兼容）', () => {
+    expect(DashScopeEmbedder).toBe(OpenAICompatibleEmbedder);
+    const e = new DashScopeEmbedder({ apiKey: 'k', fetchImpl: vi.fn() });
+    expect(e).toBeInstanceOf(OpenAICompatibleEmbedder);
+    expect(e.embed).toBeTypeOf('function');
+  });
+
+  it('OPENAI_DIM_BY_MODEL 覆盖 OpenAI 常见嵌入模型与 DashScope 默认模型', () => {
+    expect(OPENAI_DIM_BY_MODEL['text-embedding-v3']).toBe(1024);
+    expect(OPENAI_DIM_BY_MODEL['text-embedding-3-small']).toBe(1536);
+    expect(OPENAI_DIM_BY_MODEL['text-embedding-3-large']).toBe(3072);
+  });
+
+  it.each([
+    ['text-embedding-3-small', 1536],
+    ['text-embedding-3-large', 3072],
+    ['text-embedding-v3', 1024],
+  ])('未显式维度时按模型查表：%s → %i 维', (model, dim) => {
+    const e = new OpenAICompatibleEmbedder({ apiKey: 'k', model, fetchImpl: vi.fn() });
+    expect(e.dimension).toBe(dim);
+  });
+
+  it('模型名查表大小写不敏感', () => {
+    const e = new OpenAICompatibleEmbedder({ apiKey: 'k', model: 'Text-Embedding-3-Small', fetchImpl: vi.fn() });
+    expect(e.dimension).toBe(1536);
+  });
+
+  it('未知模型回落默认 1024 维', () => {
+    const e = new OpenAICompatibleEmbedder({ apiKey: 'k', model: 'my-unknown-embedder', fetchImpl: vi.fn() });
+    expect(e.dimension).toBe(1024);
+  });
+
+  it('显式 dimension 优先于维度表', () => {
+    const e = new OpenAICompatibleEmbedder({
+      apiKey: 'k',
+      model: 'text-embedding-3-small',
+      dimension: 64,
+      fetchImpl: vi.fn(),
+    });
+    expect(e.dimension).toBe(64);
+  });
+
+  it('未显式 baseUrl 时默认百炼兼容端点（向后兼容）', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(makeResponse({ data: [{ embedding: [0.1], index: 0 }] }));
+    const e = new OpenAICompatibleEmbedder({ apiKey: 'k', fetchImpl: fetchMock as unknown as typeof fetch });
+    await e.embed(['a']);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings');
+  });
+
+  it('OPENAI_DEFAULT_BASE 供 openai-compatible 分支作为默认端点', async () => {
+    expect(OPENAI_DEFAULT_BASE).toBe('https://api.openai.com/v1');
+    const fetchMock = vi.fn().mockResolvedValue(makeResponse({ data: [{ embedding: [0.1], index: 0 }] }));
+    const e = new OpenAICompatibleEmbedder({
+      apiKey: 'k',
+      baseUrl: OPENAI_DEFAULT_BASE,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    await e.embed(['a']);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.openai.com/v1/embeddings');
   });
 });

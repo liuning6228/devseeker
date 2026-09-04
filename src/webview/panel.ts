@@ -123,7 +123,9 @@ import {
   CodebaseIndex,
   Bm25CodebaseIndex,
   DashScopeEmbedder,
+  OpenAICompatibleEmbedder,
   OllamaEmbedder,
+  OPENAI_DEFAULT_BASE,
   WorkerEmbedder,
   defaultIndexStorePath,
   defaultBm25IndexStorePath,
@@ -636,6 +638,13 @@ export class DualMindChatPanel {
       (e) => {
         if (!e.affectsConfiguration('devSeeker')) return;
         if (e.affectsConfiguration('devSeeker.codebaseIndex')) {
+          // C-0 · 嵌入引擎配置已变：旧 embedder 缓存（codebase/memory 共享实例）必须失效，
+          // 否则自动重建仍用旧 provider 实例重建索引，会话内切换配置永不生效
+          this._embedderCache = undefined;
+          // C-0 补全 · MemoryManager/PrefetchEngine 在构造时捕获 embedder 引用，不重建会继续用旧
+          // provider/旧 key 做记忆向量化与检索；MemoryStore 写盘即时，重建无数据丢失
+          this.memoryManager = undefined;
+          this.prefetchEngine = undefined;
           this.pushEmbedConfig();
           if (embedReindexTimer) clearTimeout(embedReindexTimer);
           embedReindexTimer = setTimeout(() => {
@@ -1291,6 +1300,7 @@ export class DualMindChatPanel {
       type: 'embed_config',
       payload: {
         embedProvider: (cfg.get<string>('codebaseIndex.embedProvider', 'local-bert') || 'local-bert').trim(),
+        embedApiKeySet: (explicit('embedApiKey') ?? '') !== '',
         embedBaseUrl: explicit('embedBaseUrl') ?? '',
         embedModel: explicit('embedModel') ?? '',
         embedDimension: Number(explicit('embedDimension')) || 0,
@@ -1302,7 +1312,14 @@ export class DualMindChatPanel {
 
   /** 处理 webview 发来的索引配置单字段变更（空串 = 清除显式配置回落引擎默认；数字做合法性校验） */
   private handleUpdateEmbedConfig(
-    field: 'embedProvider' | 'embedBaseUrl' | 'embedModel' | 'embedDimension' | 'embedBatchSize' | 'embedTimeoutMs',
+    field:
+      | 'embedProvider'
+      | 'embedApiKey'
+      | 'embedBaseUrl'
+      | 'embedModel'
+      | 'embedDimension'
+      | 'embedBatchSize'
+      | 'embedTimeoutMs',
     value: string | number,
   ): void {
     const cfg = vscode.workspace.getConfiguration('devSeeker.codebaseIndex');
@@ -1330,6 +1347,64 @@ export class DualMindChatPanel {
     );
   }
 
+  /** T5 · 索引探活：按当前配置构造 embedder（不缓存）嵌入 1 条，结果回推 webview */
+  private async handleProbeEmbed(): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('devSeeker');
+    const fail = (message: string) =>
+      this.post({ type: 'embed_probe_result', payload: { ok: false, message } });
+    try {
+      const provider = (
+        cfg.get<string>('codebaseIndex.embedProvider', 'local-bert') || 'local-bert'
+      ).trim();
+      if (provider === 'local-bert' || provider === 'bm25') {
+        const mode = provider === 'local-bert' ? 'local-bert（本地模型）' : 'bm25（词法索引）';
+        this.post({ type: 'embed_probe_result', payload: { ok: true, message: `${mode} 无需云端探活` } });
+        return;
+      }
+      if (provider === 'ollama') {
+        const embedder = this.buildOllamaEmbedder(cfg);
+        const online = await embedder.probe();
+        this.post({
+          type: 'embed_probe_result',
+          payload: {
+            ok: online,
+            message: online ? `Ollama 在线：${embedder.modelId}（${embedder.dimension} 维）` : 'Ollama 服务不可达，请确认已启动',
+          },
+        });
+        return;
+      }
+      // dashscope / openai-compatible：真实嵌入 1 条验证（12s 兜底超时，避免误等配置的 60s）
+      const embedder = this.buildOpenAICompatibleEmbedder(
+        cfg,
+        provider === 'dashscope' ? 'dashscope' : 'openai-compatible',
+      );
+      const probePromise = embedder.embed(['ping']);
+      // 竞态安全：12s 兜底超时先 reject 后，原始 promise 仍可能稍后 reject（内部 60s abort/retry），
+      // 挂空 catch 抑制 unhandled rejection，探测结果一律以 race 结果为准
+      probePromise.catch(() => {});
+      const out = await Promise.race([
+        probePromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('探测超时（12s），请检查网络或端点配置')), 12_000),
+        ),
+      ]);
+      const dim = out.vectors[0]?.length;
+      this.post({
+        type: 'embed_probe_result',
+        payload: {
+          ok: out.vectors.length === 1,
+          message:
+            out.vectors.length === 1
+              ? `连通成功：${embedder.modelId}（${dim} 维）`
+              : `响应异常：未返回向量（${out.vectors.length} 条）`,
+          dimension: dim,
+        },
+      });
+    } catch (e) {
+      fail((e as Error).message || String(e));
+    }
+  }
+
   /**
    * 索引配置变更后触发一次自动重索引：
    * 清除 24h 防重跑 marker（嵌入引擎/维度已变，旧 marker 失效），
@@ -1338,6 +1413,8 @@ export class DualMindChatPanel {
   private async triggerReindexOnEmbedChange(): Promise<void> {
     try {
       await this.context.workspaceState.update(AUTO_INDEX_MARKER_KEY, 0);
+      // T4 · 配置变更触发重建的 UI 预告：告知重建原因（耗时/费用预期）
+      void vscode.window.showInformationMessage('嵌入模型配置已变更，正在重建代码库索引…');
       const outcome = await maybeAutoReindex({
         context: this.context,
         log,
@@ -1492,6 +1569,10 @@ export class DualMindChatPanel {
 
       case 'update_embed_config':
         this.handleUpdateEmbedConfig(msg.field, msg.value);
+        break;
+
+      case 'probe_embed':
+        void this.handleProbeEmbed();
         break;
 
       case 'new_session':
@@ -3766,8 +3847,11 @@ export class DualMindChatPanel {
       this._embedderCache = embedder;
       return embedder;
     }
-    // dashscope
-    const embedder = this.buildDashScopeEmbedder(config);
+    // dashscope / openai-compatible（OpenAI 兼容协议，T1 泛化）
+    const embedder = this.buildOpenAICompatibleEmbedder(
+      config,
+      provider === 'dashscope' ? 'dashscope' : 'openai-compatible',
+    );
     this._embedderCache = embedder;
     return embedder;
   }
@@ -3776,7 +3860,7 @@ export class DualMindChatPanel {
    * 同步构造 embedder（fetch_content::getEmbedder 回调专用）。
    * - 已缓存 → 直接返回
    * - local-bert 未预热 → 返回 undefined（fetch_content relevance 会自动 fallback 到关键词策略）
-   * - dashscope → 同步构造 client
+   * - dashscope / openai-compatible → 同步构造 client
    */
   private buildEmbedderSync(
     config: vscode.WorkspaceConfiguration,
@@ -3785,10 +3869,12 @@ export class DualMindChatPanel {
     const provider = (
       config.get<string>('codebaseIndex.embedProvider', 'local-bert') || 'local-bert'
     ).trim();
-    if (provider !== 'dashscope' && provider !== 'ollama') return undefined;
+    if (provider !== 'dashscope' && provider !== 'ollama' && provider !== 'openai-compatible') return undefined;
     try {
       const embedder =
-        provider === 'ollama' ? this.buildOllamaEmbedder(config) : this.buildDashScopeEmbedder(config);
+        provider === 'ollama'
+          ? this.buildOllamaEmbedder(config)
+          : this.buildOpenAICompatibleEmbedder(config, provider as 'dashscope' | 'openai-compatible');
       this._embedderCache = embedder;
       return embedder;
     } catch {
@@ -3812,26 +3898,39 @@ export class DualMindChatPanel {
     });
   }
 
-  private buildDashScopeEmbedder(
+  /** 同步构造 OpenAI 兼容 Embedder（dashscope / openai-compatible 共用，T1 泛化）。 */
+  private buildOpenAICompatibleEmbedder(
     config: vscode.WorkspaceConfiguration,
-  ): DashScopeEmbedder {
-    const apiKey = config.get<string>('qwenVl.apiKey', '').trim();
+    provider: 'dashscope' | 'openai-compatible',
+  ): OpenAICompatibleEmbedder {
+    // T2 · 独立密钥优先（embedApiKey），为空回退 qwenVl.apiKey 兼容存量配置
+    const apiKey =
+      config.get<string>('codebaseIndex.embedApiKey', '').trim() ||
+      config.get<string>('qwenVl.apiKey', '').trim();
     if (!apiKey) {
       throw new AgentError({
         code: ErrorCodes.PROVIDER_AUTH_INVALID_API_KEY,
         message:
-          '建立代码库索引需要 DashScope API Key。请在 VSCode 设置中填入 devSeeker.qwenVl.apiKey（与 Qwen-VL 共用同一密钥）。',
+          '建立代码库索引需要 Embedding API Key。请在 VSCode 设置中填入 devSeeker.codebaseIndex.embedApiKey（dashscope 也可继续用 devSeeker.qwenVl.apiKey）。',
       });
     }
+    const embedBaseUrl = config.get<string>('codebaseIndex.embedBaseUrl', '').trim();
+    // dashscope 保留 qwenVl.baseUrl 回退（存量行为）；openai-compatible 默认 OpenAI 官方端点
     const baseUrl =
-      config.get<string>('codebaseIndex.embedBaseUrl', '').trim() ||
-      config.get<string>('qwenVl.baseUrl', '').trim();
-    const model = config.get<string>('codebaseIndex.embedModel', 'text-embedding-v3').trim();
-    const dimension = config.get<number>('codebaseIndex.embedDimension', 1024);
+      embedBaseUrl ||
+      (provider === 'dashscope' ? config.get<string>('qwenVl.baseUrl', '').trim() : OPENAI_DEFAULT_BASE);
+    // T1/A · 维度自适应接线（设计文档警告点）：未显式配置 embedDimension 时必须传 undefined，
+    // 由 OpenAICompatibleEmbedder 内部按模型查 OPENAI_DIM_BY_MODEL（3-small=1536 / 3-large=3072）；
+    // 否则写死 1024 会把 3-small 强制成 1024 维，服务端返回 1536 向量 → store 维度校验直接失败
+    const dimension = config.get<number>('codebaseIndex.embedDimension');
+    // T1/A · openai-compatible 分支未配模型时默认 OpenAI 官方 text-embedding-3-small（dashscope 保留 text-embedding-v3）
+    const model =
+      config.get<string>('codebaseIndex.embedModel')?.trim() ||
+      (provider === 'openai-compatible' ? 'text-embedding-3-small' : 'text-embedding-v3');
     const batchSize = config.get<number>('codebaseIndex.embedBatchSize', 10);
-    // v1.0.2：允许用户覆盖超时时间（默认 60s），用于 DashScope 冷启动 / 慢网络场景
+    // v1.0.2：允许用户覆盖超时时间（默认 60s），用于服务端冷启动 / 慢网络场景
     const timeoutMs = config.get<number>('codebaseIndex.embedTimeoutMs', 60000);
-    return new DashScopeEmbedder({
+    return new OpenAICompatibleEmbedder({
       apiKey,
       baseUrl: baseUrl || undefined,
       model,
