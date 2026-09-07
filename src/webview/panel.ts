@@ -136,12 +136,14 @@ import {
 import { maybeAutoReindex, AUTO_INDEX_MARKER_KEY } from '../core/index/auto-indexer.js';
 import { FusionSearcher, type SearchSource } from '../core/index/fusion-searcher.js';
 import { GraphIndex, GraphSearchSource } from '../core/index/graph-index.js';
+import { GraphFileSync, buildGraphIndex } from '../core/index/graph-sync.js';
 import { defaultIndexSqlitePath } from '../core/storage/sqlite-db.js';
 import { KnowledgeIndex } from '../core/knowledge/index.js';
 import { VSCodeLspBridge, type LspBridge } from '../core/lsp/index.js';
 import { VSCodeProblemsBridge, type ProblemsBridge } from '../core/problems/index.js';
 import { MemoryManager, BuiltinMemoryProvider, enhanceWithVectorMatch, renderTaskContextSection, buildFrozenSnapshot, PrefetchEngine } from '../core/memory/index.js';
 import { buildMemoryTreeBlock } from '../core/memory/explore-inject.js';
+import { buildCodeHintsBlock, buildKnowledgeHintsBlock, type HintHit } from '../core/index/context-hints.js';
 import type { MemoryExtractorFn } from '../core/memory/index.js';
 import { formatApprovedPlanXml, appendPlanToSystemPrompt, formatSpecXml, formatSpecTasksXml } from '../core/task/plan-injector.js';
 import { SpecManager, type SpecDocument } from '../core/task/spec-manager.js';
@@ -208,6 +210,21 @@ const LAST_REINDEX_FILES_SCANNED_KEY = 'devSeeker.index.lastFilesScanned.v1';
 const TODO_LIST_KEY = 'devSeeker.todoList.v1';
 // B-P1-13 · M10.1 首轮标记：workspace_tree 仅在会话首轮注入，避免循环占用 token。
 const HAS_EMITTED_WORKSPACE_TREE_KEY = 'devSeeker.hasEmittedWorkspaceTree.v1';
+
+// P3 接线补全 · 参与索引监听的扩展名集合（源码 + 配置文件 + 文档）：
+// fsWatcher 增量监听与 graph 全量构建共用同一判定
+const CODE_INDEX_EXTS = new Set([
+  '.ts','.tsx','.js','.jsx','.mjs','.cjs','.py','.go','.rs','.java',
+  '.kt','.c','.h','.cpp','.hpp','.cc','.cs','.swift','.rb','.php',
+  '.vue','.svelte','.html','.css','.scss','.less','.json','.yml','.yaml',
+  '.toml','.md','.sh','.ps1',
+]);
+
+/** 判定相对路径是否属于可索引文件 */
+function isIndexableCodeFile(relPath: string): boolean {
+  const ext = relPath.slice(relPath.lastIndexOf('.')).toLowerCase();
+  return CODE_INDEX_EXTS.has(ext);
+}
 
 // W3.6 · DEFAULT_SYSTEM_PROMPT 已迁移到 src/core/prompts/layers/identity.ts（L0 层）
 // 原地拼接逻辑由 PromptBuilder 负责，下方 buildSystemPrompt() 仅做数据采集。
@@ -278,6 +295,12 @@ export class DualMindChatPanel {
   /** P3 补齐 · GraphIndex 实例（懒加载，与 codebase 共用同一 SQLite 文件） */
   private graphIndex: GraphIndex | undefined;
   private graphIndexPromise: Promise<GraphIndex> | undefined;
+  /** P3 接线补全 · 图全量构建 promise（防重入；构建失败清空后后续轮可重试） */
+  private graphBuildPromise: Promise<void> | undefined;
+  /** P3 接线补全 · 首次初始化失败后置位：graph 源本会话禁用，避免每次搜索重试打开数据库 */
+  private graphIndexFailed = false;
+  /** P3 接线补全 · 首次全量构建尝试后置位：空图/失败只尝试一次，避免每次搜索触发全库扫描 */
+  private graphBuildAttempted = false;
   /** LSP 桥接器（依赖 VSCode 工作区；未打开工作区时为 undefined） */
   private lspBridge: LspBridge | undefined;
   /** Problems 桥接器（依赖 VSCode workspaceRoot；未打开工作区时为 undefined） */
@@ -411,9 +434,10 @@ export class DualMindChatPanel {
     );
     // search_codebase 工具注入闭包，以便动态获取当前索引
     // P3 · 融合搜索：优先走 FusionSearcher，降级到单路语义搜索
-    const fusionSearcher = new FusionSearcher();
+    // T1 · 提升为实例字段：search_codebase 工具与 <code_hints> 注入共用同一实例
+    this.fusionSearcher = new FusionSearcher();
     // 注册 codebase 搜索源（语义向量）
-    fusionSearcher.registerSource({
+    this.fusionSearcher.registerSource({
       name: 'codebase',
       search: async (query, topK) => {
         const idx = this.codebaseIndex;
@@ -423,7 +447,7 @@ export class DualMindChatPanel {
       size: () => this.codebaseIndex?.size() ?? 0,
     });
     // P3 补齐 · 注册 graph 搜索源（代码调用关系图）
-    fusionSearcher.registerSource({
+    this.fusionSearcher.registerSource({
       name: 'graph',
       search: async (query, topK) => {
         const gIdx = await this.getGraphIndex();
@@ -436,7 +460,7 @@ export class DualMindChatPanel {
       size: () => this.graphIndex?.size() ?? 0,
     });
     // P3 补齐 · 注册 knowledge 搜索源（私有知识库 BM25）
-    fusionSearcher.registerSource({
+    this.fusionSearcher.registerSource({
       name: 'knowledge',
       search: async (query, topK) => {
         try {
@@ -450,7 +474,10 @@ export class DualMindChatPanel {
     this.toolRegistry.register(
       new SearchCodebaseTool({
         getIndex: () => this.codebaseIndex,
-        getFusionSearcher: () => fusionSearcher.getReadySourceCount() > 0 ? fusionSearcher : undefined,
+        getFusionSearcher: () =>
+          this.fusionSearcher && this.fusionSearcher.getReadySourceCount() > 0
+            ? this.fusionSearcher
+            : undefined,
       }),
     );
     // W14.2 · search_knowledge 工具：懒加载私有知识库（.devseeker/knowledge/**/*.md）
@@ -3658,6 +3685,52 @@ export class DualMindChatPanel {
         if (!debugMode) this.memoryTreeEmittedThisSession = true;
       }
     }
+
+    // T1 · 代码检索提示注入：userQuery 存在且融合搜索就绪 → 自动检索 top-6 并前置到
+    // system prompt（降低 agent 探索轮次）。1s 超时护栏：e5-small query 向量化有冷启动
+    // 延迟，超时/未就绪/异常只跳过本轮注入，绝不拖慢主流程（与 debugContext 同款软失败）。
+    let codeHintsBlock: string | undefined;
+    let knowledgeHintsBlock: string | undefined;
+    if (options.userQuery && workspaceRoot2) {
+      try {
+        const fusion = this.fusionSearcher;
+        if (fusion && fusion.getReadySourceCount() > 0) {
+          const fused = await withTimeout(fusion.search(options.userQuery, 6), 1000);
+          if (fused.hits.length > 0) {
+            const filled = await this.fillHintTexts(fused.hits, workspaceRoot2);
+            codeHintsBlock = buildCodeHintsBlock(options.userQuery, filled);
+          }
+        }
+      } catch (e) {
+        log.warn({ err: String(e) }, 'buildSystemPrompt(codeHints) failed; continue');
+      }
+
+      // T2 · 知识库提示注入：首轮 / debug 模式直建，尝试过即置位（debug 轮不影响普通轮）
+      try {
+        const debugMode = this.modeManager.getCurrent() === 'debug';
+        if (debugMode || !this.knowledgeHintsEmittedThisSession) {
+          const kIdx = await this.getKnowledgeIndex();
+          if (kIdx && kIdx.size() > 0) {
+            const khits = await kIdx.search(options.userQuery, 3);
+            if (khits.length > 0) {
+              // BM25 索引自带原文 text，不读盘（text 为空条由块构建器过滤）
+              const filled: HintHit[] = khits.map((h) => ({
+                filePath: h.filePath,
+                startLine: h.startLine,
+                endLine: h.endLine,
+                score: h.score,
+                text: h.text ?? '',
+              }));
+              knowledgeHintsBlock = buildKnowledgeHintsBlock(options.userQuery, filled);
+            }
+          }
+          if (!debugMode) this.knowledgeHintsEmittedThisSession = true;
+        }
+      } catch (e) {
+        log.warn({ err: String(e) }, 'buildSystemPrompt(knowledgeHints) failed; continue');
+      }
+    }
+
     const { full } = PromptBuilder.build({
       mode: this.modeManager.getCurrent(),
       skills,
@@ -3702,7 +3775,9 @@ export class DualMindChatPanel {
     let result = full;
 
     // M4/T3 · 预取命中与记忆树骨架注入（修复 M4 预取结果从未进入上下文的接线缺失）：
-    // 记忆树 → 任务相关记忆骨架；prefetch → 上轮讨论预取的记忆；均追加在 spec 控制信息之前
+    // 检索提示 → 记忆树 → 预取记忆 → spec（代码命中优先级最高，先注入）
+    if (codeHintsBlock) result = result + '\n\n' + codeHintsBlock;
+    if (knowledgeHintsBlock) result = result + '\n\n' + knowledgeHintsBlock;
     if (memoryTreeBlock) result = result + '\n\n' + memoryTreeBlock;
     if (prefetchBlock) result = result + '\n\n' + prefetchBlock;
 
@@ -3714,6 +3789,38 @@ export class DualMindChatPanel {
     }
 
     return result;
+  }
+
+  /**
+   * T1 · 读盘填充命中 text：索引原文 ≥80 字符直接复用；否则按行范围从磁盘读取
+   * （与 search_codebase.executeFusion 同款策略；缺失/读失败给友好 fallback）。
+   */
+  private async fillHintTexts(
+    hits: Array<{
+      filePath: string;
+      startLine: number;
+      endLine: number;
+      text?: string;
+      score?: number;
+      rrfScore?: number;
+    }>,
+    workspaceRoot: string,
+  ): Promise<HintHit[]> {
+    const out: HintHit[] = [];
+    for (const h of hits) {
+      let text = h.text ?? '';
+      if (text.length <= 80) {
+        text = await readHintText(path.join(workspaceRoot, h.filePath), h.startLine, h.endLine);
+      }
+      out.push({
+        filePath: h.filePath,
+        startLine: h.startLine,
+        endLine: h.endLine,
+        score: h.score ?? h.rrfScore ?? 0,
+        text,
+      });
+    }
+    return out;
   }
 
   /** 懒加载 / 初始化 CodebaseIndex（复用已有实例或创建新实例） */
@@ -3774,17 +3881,88 @@ export class DualMindChatPanel {
    * 目录不存在或打开失败时返回 undefined（图索引为可选增强）。
    */
   async getGraphIndex(): Promise<GraphIndex | undefined> {
-    if (this.graphIndex) return this.graphIndex;
+    if (this.graphIndex) {
+      // P3 接线补全 · 索引常驻后确保全量构建过（空图时后台建图，防重入）
+      void this.ensureGraphBuilt();
+      return this.graphIndex;
+    }
     if (this.graphIndexPromise) return this.graphIndexPromise;
+    // init 失败后本会话禁用 graph 源（原实现每次搜索都会重试打开数据库，形成热循环）
+    if (this.graphIndexFailed) return undefined;
 
     this.graphIndexPromise = this.initGraphIndex().catch((e) => {
-      this.graphIndexPromise = undefined;
+      this.graphIndexFailed = true;
       log.warn({ err: String(e) }, '[P3] GraphIndex init failed; graph source disabled');
       return undefined as unknown as GraphIndex;
     });
-    this.graphIndex = await this.graphIndexPromise;
+    const idx = await this.graphIndexPromise;
     this.graphIndexPromise = undefined;
+    if (idx) {
+      this.graphIndex = idx;
+      void this.ensureGraphBuilt();
+    }
     return this.graphIndex;
+  }
+
+  /**
+   * P3 接线补全 · 图索引全量构建（后台执行，防重入）。
+   * 仅空图（size() === 0）时构建；失败只打日志，graph 源保持空、不影响主流程。
+   */
+  private ensureGraphBuilt(): Promise<void> {
+    if (this.graphBuildPromise) return this.graphBuildPromise;
+    this.graphBuildPromise = this.runGraphBuild().catch((e) => {
+      log.warn({ err: String(e) }, '[P3] graph full build failed; graph source stays empty');
+    }).finally(() => {
+      this.graphBuildPromise = undefined;
+    });
+    return this.graphBuildPromise;
+  }
+
+  /** P3 接线补全 · 全量构建执行体：文件集 → 逐个提取 → 跨文件解析 */
+  private async runGraphBuild(): Promise<void> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const gIdx = this.graphIndex;
+    if (!gIdx || !workspaceRoot || gIdx.size() > 0) return;
+    // 本会话只尝试一次全量构建：空工作区 / 构建结果为空 / 失败都置位，
+    // 避免 getGraphIndex 每次搜索触发 findFiles 全库扫描（500 上限兜底）
+    if (this.graphBuildAttempted) return;
+    try {
+      // 文件集优先复用 codebase 索引已收录清单（同一文件集、含过滤）；codebase 索引
+      // 未建（embedder 失败/未触发）时退化为 findFiles 全工作区扫描（上限 500，
+      // 复用 workspace_tree 同款过滤）。
+      let files: string[] = [];
+      try {
+        const cIdx = await this.getCodebaseIndex();
+        files = cIdx.listIndexedFiles();
+      } catch {
+        // codebase 索引不可用 → 走 findFiles 兜底
+      }
+      if (files.length === 0) {
+        const uris = await vscode.workspace.findFiles(
+          '**/*',
+          '{**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.turbo/**,**/coverage/**}',
+          500,
+        );
+        files = uris
+          .map((f) => vscode.workspace.asRelativePath(f, false))
+          .filter((p) => isIndexableCodeFile(p));
+      }
+      if (files.length === 0) return;
+
+      const stats = await buildGraphIndex(gIdx, workspaceRoot, files, {
+        onProgress: (done, total) => {
+          if (done === total || done % 50 === 0) {
+            log.info({ done, total }, '[P3] graph build progress');
+          }
+        },
+      });
+      log.info(
+        { files: files.length, filesWithSymbols: stats.filesWithSymbols, symbols: stats.symbols },
+        '[P3] graph index built in background',
+      );
+    } finally {
+      this.graphBuildAttempted = true;
+    }
   }
 
   private async initGraphIndex(): Promise<GraphIndex> {
@@ -4277,6 +4455,12 @@ export class DualMindChatPanel {
   /** T3 · 本会话是否已尝试过直建记忆树骨架（防单文件/无 workspace 时每轮重复注入） */
   private memoryTreeEmittedThisSession = false;
 
+  /** T1 · 融合搜索实例（构造器创建；search_codebase 工具与 <code_hints> 注入共用） */
+  private fusionSearcher: FusionSearcher | undefined;
+
+  /** T2 · 本会话是否已尝试过直建知识库提示（首轮/debug 尝试，防每轮重复检索注入） */
+  private knowledgeHintsEmittedThisSession = false;
+
   /**
    * 从 VSCode config 构建联网搜索 ProviderRegistry（W6b3 + W8.11）。
    * 每次调用都读最新配置，使 apiKeys 变更无需重启。
@@ -4674,16 +4858,8 @@ export class DualMindChatPanel {
   private registerFileWatcher(): void {
     // B-P2-4 · 用于包含外部改动（git pull / 外部编辑器）的索引塑念 IndexWatcher；
     // onDidSaveTextDocument 仍保留，用于 Rules/Skills/Hooks 配置的即时失效。
-    const codeExts = new Set([
-      '.ts','.tsx','.js','.jsx','.mjs','.cjs','.py','.go','.rs','.java',
-      '.kt','.c','.h','.cpp','.hpp','.cc','.cs','.swift','.rb','.php',
-      '.vue','.svelte','.html','.css','.scss','.less','.json','.yml','.yaml',
-      '.toml','.md','.sh','.ps1',
-    ]);
-    const isCodeFile = (relPath: string): boolean => {
-      const ext = relPath.slice(relPath.lastIndexOf('.')).toLowerCase();
-      return codeExts.has(ext);
-    };
+    // 扩展名判定提升为模块级：fsWatcher 增量与 graph 全量构建共用
+    const isCodeFile = isIndexableCodeFile;
     const indexWatcher = new IndexFileWatcher({
       getIndex: async () => {
         try { return await this.getCodebaseIndex(); } catch { return undefined; }
@@ -4693,6 +4869,27 @@ export class DualMindChatPanel {
       debounceMs: 2000,
     });
     this.disposables.push({ dispose: () => indexWatcher.dispose() });
+
+    // P3 接线补全 · 图索引增量更新：与 codebase 同款 watcher，但更新前需 AST 提取
+    // （GraphFileSync 适配：读文件 → extractGraphData → 写图 + 跨文件解析）。
+    // 空图守卫在 flush 内（size()===0 跳过），全量构建由 getGraphIndex 后台触发。
+    const graphWatcher = new IndexFileWatcher({
+      getIndex: async () => {
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root) return undefined;
+        try {
+          const gIdx = await this.getGraphIndex();
+          if (!gIdx) return undefined;
+          return new GraphFileSync(gIdx, root);
+        } catch {
+          return undefined;
+        }
+      },
+      isCodeFile,
+      onError: (err, file, op) => log.warn({ err: String(err), file, op }, 'GraphWatcher op failed'),
+      debounceMs: 2000,
+    });
+    this.disposables.push({ dispose: () => graphWatcher.dispose() });
 
     // 全工作区文件监听（包含外部改动）
     const fsWatcher = vscode.workspace.createFileSystemWatcher('**/*');
@@ -4704,15 +4901,24 @@ export class DualMindChatPanel {
       fsWatcher,
       fsWatcher.onDidCreate((uri) => {
         const rel = toRel(uri);
-        if (rel) indexWatcher.schedule(rel, 'update');
+        if (rel) {
+          indexWatcher.schedule(rel, 'update');
+          graphWatcher.schedule(rel, 'update');
+        }
       }),
       fsWatcher.onDidChange((uri) => {
         const rel = toRel(uri);
-        if (rel) indexWatcher.schedule(rel, 'update');
+        if (rel) {
+          indexWatcher.schedule(rel, 'update');
+          graphWatcher.schedule(rel, 'update');
+        }
       }),
       fsWatcher.onDidDelete((uri) => {
         const rel = toRel(uri);
-        if (rel) indexWatcher.schedule(rel, 'remove');
+        if (rel) {
+          indexWatcher.schedule(rel, 'remove');
+          graphWatcher.schedule(rel, 'remove');
+        }
       }),
     );
 
@@ -5342,6 +5548,45 @@ export class DualMindChatPanel {
 }
 
 // ─────────── W7b4b · helpers ───────────
+
+/**
+ * T1 · 带超时的 Promise 包装：超时 reject 交由调用方 catch（原 promise 结果丢弃）。
+ * 用于检索提示注入的护栏：e5-small query 向量化冷启动不应拖慢首轮构建。
+ */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** 读取文件指定行范围的内容（1-based，闭区间）；缺失/失败给友好 fallback 文本 */
+async function readHintText(filePath: string, startLine: number, endLine: number): Promise<string> {
+  try {
+    const content = await fs.readFile(filePath, 'utf-8');
+    const lines = content.split(/\r?\n/);
+    if (startLine < 1 || startLine > lines.length) {
+      return `[invalid line range: ${startLine}-${endLine}, file has ${lines.length} lines]`;
+    }
+    const selected = lines.slice(startLine - 1, endLine);
+    return selected.join('\n');
+  } catch (e: unknown) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') {
+      return `[file deleted: ${filePath}]`;
+    }
+    return `[error reading ${filePath}: ${err.message}]`;
+  }
+}
 
 /**
  * P1-4 · 从用户输入中提取候选报错文件路径（相对/绝对，常见源码扩展名）。

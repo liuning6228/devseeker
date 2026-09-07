@@ -52,6 +52,7 @@ export function buildSyncTurnExtractionPrompt(
 - 只提取真正有价值的信息：踩坑记录、技术决策、项目知识、工具使用经验
 - 忽略寒暄、重复信息、已在记忆中存在的内容
 - 每条记忆必须具体、可操作，不要泛泛而谈
+- 涉及代码/实现结论的记忆，content 中必须包含具体文件或模块名（便于后续任务直接定位）
 - 最多提取 ${SYNC_TURN_MAX_MEMORIES} 条
 
 ## 类别选择

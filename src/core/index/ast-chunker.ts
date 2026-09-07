@@ -117,8 +117,24 @@ interface Parser {
 export async function ensureWasmModule(): Promise<void> {
   if (parserInitialized) return;
   try {
-    const Parser = require('web-tree-sitter');
-    await Parser.init();
+    // 兼容 web-tree-sitter 0.23-0.24（模块直接导出 Parser 类）与 0.25+
+    // （模块导出 { Parser, Language, ... } 命名空间）：init 是类的静态方法。
+    // 另需兼容 vitest 等 ESM interop 把 CJS 类导出包装为 { default: Ctor } 的形态。
+    const mod = require('web-tree-sitter');
+    const ParserCtor = mod.Parser ?? mod.default ?? mod;
+    if (typeof ParserCtor.init === 'function') {
+      await ParserCtor.init();
+      // 0.24 的 Emscripten UMD 尾部在 init() 完成时执行 `module.exports = Module`，
+      // 会把 require.cache 的导出覆盖为内部 Module 对象，同一进程后续 require 拿不到 Parser 类。
+      // 恢复 init 前的原始导出，保证二次 require 形态稳定（0.25+ 无此行为，恢复同样无害）。
+      try {
+        const resolved = require.resolve('web-tree-sitter');
+        const cached = require.cache[resolved];
+        if (cached) cached.exports = mod;
+      } catch {
+        /* ignore: 恢复失败时按原样回退 */
+      }
+    }
     parserInitialized = true;
   } catch (e) {
     log.warn({ err: (e as Error).message }, 'web-tree-sitter init failed, falling back to line-based chunker');
@@ -134,13 +150,18 @@ export async function getParser(langId: string): Promise<Parser | null> {
   const wasmFile = LANG_TO_WASM[langId];
   if (!wasmFile) return null;
   try {
-    const Parser = require('web-tree-sitter');
-    const parser = new Parser();
+    const mod = require('web-tree-sitter');
+    // 0.25+ 命名空间导出 { Parser, Language }；旧版直接导出带静态 Language 的 Parser 类
+    // （vitest interop 下表现为 { default: Ctor }，ParserCtor 需兼容三种形态）
+    const ParserCtor = mod.Parser ?? mod.default ?? mod;
+    const LanguageCtor = mod.Language ?? ParserCtor.Language;
+    const parser = new ParserCtor();
     // 从 tree-sitter-wasms 包中加载 WASM 语法文件
     const wasmPath = require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
     const fs = require('node:fs');
-    const wasmBytes = fs.readFileSync(wasmPath).buffer as ArrayBuffer;
-    const lang = await Parser.Language.load(wasmBytes);
+    // Language.load 的 input 同时兼容 Uint8Array（含 Buffer 子类）与文件路径：
+    // 直接传 readFileSync 的 Buffer 在 0.24 与 0.26 两种 ABI 下都可用
+    const lang = await LanguageCtor.load(fs.readFileSync(wasmPath));
     parser.setLanguage(lang);
     parserCache.set(langId, parser);
     return parser;
@@ -181,12 +202,12 @@ function collectNodes(node: SyntaxNode, queries: string[], result: SyntaxNode[])
   }
 }
 
-function extractTopLevelNodes(root: SyntaxNode, langId: string): SyntaxNode[] {
+function extractTopLevelNodes(root: SyntaxNode, langId: string): SyntaxNode[] | null {
   const queries = LANG_QUERIES[langId];
-  if (!queries) return [root];
+  if (!queries) return null;
   const result: SyntaxNode[] = [];
   collectNodes(root, queries, result);
-  if (result.length === 0) return [root];
+  if (result.length === 0) return null;
   return result.sort((a, b) => a.startPosition.row - b.startPosition.row);
 }
 
@@ -195,10 +216,13 @@ function extractTopLevelNodes(root: SyntaxNode, langId: string): SyntaxNode[] {
 const MAX_CHUNK_CHARS = 1600;
 const MIN_CHUNK_CHARS = 80;
 
-function splitLargeNode(node: SyntaxNode, filePath: string, maxChars: number): TextChunk[] {
-  const lines = node.text.split('\n');
+function splitLinesIntoChunks(
+  lines: string[],
+  baseLine: number,
+  filePath: string,
+  maxChars: number,
+): TextChunk[] {
   const result: TextChunk[] = [];
-  const baseLine = node.startPosition.row;
   let cursor = 0;
   while (cursor < lines.length) {
     let end = cursor;
@@ -209,17 +233,20 @@ function splitLargeNode(node: SyntaxNode, filePath: string, maxChars: number): T
       charCount += lineLen;
       end++;
     }
-    const text = lines.slice(cursor, end).join('\n');
     result.push({
       filePath,
       startLine: baseLine + cursor + 1,
       endLine: baseLine + end,
-      text,
+      text: lines.slice(cursor, end).join('\n'),
     });
     cursor = end;
-    if (cursor >= lines.length) break;
   }
   return result;
+}
+
+function splitLargeNode(node: SyntaxNode, filePath: string, maxChars: number): TextChunk[] {
+  // 行级字符滑窗：单 chunk ≤ maxChars（超长单行不拆，保持行完整性）
+  return splitLinesIntoChunks(node.text.split('\n'), node.startPosition.row, filePath, maxChars);
 }
 
 // ─────────── 主入口 ───────────
@@ -265,11 +292,13 @@ export async function astChunkText(
 
   // §8.16.1 · Vue SFC 特殊处理：三层独立 chunk
   if (langId === 'vue') {
-    return chunkVueSfc(filePath, content, options);
+    return await chunkVueSfc(filePath, content, options);
   }
 
   // 尝试 AST 切分；失败时回退
   try {
+    // 与 chunkText 对齐：空/空白内容不产生 chunk（跳过无意义的 WASM parse）
+    if (!content.trim()) return [];
     await ensureWasmModule();
     const parser = await getParser(langId);
     if (!parser) {
@@ -279,6 +308,43 @@ export async function astChunkText(
     const tree = parser.parse(content);
     const root = tree.rootNode;
     const nodes = extractTopLevelNodes(root, langId);
+    // 无语法节点（纯数据/标识符文件）→ 退化为行式切分：
+    // 避免把整个文件包装成带前缀的单个 chunk，稀释向量命中
+    if (!nodes) {
+      return chunkText(filePath, content, options);
+    }
+
+    // 提取节点区间之外的间隙文本（注释 / import / 杂散行）作为独立 chunk，
+    // 保证 AST 切分不丢内容：注释常承载搜索语义（中文说明等），丢注释等于丢索引
+    const coveredRows = new Set<number>();
+    for (const node of nodes) {
+      for (let r = node.startPosition.row; r <= node.endPosition.row; r++) coveredRows.add(r);
+    }
+    const contentLines = content.split('\n');
+    const gapChunks: TextChunk[] = [];
+    let gapStart = -1;
+    const flushGap = (endRow: number): void => {
+      if (gapStart < 0) return;
+      const text = contentLines.slice(gapStart, endRow + 1).join('\n');
+      if (text.trim()) {
+        if (text.length <= maxChars) {
+          gapChunks.push({ filePath, startLine: gapStart + 1, endLine: endRow + 1, text });
+        } else {
+          // 超大间隙（如整块 LICENSE 头注释）按 maxChars 二次切分，
+          // 保持「单 chunk ≤ maxChars」的容量约束
+          gapChunks.push(...splitLinesIntoChunks(contentLines.slice(gapStart, endRow + 1), gapStart, filePath, maxChars));
+        }
+      }
+      gapStart = -1;
+    };
+    for (let r = 0; r < contentLines.length; r++) {
+      if (coveredRows.has(r)) {
+        flushGap(r - 1);
+      } else if (gapStart < 0) {
+        gapStart = r;
+      }
+    }
+    flushGap(contentLines.length - 1);
 
     const chunks: TextChunk[] = [];
 
@@ -304,7 +370,13 @@ export async function astChunkText(
       }
     }
 
-    parser.delete();
+    // 注意：不能在此调用 parser.delete() —— parser 由 parserCache 缓存共享，
+    // 销毁后同语言下次调用 getParser 会拿到已失效实例，parse 时 WASM 内存越界。
+    // parser 生命周期终止于进程退出，无需显式释放。
+
+    // 节点 chunk 与间隙 chunk 合并，按行号排序保持原文顺序
+    chunks.push(...gapChunks);
+    chunks.sort((a, b) => a.startLine - b.startLine);
 
     // 合并过短的尾部 chunk
     if (chunks.length >= 2) {
@@ -330,13 +402,13 @@ export async function astChunkText(
  * 对 Vue SFC 做三层感知切分：<template> / <script> / <style> 各为独立 chunk。
  * 优先使用 tree-sitter-vue WASM（若可用），失败时回退到正则按标签块分割。
  */
-function chunkVueSfc(
+async function chunkVueSfc(
   filePath: string,
   content: string,
   options: ChunkOptions = {},
-): TextChunk[] {
+): Promise<TextChunk[]> {
   // 尝试用 tree-sitter 解析
-  const astChunks = chunkVueSfcWithTreeSitter(filePath, content, options);
+  const astChunks = await chunkVueSfcWithTreeSitter(filePath, content, options);
   if (astChunks) return astChunks;
 
   // 回退到正则按标签块分割
@@ -347,21 +419,25 @@ function chunkVueSfc(
  * 用 tree-sitter-vue WASM 解析 Vue SFC 并切分。
  * 返回 null 表示 tree-sitter 不可用，调用方应回退到正则。
  */
-function chunkVueSfcWithTreeSitter(
+async function chunkVueSfcWithTreeSitter(
   filePath: string,
   content: string,
   options: ChunkOptions = {},
-): TextChunk[] | null {
+): Promise<TextChunk[] | null> {
+  // 必须先初始化 WASM 基础设施：vue 可能是本会话首个被处理的文件类型。
+  // 主流程 AST 分支会调 ensureWasmModule，但 vue 先走本分支，不能依赖主流程。
+  await ensureWasmModule();
   if (!parserInitialized) return null;
 
   try {
-    const Parser = require('web-tree-sitter');
-    const parser = new Parser();
+    const mod = require('web-tree-sitter');
+    const ParserCtor = mod.Parser ?? mod.default ?? mod;
+    const LanguageCtor = mod.Language ?? ParserCtor.Language;
+    const parser = new ParserCtor();
     const wasmFile = LANG_TO_WASM.vue!;
     const wasmPath = require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
     const fs = require('node:fs');
-    const wasmBytes = fs.readFileSync(wasmPath).buffer as ArrayBuffer;
-    const lang = Parser.Language.load(wasmBytes);
+    const lang = await LanguageCtor.load(fs.readFileSync(wasmPath));
     parser.setLanguage(lang);
 
     const tree = parser.parse(content);
@@ -409,18 +485,15 @@ function chunkVueSfcWithTreeSitter(
             text: `[vue-script]\n${scriptContent.trim()}`,
           });
         } else {
+          // 按字符上限滑窗切分（与主流程 splitLargeNode 同策略），
+          // 避免 40 行硬编码在长行场景下单个 chunk 超出 maxChars
           const lines = scriptContent.split('\n');
-          for (let i = 0; i < lines.length; i += 40) {
-            const slice = lines.slice(i, i + 40).join('\n');
-            chunks.push({
-              filePath,
-              startLine: scriptNode.startPosition.row + 1 + i,
-              endLine: Math.min(
-                scriptNode.startPosition.row + 1 + i + 39,
-                scriptNode.endPosition.row + 1,
-              ),
-              text: `[vue-script:${i + 1}-${Math.min(i + 40, lines.length)}]\n${slice}`,
-            });
+          const subChunks = splitLinesIntoChunks(lines, scriptNode.startPosition.row, filePath, maxChars);
+          for (const sc of subChunks) {
+            const from = sc.startLine - scriptNode.startPosition.row;
+            const to = sc.endLine - scriptNode.startPosition.row;
+            sc.text = `[vue-script:${from}-${to}]\n${sc.text}`;
+            chunks.push(sc);
           }
         }
       }
@@ -518,17 +591,14 @@ function chunkVueSfcRegex(
           text: `[vue-script]\n${scriptText}`,
         });
       } else {
-        // 按行拆分
+        // 按字符上限滑窗切分（与 AST 分支同策略），避免长行场景超出 maxChars
         const lines = scriptText.split('\n');
-        for (let i = 0; i < lines.length; i += 40) {
-          const slice = lines.slice(i, i + 40).join('\n');
-          const chunkStart = lineOffset + i;
-          chunks.push({
-            filePath,
-            startLine: chunkStart,
-            endLine: chunkStart + Math.min(40, lines.length - i) - 1,
-            text: `[vue-script:${i + 1}-${Math.min(i + 40, lines.length)}]\n${slice}`,
-          });
+        const subChunks = splitLinesIntoChunks(lines, lineOffset - 1, filePath, maxChars);
+        for (const sc of subChunks) {
+          const from = sc.startLine - lineOffset + 1;
+          const to = sc.endLine - lineOffset + 1;
+          sc.text = `[vue-script:${from}-${to}]\n${sc.text}`;
+          chunks.push(sc);
         }
       }
     }

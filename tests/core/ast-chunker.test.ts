@@ -218,4 +218,56 @@ fn sub(a: i32, b: i32) -> i32 {
     const chunks = await astChunkText('short.ts', 'const x = 1;\n');
     expect(chunks.length).toBeGreaterThanOrEqual(1);
   });
+
+  // 节点间隙的超大注释块（> maxChars）按 maxChars 二次切分，且注释内容不丢失
+  it('超大注释间隙按 maxChars 二次切分且内容不丢失', async () => {
+    // 构造一块超过默认 maxChars(1600) 的头部注释（模拟 LICENSE 块）
+    const commentLines = Array.from({ length: 60 }, (_, i) => `// ${i}: ${'y'.repeat(40)}`);
+    const comment = commentLines.join('\n');
+    expect(comment.length).toBeGreaterThan(1600);
+    const code = `${comment}\n\nfunction handle() {\n  return 1;\n}\n`;
+    const chunks = await astChunkText('gap.ts', code);
+    // 注释被切为多个 gap chunk + 函数节点 chunk
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+    // gap chunk（无 `// file:` 上下文头前缀）单块不超过 maxChars
+    for (const c of chunks) {
+      if (!c.text.startsWith('// file:')) {
+        expect(c.text.length).toBeLessThanOrEqual(1600);
+      }
+    }
+    // 注释首尾行与函数文本都保留（切分不丢内容）
+    const allText = chunks.map(c => c.text).join('\n');
+    expect(allText).toContain('// 0: yyyyyyyyy');
+    expect(allText).toContain('// 59: yyyyyyyyy');
+    expect(allText).toContain('function handle');
+    // chunk 按行号有序、无重叠
+    for (let i = 1; i < chunks.length; i++) {
+      expect(chunks[i].startLine).toBeGreaterThanOrEqual(chunks[i - 1].endLine);
+    }
+  });
+
+  // Vue SFC：三层 chunk 输出，且 WASM 可用时优先走 tree-sitter AST 分支
+  it('Vue SFC 输出三层 chunk 且优先走 AST 分支', async () => {
+    const code = `<template>\n  <el-button>Go</el-button>\n</template>\n\n<script setup lang="ts">\nconst msg = 'hello';\nfunction greet() { return msg; }\n</script>\n\n<style scoped>\n.btn { color: red; }\n</style>\n`;
+
+    // WASM 可用时挂 spy 验证 AST 分支被触发（chunkVueSfcWithTreeSitter 内实例化
+    // parser 并 setLanguage 才会调用到）；WASM 不可用环境跳过 spy 断言，输出断言兜底
+    let spy: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const wts: unknown = await import('web-tree-sitter');
+      const ns = wts as { Parser?: { prototype: object }; default?: { prototype: object } };
+      const ParserCtor: unknown = ns.Parser ?? ns.default ?? wts;
+      if (typeof ParserCtor !== 'undefined') {
+        spy = vi.spyOn((ParserCtor as { prototype: object }).prototype, 'setLanguage' as never);
+      }
+    } catch {
+      // tree-sitter 不可用 → 跳过 spy 断言
+    }
+
+    const chunks = await astChunkText('comp.vue', code);
+    expect(chunks.some(c => c.text.startsWith('[vue-template]'))).toBe(true);
+    expect(chunks.some(c => c.text.startsWith('[vue-script'))).toBe(true);
+    expect(chunks.some(c => c.text.startsWith('[vue-style]'))).toBe(true);
+    if (spy) expect(spy).toHaveBeenCalled();
+  });
 });
