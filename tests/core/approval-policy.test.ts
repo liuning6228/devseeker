@@ -98,4 +98,73 @@ describe('decideApproval', () => {
       expect(DEFAULT_POLICY.read_only).toBe('auto');
     });
   });
+
+  describe('command_safety overrides (settings auto-approve)', () => {
+    it('command_safety=safe + safe command → auto (bash read auto)', () => {
+      const r = decideApproval({
+        level: 'destructive',
+        command: 'ls -la',
+        toolName: 'bash',
+        overrides: [{ tool: 'bash', command_safety: 'safe', command_policy: 'auto' }],
+      });
+      expect(r.decision).toBe('auto');
+      expect(r.commandSafety).toBe('safe');
+    });
+    it('command_safety=safe + risky command → override skipped, risky confirm', () => {
+      const r = decideApproval({
+        level: 'destructive',
+        command: 'git push --force',
+        toolName: 'bash',
+        overrides: [{ tool: 'bash', command_safety: 'safe', command_policy: 'auto' }],
+      });
+      expect(r.decision).toBe('confirm');
+      expect(r.commandSafety).toBe('risky');
+    });
+    it('command_safety=risky + risky command → auto (bash write auto)', () => {
+      const r = decideApproval({
+        level: 'destructive',
+        command: 'npm publish',
+        toolName: 'bash',
+        overrides: [{ tool: 'bash', command_safety: 'risky', command_policy: 'auto' }],
+      });
+      expect(r.decision).toBe('auto');
+    });
+    it('command_safety=risky + safe command → override skipped, level table apply', () => {
+      const r = decideApproval({
+        level: 'destructive',
+        command: 'cat package.json',
+        toolName: 'bash',
+        overrides: [{ tool: 'bash', command_safety: 'risky', command_policy: 'auto' }],
+      });
+      expect(r.decision).toBe('confirm');
+    });
+    it('blacklisted command wins over command_safety auto', () => {
+      const r = decideApproval({
+        level: 'destructive',
+        command: 'rm -rf /',
+        toolName: 'bash',
+        overrides: [{ tool: 'bash', command_safety: 'safe', command_policy: 'auto' }],
+      });
+      expect(r.decision).toBe('deny');
+    });
+    it('has_risk=true + safe auto override → still confirm (hard rule)', () => {
+      const r = decideApproval({
+        level: 'destructive',
+        command: 'ls',
+        hasRisk: true,
+        toolName: 'bash',
+        overrides: [{ tool: 'bash', command_safety: 'safe', command_policy: 'auto' }],
+      });
+      expect(r.decision).toBe('confirm');
+    });
+    it('command_safety rule does not apply to other tools', () => {
+      const r = decideApproval({
+        level: 'read_only',
+        command: 'ls',
+        toolName: 'read_file',
+        overrides: [{ tool: 'bash', command_safety: 'safe', command_policy: 'auto' }],
+      });
+      expect(r.decision).toBe('auto'); // 走默认表，不受 bash 规则影响
+    });
+  });
 });

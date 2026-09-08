@@ -119,12 +119,16 @@ export function decideApproval(ctx: ApprovalContext): ApprovalResult {
     for (const o of ctx.overrides) {
       if (!matchToolPattern(ctx.toolName, o.tool)) continue;
 
-      // command_policy 覆写（仅当传了 command 且匹配）
-      if (o.command_policy && ctx.command && o.command_match) {
-        if (matchCommandPattern(ctx.command, o.command_match)) {
+      // command_safety 限定：声明了命令安全级别但当前命令不归属该级别 → 本覆写不生效
+      // （设置页「Bash 只读/写命令自动执行」由该字段驱动）
+      if (o.command_safety !== undefined && o.command_safety !== commandSafety) continue;
+
+      // command_policy 覆写（command_safety 限定或 command_match 匹配时生效）
+      if (o.command_policy && ctx.command) {
+        if (o.command_safety !== undefined || (o.command_match && matchCommandPattern(ctx.command, o.command_match))) {
           return {
             decision: o.command_policy,
-            reason: `approval-policy.yaml override: ${o.tool} 的 command_match 匹配，policy=${o.command_policy}`,
+            reason: `approval-policy.yaml override: ${o.tool} 的 command${o.command_safety ? `_safety=${o.command_safety}` : ' 匹配'}，policy=${o.command_policy}`,
             ...(commandSafety ? { commandSafety } : {}),
           };
         }

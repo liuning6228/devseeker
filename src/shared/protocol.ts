@@ -297,7 +297,21 @@ export type WebviewInboundMessage =
       value: string | number;
     }
   /** 索引探活：按当前配置构造 embedder 嵌入 1 条，结果回推 embed_probe_result */
-  | { type: 'probe_embed' };
+  | { type: 'probe_embed' }
+  /** 审批策略：设置页「审批」Tab 提交变更（即改即写 .devseeker/approval-policy.yaml） */
+  | {
+      type: 'update_approval_policy';
+      values: {
+        /** 默认表字段：auto=自动执行，confirm=需审批（UI 开关仅暴露这两个语义） */
+        read_only?: 'auto' | 'confirm';
+        workspace_write?: 'auto' | 'confirm';
+        network?: 'auto' | 'confirm';
+        /** Bash 只读命令（命令安全级别 safe）自动执行 */
+        bash_read?: boolean;
+        /** Bash 写命令（命令安全级别 risky）自动执行 */
+        bash_write?: boolean;
+      };
+    };
 
 // ─────────── Todo（W7e4 ·   todo_write 对齐） ───────────
 
@@ -362,6 +376,24 @@ export interface SearchConfigPayload {
   bochaKeys: string[];
   /** 默认搜索 Provider */
   defaultProvider: string;
+}
+
+/** 审批策略配置推送 payload（Extension → Webview，设置页「审批」Tab 数据源） */
+export interface ApprovalPolicyConfigPayload {
+  /** 是否已存在 .devseeker/approval-policy.yaml（未手动配置时 UI 展示默认策略） */
+  fileExists: boolean;
+  /** 生效默认表（yaml defaults 未配置项回退内置默认） */
+  defaults: {
+    read_only: 'auto' | 'confirm' | 'deny';
+    workspace_write: 'auto' | 'confirm' | 'deny';
+    destructive: 'auto' | 'confirm' | 'deny';
+    network: 'auto' | 'confirm' | 'deny';
+    external: 'auto' | 'confirm' | 'deny';
+  };
+  /** Bash 只读命令（safe）是否自动执行（yaml overrides 含 bash command_safety=safe 规则） */
+  bashRead: boolean;
+  /** Bash 写命令（risky）是否自动执行（yaml overrides 含 bash command_safety=risky 规则） */
+  bashWrite: boolean;
 }
 
 /** 代码库索引（Embedding）配置推送 payload。数字字段 0/空串 = 未显式配置（使用各引擎默认值）。 */
@@ -684,5 +716,7 @@ export type WebviewOutboundMessage =
   | { type: 'search_config'; payload: SearchConfigPayload }
   /** 索引配置推送（Extension → Webview） */
   | { type: 'embed_config'; payload: EmbedConfigPayload }
+  /** 审批策略推送（Extension → Webview，设置页「审批」Tab 数据源） */
+  | { type: 'approval_policy_config'; payload: ApprovalPolicyConfigPayload }
   /** 索引探活结果推送（Extension → Webview，回应 probe_embed） */
   | { type: 'embed_probe_result'; payload: EmbedProbeResultPayload };

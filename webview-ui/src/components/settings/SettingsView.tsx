@@ -8,7 +8,7 @@ import { AutoApproveBar } from './AutoApproveBar.js';
 import { Tab } from '../common/Tab.js';
 import { PROVIDER_DEFAULTS } from '../../providers.js';
 import { postToHost } from '../../vscode-api.js';
-import type { ModelConfigPayload, ModelLevelConfigPayload, SearchConfigPayload, EmbedConfigPayload } from '../../protocol.js';
+import type { ModelConfigPayload, ModelLevelConfigPayload, SearchConfigPayload, EmbedConfigPayload, ApprovalPolicyConfigPayload } from '../../protocol.js';
 
 type SettingsViewProps = {
   /** 从 extension host 推送的当前模型配置 */
@@ -17,6 +17,8 @@ type SettingsViewProps = {
   searchConfig?: SearchConfigPayload | null;
   /** 从 extension host 推送的索引（Embedding）配置 */
   embedConfig?: EmbedConfigPayload | null;
+  /** 从 extension host 推送的审批策略配置 */
+  approvalConfig?: ApprovalPolicyConfigPayload | null;
   onBack?: () => void;
   className?: string;
 };
@@ -75,7 +77,7 @@ type EmbedState = {
 
 const INITIAL_EMBED: EmbedState = { provider: 'local-bert', apiKey: '', baseUrl: '', model: '', dimension: '', batchSize: '', timeoutMs: '' };
 
-export function SettingsView({ config, searchConfig, embedConfig, onBack, className }: SettingsViewProps) {
+export function SettingsView({ config, searchConfig, embedConfig, approvalConfig, onBack, className }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState('llm');
   // Step 21: 配置搜索
   const [searchQuery, setSearchQuery] = useState('');
@@ -780,9 +782,9 @@ export function SettingsView({ config, searchConfig, embedConfig, onBack, classN
         {/* ────────── 审批 ────────── */}
         {activeTab === 'approval' && (
           <Section title="工具审批策略">
-            <AutoApproveBar />
+            <AutoApproveBar config={approvalConfig ?? null} />
             <div className="mt-4 text-xs text-vscode-fg/40">
-              审批策略可通过 .dualmind/approval-policy.yaml 文件进一步自定义。
+              修改即写入 .devseeker/approval-policy.yaml，下次任务生效；也可手工编辑该文件进一步自定义。
             </div>
           </Section>
         )}

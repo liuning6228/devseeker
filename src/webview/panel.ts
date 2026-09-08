@@ -163,7 +163,8 @@ import type { HookSpec } from '../core/hooks/index.js';
 import { ContextManager } from '../core/context/index.js';
 import type { ToolApprovalGate } from '../core/tools/registry.js';
 import { FileApprovalAuditSink } from '../core/tools/approval-audit.js';
-import { loadApprovalPolicy } from '../core/tools/approval-policy-loader.js';
+import { loadApprovalPolicy, loadPolicyYaml, getDefaultPolicyPath, writeApprovalPolicy } from '../core/tools/approval-policy-loader.js';
+import { DEFAULT_POLICY } from '../core/tools/approval-policy.js';
 import { isEditTool, getBlockedMessage } from '../core/tools/debug-mode-gate.js';
 import {
   ModeManager,
@@ -1375,6 +1376,82 @@ export class DualMindChatPanel {
     );
   }
 
+  // ─── 审批策略：推送 & 更新 ───
+
+  /** 推送当前生效审批策略到 webview（设置页「审批」Tab 数据源：默认表 + bash 命令级规则） */
+  private pushApprovalPolicyConfig(): void {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      this.post({ type: 'approval_policy_config', payload: {
+        fileExists: false,
+        defaults: { ...DEFAULT_POLICY },
+        bashRead: false,
+        bashWrite: false,
+      } });
+      return;
+    }
+    void (async () => {
+      let fileExists = true;
+      const filePath = getDefaultPolicyPath(workspaceRoot);
+      try {
+        if (!filePath) {
+          fileExists = false;
+        } else {
+          await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+        }
+      } catch {
+        fileExists = false;
+      }
+      const cfg = await loadPolicyYaml(workspaceRoot);
+      const defaults = { ...DEFAULT_POLICY, ...(cfg.defaults ?? {}) };
+      const overrides = cfg.overrides ?? [];
+      // 仅 command_policy=auto 的 UI 生成规则视为「已开启」；手写 deny/confirm 规则不误报为开启
+      const bashRead = overrides.some(
+        (o) => o.tool === 'bash' && o.command_safety === 'safe' && o.command_policy === 'auto',
+      );
+      const bashWrite = overrides.some(
+        (o) => o.tool === 'bash' && o.command_safety === 'risky' && o.command_policy === 'auto',
+      );
+      this.post({
+        type: 'approval_policy_config',
+        payload: { fileExists, defaults, bashRead, bashWrite },
+      });
+    })().catch((e: unknown) => {
+      log.warn({ err: String(e) }, 'pushApprovalPolicyConfig failed');
+    });
+  }
+
+  /** 处理 webview 提交的审批策略变更：写 .devseeker/approval-policy.yaml 后回推（即改即写） */
+  private async handleUpdateApprovalPolicy(values: {
+    read_only?: 'auto' | 'confirm';
+    workspace_write?: 'auto' | 'confirm';
+    network?: 'auto' | 'confirm';
+    bash_read?: boolean;
+    bash_write?: boolean;
+  }): Promise<void> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      log.warn({}, 'update_approval_policy ignored: no workspace folder open');
+      this.pushApprovalPolicyConfig();
+      return;
+    }
+    try {
+      await writeApprovalPolicy(workspaceRoot, {
+        defaults: {
+          ...(values.read_only !== undefined ? { read_only: values.read_only } : {}),
+          ...(values.workspace_write !== undefined ? { workspace_write: values.workspace_write } : {}),
+          ...(values.network !== undefined ? { network: values.network } : {}),
+        },
+        bashRead: values.bash_read,
+        bashWrite: values.bash_write,
+      });
+      log.info({ values }, 'approval policy updated from settings');
+    } catch (e: unknown) {
+      log.error({ err: String(e) }, 'Failed to update approval policy');
+    }
+    this.pushApprovalPolicyConfig();
+  }
+
   /** T5 · 索引探活：按当前配置构造 embedder（不缓存）嵌入 1 条，结果回推 webview */
   private async handleProbeEmbed(): Promise<void> {
     const cfg = vscode.workspace.getConfiguration('devSeeker');
@@ -1531,6 +1608,7 @@ export class DualMindChatPanel {
         this.pushModelConfig(); // 首次就绪即推送模型配置，避免 ModelConfigPanel 显示空白
         this.pushSearchConfig(); // 推送联网搜索配置，避免设置页 API Key 显示空白
         this.pushEmbedConfig(); // 推送索引配置，避免设置页索引配置显示空白
+        this.pushApprovalPolicyConfig(); // 推送审批策略，避免设置页「审批」Tab 显示硬编码默认值
         this.pushCostSummary();
         this.pushSessionList();
         this.pushIndexStatus();
@@ -1577,6 +1655,7 @@ export class DualMindChatPanel {
         this.pushModelConfig();
         this.pushSearchConfig();
         this.pushEmbedConfig();
+        this.pushApprovalPolicyConfig();
         break;
 
       case 'update_model_config':
@@ -1593,6 +1672,10 @@ export class DualMindChatPanel {
 
       case 'update_search_config':
         this.handleUpdateSearchConfig(msg.field, msg.value);
+        break;
+
+      case 'update_approval_policy':
+        void this.handleUpdateApprovalPolicy(msg.values);
         break;
 
       case 'update_embed_config':

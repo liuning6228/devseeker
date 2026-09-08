@@ -206,9 +206,15 @@ export class ToolRunner {
 
     // v3.2.1: bash 工具即使 safe 命令也走审批门，让用户选择"终端运行"或"沙箱运行"。
     // safe 命令的审批面板默认主按钮为「终端运行」，risky 命令默认主按钮为「沙箱运行」。
+    // 例外：设置页「Bash 只读命令自动执行」已开（command_safety=safe + command_policy=auto → decision=auto）
+    // 时不再强制弹门——用户已显式授权 safe 命令自动执行，直接走默认沙箱；否则弹门选择运行方式并可选记住。
     const commandSafety = command ? classifyCommand(command) : undefined;
     const isBashTool = tool.name === 'bash' || tool.name === 'run_in_terminal';
-    const bashForceApproval = isBashTool && commandSafety === 'safe' && this.approvalGate !== undefined;
+    const bashForceApproval =
+      isBashTool &&
+      commandSafety === 'safe' &&
+      approvalResult.decision !== 'auto' &&
+      this.approvalGate !== undefined;
 
     // confirm 或 dangerous 或 bash safe 强制审批 → 走审批门
     // 交互类工具（tool.interactive）除外：它们的执行本身就是向用户弹窗征询，
