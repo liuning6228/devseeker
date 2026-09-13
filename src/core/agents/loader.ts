@@ -34,6 +34,7 @@ export const DEFAULT_CUSTOM_AGENT_TOOLS: readonly string[] = [
   'read_file',
   'list_dir',
   'search_codebase',
+  'get_repo_map',
   'search_knowledge',
   'fetch_content',
   'read_url',

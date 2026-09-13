@@ -202,3 +202,8 @@ export {
   GrepCodeTool,
   type GrepCodeArgs,
 } from './grep_code.js';
+export {
+  GetRepoMapTool,
+  type GetRepoMapArgs,
+  type GetRepoMapDeps,
+} from './get_repo_map.js';

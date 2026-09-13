@@ -110,6 +110,7 @@ import {
   AgentTool,
   TraceErrorTool,
   GrepCodeTool,
+  GetRepoMapTool,
   TodoWriteTool,
 } from '../core/tools/index.js';
 import {
@@ -137,6 +138,7 @@ import { maybeAutoReindex, AUTO_INDEX_MARKER_KEY } from '../core/index/auto-inde
 import { FusionSearcher, type SearchSource } from '../core/index/fusion-searcher.js';
 import { GraphIndex, GraphSearchSource } from '../core/index/graph-index.js';
 import { GraphFileSync, buildGraphIndex } from '../core/index/graph-sync.js';
+import { buildRepoMap } from '../core/index/repo-map.js';
 import { defaultIndexSqlitePath } from '../core/storage/sqlite-db.js';
 import { KnowledgeIndex } from '../core/knowledge/index.js';
 import { VSCodeLspBridge, type LspBridge } from '../core/lsp/index.js';
@@ -479,6 +481,12 @@ export class DualMindChatPanel {
           this.fusionSearcher && this.fusionSearcher.getReadySourceCount() > 0
             ? this.fusionSearcher
             : undefined,
+      }),
+    );
+    // T2 · get_repo_map 工具：代码骨架地图（P2 图索引 → Repo Map 渲染器）
+    this.toolRegistry.register(
+      new GetRepoMapTool({
+        getGraphIndex: () => this.getGraphIndex(),
       }),
     );
     // W14.2 · search_knowledge 工具：懒加载私有知识库（.devseeker/knowledge/**/*.md）
@@ -3769,6 +3777,23 @@ export class DualMindChatPanel {
       }
     }
 
+    // Repo Map · 代码骨架注入（骨架先行）：图索引就绪（size>0）时渲染 <repo_map>。
+    // 每 send 注入（不设首轮标志——system prompt 每 send 重建，一次性标志会让骨架
+    // 在多轮对话中丢失）；触发懒初始化但不阻塞本轮：图未就绪/空图/异常一律零注入。
+    let repoMapBlock: string | undefined;
+    if (workspaceRoot2) {
+      try {
+        void this.getGraphIndex().catch(() => {});
+        const gIdx = this.graphIndex;
+        if (gIdx && gIdx.size() > 0) {
+          const repoMap = buildRepoMap(gIdx);
+          if (repoMap.text) repoMapBlock = repoMap.text;
+        }
+      } catch (e) {
+        log.warn({ err: String(e) }, 'buildSystemPrompt(repoMap) failed; continue');
+      }
+    }
+
     // T1 · 代码检索提示注入：userQuery 存在且融合搜索就绪 → 自动检索 top-6 并前置到
     // system prompt（降低 agent 探索轮次）。1s 超时护栏：e5-small query 向量化有冷启动
     // 延迟，超时/未就绪/异常只跳过本轮注入，绝不拖慢主流程（与 debugContext 同款软失败）。
@@ -3858,7 +3883,8 @@ export class DualMindChatPanel {
     let result = full;
 
     // M4/T3 · 预取命中与记忆树骨架注入（修复 M4 预取结果从未进入上下文的接线缺失）：
-    // 检索提示 → 记忆树 → 预取记忆 → spec（代码命中优先级最高，先注入）
+    // 骨架 → 检索提示 → 记忆树 → 预取记忆 → spec（骨架先行定位，片段随后）
+    if (repoMapBlock) result = result + '\n\n' + repoMapBlock;
     if (codeHintsBlock) result = result + '\n\n' + codeHintsBlock;
     if (knowledgeHintsBlock) result = result + '\n\n' + knowledgeHintsBlock;
     if (memoryTreeBlock) result = result + '\n\n' + memoryTreeBlock;

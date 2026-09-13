@@ -60,6 +60,10 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
     // V2 新增 thinking-framework
     expect(THINKING_FRAMEWORK_MODULE).toContain('Thinking Before Acting');
     expect(THINKING_FRAMEWORK_MODULE).toContain('<thinking>');
+    // Repo Map 探索 SOP（T5 · 骨架先行 → focus 下钻 → 窄读）
+    expect(THINKING_FRAMEWORK_MODULE).toContain('Source Code Exploration Strategy');
+    expect(THINKING_FRAMEWORK_MODULE).toContain('Map first');
+    expect(THINKING_FRAMEWORK_MODULE).toContain('get_repo_map');
     // V2 新增 output-style
     expect(OUTPUT_STYLE_MODULE).toContain('Output Style');
     expect(OUTPUT_STYLE_MODULE).toContain('emojis');
@@ -163,6 +167,8 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
     // 2. thinking-framework (V2 新增)
     expect(full).toContain('Thinking Before Acting');
     expect(full).toContain('<thinking>');
+    expect(full).toContain('Source Code Exploration Strategy');
+    expect(full).toContain('get_repo_map');
     // 3. output-style (V2 新增)
     expect(full).toContain('Output Style');
     expect(full).toContain('emojis');

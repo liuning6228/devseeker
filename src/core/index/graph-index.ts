@@ -37,6 +37,46 @@ const log = getLogger('index.graph-index');
 /** 符号类型 */
 export type SymbolKind = 'function' | 'class' | 'method' | 'interface';
 
+/**
+ * 原生 API 成员名黑名单（Repo Map 热度用）。
+ *
+ * 这些名字在任意 JS/TS 代码中会被大量原生调用（数组 push、Object.keys、
+ * JSON.parse 等），而 AST 提取无法区分「原生成员调用」与「自定义方法调用」——
+ * 若源码中恰好只定义了一个同名成员，全部原生调用会被误归属到它
+ * （真实验证：未加黑名单时 transport.ts 的唯一 push 方法吞掉全库 1023 次
+ * 数组 push 调用而霸榜）。
+ *
+ * 列表保持保守：只收录 JS/TS 运行时内建 API 的成员名；自定义高频名
+ * （emit/run/load/render/handle/...）不在列。
+ */
+export const NATIVE_MEMBER_NAMES: readonly string[] = [
+  // Array / String 操作
+  'push', 'pop', 'shift', 'unshift', 'splice', 'slice', 'concat', 'join', 'split',
+  'trim', 'trimStart', 'trimEnd', 'replace', 'replaceAll', 'includes', 'indexOf', 'lastIndexOf',
+  'startsWith', 'endsWith', 'repeat', 'padStart', 'padEnd',
+  'toUpperCase', 'toLowerCase', 'toLocaleLowerCase', 'toLocaleUpperCase',
+  'charAt', 'charCodeAt', 'codePointAt', 'substring', 'substr', 'normalize', 'localeCompare',
+  'match', 'matchAll', 'search',
+  'filter', 'map', 'forEach', 'reduce', 'reduceRight', 'find', 'findIndex', 'findLast', 'findLastIndex',
+  'some', 'every', 'sort', 'reverse', 'flat', 'flatMap', 'fill', 'copyWithin', 'at',
+  // Object / Map / Set / 集合
+  'get', 'set', 'has', 'delete', 'clear', 'add', 'size', 'keys', 'values', 'entries',
+  'from', 'of', 'isArray', 'isInteger', 'isFinite', 'isNaN',
+  'assign', 'freeze', 'defineProperty', 'getOwnPropertyNames', 'getPrototypeOf', 'setPrototypeOf',
+  // JSON / Math / Date
+  'parse', 'stringify', 'floor', 'ceil', 'round', 'abs', 'min', 'max', 'random', 'pow', 'sqrt',
+  'now', 'getTime', 'getFullYear', 'getMonth', 'getDate', 'getHours', 'getMinutes', 'getSeconds',
+  'getMilliseconds', 'toISOString', 'toJSON',
+  // Promise / RegExp / 其他内建
+  'then', 'catch', 'finally', 'resolve', 'reject', 'all', 'allSettled', 'race', 'any',
+  'test', 'exec', 'toString', 'valueOf', 'hasOwnProperty',
+  // 生命周期（Node/browser 原生遍布）
+  'close', 'next',
+];
+
+/** 黑名单的 SQL IN 字面量（模块加载时构建一次；常量集合无注入风险） */
+const NATIVE_SQL_LIST = NATIVE_MEMBER_NAMES.map((n) => `'${n}'`).join(', ');
+
 /** 符号引用（查询结果） */
 export interface SymbolRef {
   name: string;
@@ -45,6 +85,19 @@ export interface SymbolRef {
   startLine: number;
   endLine: number;
   scope?: string;
+}
+
+/**
+ * 热度聚合行（Repo Map 数据源）：符号定义 + 被调用次数。
+ * heat 仅统计 callee_id 已解析到定义的调用点（排除外部 API 噪声）。
+ */
+export interface HotSymbolRow {
+  name: string;
+  kind: SymbolKind;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  heat: number;
 }
 
 /** 调用关系记录（提取器输出） */
@@ -455,6 +508,135 @@ export class GraphIndex {
       upstream: upRows.map(r => r.source_file),
       downstream: downRows.map(r => r.target_file),
     };
+  }
+
+  /**
+   * 热度聚合（Repo Map 数据源）：按被调用次数返回符号定义行。
+   *
+   * 热度语义（真实验证后修正）：**代码内部复用度**——只统计
+   * 「全库唯一名符号」被「非测试文件」调用的次数。三道闸门的原因：
+   *   1. 唯一名约束：同名多定义符号（get/set/push/fail/execute 等常见名）
+   *      的计数被跨文件合并后会膨胀成“名字出现频率”而非“符号重要性”
+   *      （真实验证：未加约束时热度榜被 sqlite-db.get/push/fail 霸榜，
+   *      真正核心文件全部落榜）；唯一名符号的调用归属无歧义，热度可信。
+   *   2. 非测试过滤：tests/ 下的 mock （push/execute 等）与用例反复调用
+   *      不反映程序主干，全部排除（caller 侧影响计数；定义侧也过滤，
+   *      避免同名测试定义占榜；唯一性判定只看非测试定义）。
+   *   3. 原生成员名黑名单（NATIVE_MEMBER_NAMES）：AST 无法区分原生成员调用
+   *      与自定义同名方法，单定义时会吞掉全库原生调用（push 1023 验证）。
+   *
+   * 两段式查询（子查询限名额 + JOIN 定义表）避免同名 JOIN 行数爆炸；
+   * 仅统计 callee_id 已解析到定义的调用——未解析的外部调用
+   * （console.log / 库函数等）天然不出现在 graph_symbols 中，不会污染热度。
+   *
+   * 返回排序：heat desc → file_path asc → start_line asc（稳定输出，
+   * 保证同数据多次渲染字节级恒等）。异常时返回空数组（调用方软失败）。
+   */
+  getHotSymbols(maxNames: number = 300): HotSymbolRow[] {
+    const limit = Math.max(1, Math.min(1000, Math.floor(maxNames) || 1));
+    // 测试路径过滤（GLOB 大小写敏感，与仓库小写约定一致）：
+    // tests/* · test/* · *​/tests/* · *​/test/* · __tests__/* · */__tests__/* · *.test.* · *.spec.*
+    // 注：GLOB 中 _ 不是通配符（与 LIKE 的区别），无需转义。
+    const notTest = (col: string): string =>
+      [
+        `${col} NOT GLOB 'tests/*'`,
+        `${col} NOT GLOB 'test/*'`,
+        `${col} NOT GLOB '*/tests/*'`,
+        `${col} NOT GLOB '*/test/*'`,
+        `${col} NOT GLOB '__tests__/*'`,
+        `${col} NOT GLOB '*/__tests__/*'`,
+        `${col} NOT GLOB '*.test.*'`,
+        `${col} NOT GLOB '*.spec.*'`,
+      ].join(' AND ');
+    try {
+      const rows = this.db.prepare(
+        /* sql */ `
+        SELECT h.name AS name, h.heat AS heat, s.kind AS kind,
+               s.file_path AS file_path, s.start_line AS start_line, s.end_line AS end_line
+        FROM (
+          SELECT c.callee_name AS name, COUNT(*) AS heat
+          FROM graph_calls c
+          JOIN graph_symbols caller_s ON caller_s.id = c.caller_id
+          WHERE c.callee_id IS NOT NULL
+            AND ${notTest('caller_s.file_path')}
+            AND c.callee_name NOT IN (${NATIVE_SQL_LIST})
+            AND c.callee_name IN (
+              SELECT s2.name FROM graph_symbols s2
+              WHERE ${notTest('s2.file_path')}
+              GROUP BY s2.name
+              HAVING COUNT(*) = 1
+            )
+          GROUP BY c.callee_name
+          ORDER BY heat DESC, c.callee_name ASC
+          LIMIT ?
+        ) h
+        JOIN graph_symbols s ON s.name = h.name
+        WHERE ${notTest('s.file_path')}
+      `,
+      ).all(limit) as Array<{
+        name: string; heat: number; kind: string;
+        file_path: string; start_line: number; end_line: number;
+      }>;
+
+      const out: HotSymbolRow[] = rows.map((r) => ({
+        name: r.name,
+        kind: r.kind as SymbolKind,
+        filePath: r.file_path,
+        startLine: r.start_line,
+        endLine: r.end_line,
+        heat: r.heat,
+      }));
+      out.sort(
+        (a, b) =>
+          b.heat - a.heat ||
+          (a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0) ||
+          a.startLine - b.startLine,
+      );
+      // 防爆：定义行数上限（唯一名最多每名 1 行，此处为保险）
+      return out.slice(0, 2000);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 按路径查询符号（Repo Map focus 路径模式用）。三种匹配语义（OR）：
+   *   1. 前缀匹配：`prefix%`（"src/core/" → 该目录；"src/a.ts" → 该文件）
+   *   2. 文件名段匹配：`%/prefix`（"panel.ts" → 任意目录下的该文件）
+   *   3. 目录段匹配：`%/prefix/%`（"core" → 任意深度的该目录）
+   * 覆盖 LLM 的多种输入形态（完整相对路径 / 裸文件名 / 裸目录名）。
+   * prefix 中的 LIKE 通配符（% _ \）会被转义；空 prefix 返回空数组。
+   */
+  findSymbolsByPathPrefix(prefix: string, limit: number = 200): SymbolRef[] {
+    const clean = prefix.trim();
+    if (!clean) return [];
+    const capped = Math.max(1, Math.min(500, Math.floor(limit) || 1));
+    const escaped = clean.replace(/[\\%_]/g, (m) => `\\${m}`);
+    try {
+      const rows = this.db.prepare(
+        `SELECT name, kind, file_path, start_line, end_line, scope
+         FROM graph_symbols
+         WHERE file_path LIKE ? ESCAPE '\\'
+            OR file_path LIKE ? ESCAPE '\\'
+            OR file_path LIKE ? ESCAPE '\\'
+         ORDER BY file_path ASC, start_line ASC
+         LIMIT ?`,
+      ).all(`${escaped}%`, `%/${escaped}`, `%/${escaped}/%`, capped) as Array<{
+        name: string; kind: string; file_path: string;
+        start_line: number; end_line: number; scope: string | null;
+      }>;
+
+      return rows.map((r) => ({
+        name: r.name,
+        kind: r.kind as SymbolKind,
+        filePath: r.file_path,
+        startLine: r.start_line,
+        endLine: r.end_line,
+        scope: r.scope ?? undefined,
+      }));
+    } catch {
+      return [];
+    }
   }
 
   /** 获取符号的 N 层调用链（递归） */

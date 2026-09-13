@@ -88,5 +88,14 @@ export {
   type ExtractedSymbol,
   type ExtractedCall,
   type ExtractedImport,
+  type HotSymbolRow,
 } from './graph-index.js';
 export { extractGraphData, extractGraphDataBatch } from './graph-extractor.js';
+export {
+  buildRepoMap,
+  buildRepoMapFocus,
+  type RepoMapGraphSource,
+  type RepoMapOptions,
+  type RepoMapStats,
+  type RepoMapResult,
+} from './repo-map.js';

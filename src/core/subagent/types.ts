@@ -108,7 +108,7 @@ export type ToolsetName =
  */
 export const TOOLSETS: Record<ToolsetName, readonly string[]> = {
   search: [
-    'search_codebase', 'search_symbol', 'lsp', 'grep_code',
+    'search_codebase', 'get_repo_map', 'search_symbol', 'lsp', 'grep_code',
     'read_file', 'list_dir', 'search_knowledge',
   ],
   file: [
