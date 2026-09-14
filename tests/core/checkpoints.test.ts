@@ -142,7 +142,9 @@ describe('CheckpointStore.list / get', () => {
     const store = makeStore();
     const a = await store.create({ sessionId: 's1', messages: sampleMessages });
     const got = await store.get(a.id, 's1');
-    expect(got?.messages).toEqual(sampleMessages);
+    // v1.9.0: 新格式 checkpoint 不再存储 messages（revert 时从 session store 切片）
+    expect(got?.messageCount).toBe(sampleMessages.length);
+    expect(got?.messages).toBeUndefined();
     const notFound = await store.get('cp-x', 's1');
     expect(notFound).toBeUndefined();
   });
@@ -164,7 +166,7 @@ describe('CheckpointStore.revert', () => {
     // 模拟后续修改
     await fs.writeFile(target, 'v2 modified', 'utf-8');
 
-    const res = await store.revert({ id: cp.id, sessionId: 's1' });
+    const res = await store.revert({ id: cp.id, sessionId: 's1', currentMessages: sampleMessages });
     expect(res.filesApplied).toBe(1);
     expect(res.messages).toEqual(sampleMessages);
     const content = await fs.readFile(target, 'utf-8');
@@ -186,7 +188,7 @@ describe('CheckpointStore.revert', () => {
     await fs.writeFile(newly, 'created later', 'utf-8');
     expect(existsSync(newly)).toBe(true);
 
-    const res = await store.revert({ id: cp.id, sessionId: 's1' });
+    const res = await store.revert({ id: cp.id, sessionId: 's1', currentMessages: sampleMessages });
     expect(res.filesDeleted).toBe(1);
     expect(existsSync(newly)).toBe(false);
   });
@@ -201,7 +203,7 @@ describe('CheckpointStore.revert', () => {
     });
     await fs.writeFile(target, 'dirty', 'utf-8');
 
-    const res = await store.revert({ id: cp.id, sessionId: 's1', applyFiles: false });
+    const res = await store.revert({ id: cp.id, sessionId: 's1', applyFiles: false, currentMessages: sampleMessages });
     expect(res.filesApplied).toBe(0);
     expect(await fs.readFile(target, 'utf-8')).toBe('dirty');
     expect(res.messages).toEqual(sampleMessages);
@@ -214,14 +216,14 @@ describe('CheckpointStore.revert', () => {
       messages: sampleMessages,
       files: [{ relPath: 'big.ts', content: 'XXXXXXX' }],
     });
-    const res = await store.revert({ id: cp.id, sessionId: 's1' });
+    const res = await store.revert({ id: cp.id, sessionId: 's1', currentMessages: sampleMessages });
     expect(res.filesSkipped).toBe(1);
     expect(res.filesApplied).toBe(0);
   });
 
   it('throws when checkpoint id not found', async () => {
     const store = makeStore();
-    await expect(store.revert({ id: 'nope', sessionId: 's1' })).rejects.toThrow(/not found/);
+    await expect(store.revert({ id: 'nope', sessionId: 's1', currentMessages: sampleMessages })).rejects.toThrow(/not found/);
   });
 
   it('rejects path-traversal relPath (skipped, no write outside workspace)', async () => {
@@ -231,7 +233,7 @@ describe('CheckpointStore.revert', () => {
       messages: sampleMessages,
       files: [{ relPath: '../escape.ts', content: 'evil' }],
     });
-    const res = await store.revert({ id: cp.id, sessionId: 's1' });
+    const res = await store.revert({ id: cp.id, sessionId: 's1', currentMessages: sampleMessages });
     expect(res.filesApplied).toBe(0);
     expect(res.filesSkipped).toBe(1);
     expect(existsSync(path.join(tmpRoot, '..', 'escape.ts'))).toBe(false);
@@ -345,7 +347,7 @@ describe('CheckpointStore.revert onConflict (W10.2)', () => {
       files: [{ relPath: 'a.ts', content: 'v1' }],
     });
     await fs.writeFile(target, 'user edit', 'utf-8');
-    const res = await store.revert({ id: cp.id, sessionId: 's1' });
+    const res = await store.revert({ id: cp.id, sessionId: 's1', currentMessages: sampleMessages });
     expect(res.filesApplied).toBe(1);
     expect(res.conflicts).toBeDefined();
     expect(res.conflicts?.length).toBe(1);
@@ -372,6 +374,7 @@ describe('CheckpointStore.revert onConflict (W10.2)', () => {
       id: cp.id,
       sessionId: 's1',
       onConflict: 'skip',
+      currentMessages: sampleMessages,
     });
     expect(res.filesSkipped).toBe(1);
     expect(res.filesApplied).toBe(1);
@@ -389,7 +392,7 @@ describe('CheckpointStore.revert onConflict (W10.2)', () => {
     });
     await fs.writeFile(target, 'user edit', 'utf-8');
     await expect(
-      store.revert({ id: cp.id, sessionId: 's1', onConflict: 'abort' }),
+      store.revert({ id: cp.id, sessionId: 's1', onConflict: 'abort', currentMessages: sampleMessages }),
     ).rejects.toThrow(/回滚中止/);
     expect(await fs.readFile(target, 'utf-8')).toBe('user edit');
   });
@@ -491,5 +494,65 @@ describe('CheckpointStore.delete', () => {
     await store.delete(a.id, 's1');
     const l2 = await store.list('s2');
     expect(l2.map((m) => m.id)).toEqual([b.id]);
+  });
+});
+
+describe('v1.9.0 messages dedup', () => {
+  it('new checkpoint does not store messages; revert uses currentMessages slice', async () => {
+    const store = makeStore();
+    const cp = await store.create({
+      sessionId: 's1',
+      messages: sampleMessages,
+      files: [{ relPath: 'a.ts', content: 'v1' }],
+    });
+    // 新格式不存 messages
+    const got = await store.get(cp.id, 's1');
+    expect(got?.messages).toBeUndefined();
+    expect(got?.messageCount).toBe(sampleMessages.length);
+
+    // 模拟后续 messages 增长（session store 中已有更多消息）
+    const laterMessages: Message[] = [
+      ...sampleMessages,
+      { role: 'user', content: 'new question' },
+      { role: 'assistant', content: 'new reply' },
+    ];
+    // revert 传入 currentMessages（来自 session store），应切片到 messageCount 条
+    const res = await store.revert({ id: cp.id, sessionId: 's1', currentMessages: laterMessages });
+    expect(res.messages).toEqual(sampleMessages); // 切片到前 2 条
+    expect(res.messages).not.toEqual(laterMessages);
+  });
+
+  it('legacy checkpoint (with messages) still works', async () => {
+    const store = makeStore();
+    // 模拟老格式：手动写一个含 messages 的 checkpoint JSON
+    const legacyCp = {
+      id: 'cp-legacy',
+      sessionId: 's1',
+      createdAt: Date.now(),
+      label: 'old',
+      messageCount: sampleMessages.length,
+      fileCount: 0,
+      totalBytes: 0,
+      messages: sampleMessages, // 老格式含 messages
+      fileSnapshots: [],
+    };
+    const sessionDir = path.join(tmpRoot, '.devseeker', 'checkpoints', 's1');
+    await fs.mkdir(sessionDir, { recursive: true });
+    await fs.writeFile(path.join(sessionDir, 'cp-legacy.json'), JSON.stringify(legacyCp), 'utf-8');
+    // 写 index
+    await fs.writeFile(
+      path.join(sessionDir, 'index.json'),
+      JSON.stringify({
+        entries: [{ id: legacyCp.id, sessionId: 's1', createdAt: legacyCp.createdAt, label: 'old', messageCount: 2, fileCount: 0, totalBytes: 0 }],
+      }),
+      'utf-8',
+    );
+    // revert 时即使传入 currentMessages，也优先使用存储的 messages
+    const res = await store.revert({
+      id: 'cp-legacy',
+      sessionId: 's1',
+      currentMessages: [{ role: 'user', content: 'different' }],
+    });
+    expect(res.messages).toEqual(sampleMessages); // 用存储的，不用 currentMessages
   });
 });

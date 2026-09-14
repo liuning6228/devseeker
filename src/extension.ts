@@ -39,6 +39,7 @@ import { InlineDiffController } from './ui/inline-diff-decorator.js';
 import { EditorChangeBar } from './ui/editor-change-bar.js';
 import { DIFF_VIEW_URI_SCHEME } from './ui/streaming-diff-view.js';
 import { openSqliteDatabase, defaultSqlitePath } from './core/storage/sqlite-db.js';
+import { SqliteCheckpointStore } from './core/storage/sqlite-checkpoint-store.js';
 
 let statusBarItem: vscode.StatusBarItem | undefined;
 /** 存储 process 全局监听器引用，deactivate 时移除防止泄漏 */
@@ -101,6 +102,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   } catch (e) {
     log.warn({ err: String(e) }, 'DeepSeek model name migration failed (non-fatal)');
+  }
+
+  // W10.4 · 激活期后台 GC：清理老 checkpoint，防止 .devseeker/checkpoints 无限膨胀
+  // v1.9.0: 使用 SQLite 存储（自动从 JSON 迁移后 GC 直接 SQL 完成）
+  // 非阻塞：GC 失败不影响激活；devSeeker.checkpoints.gcDays 可配置（默认 7 天，0 = 关闭）
+  if (workspaceRoot) {
+    const gcDays = vscode.workspace.getConfiguration('devSeeker')
+      .get<number>('checkpoints.gcDays') ?? 7;
+    if (gcDays > 0) {
+      void (async () => {
+        try {
+          const store = new SqliteCheckpointStore({ workspaceRoot });
+          const { removedCheckpoints, removedPoolEntries } = await store.gcOlderThan(gcDays);
+          if (removedCheckpoints > 0 || removedPoolEntries > 0) {
+            log.info(
+              { removedCheckpoints, removedPoolEntries, gcDays },
+              'checkpoint GC completed on activation',
+            );
+          }
+          store.close();
+        } catch (e) {
+          log.warn({ err: String(e) }, 'checkpoint GC on activation failed (non-fatal)');
+        }
+      })();
+    }
   }
 
   // P0-7 · 注册虚拟 URI scheme（流式 Diff 渲染左侧原始文档）

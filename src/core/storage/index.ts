@@ -37,3 +37,8 @@ export {
   type MigrationStats,
   type RunLegacyMigrationOptions,
 } from './migrator.js';
+
+export {
+  SqliteCheckpointStore,
+  type SqliteCheckpointStoreOptions,
+} from './sqlite-checkpoint-store.js';

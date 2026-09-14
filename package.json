@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -762,6 +762,18 @@
           ],
           "default": "info",
           "description": "日志级别"
+        },
+        "devSeeker.checkpoints.gcDays": {
+          "type": "number",
+          "default": 7,
+          "minimum": 0,
+          "maximum": 365,
+          "description": "激活期后台清理 checkpoint 的天数阈值。老于该天数的 checkpoint 会被自动删除（0 = 关闭自动清理）。"
+        },
+        "devSeeker.checkpoints.migrateFromJson": {
+          "type": "boolean",
+          "default": true,
+          "description": "首次启动时自动将旧版 JSON 格式 checkpoint 迁移到 SQLite（.devseeker/data/devseeker-checkpoints.sqlite）。迁移完成后旧目录重命名为 .devseeker/checkpoints.migrated。"
         },
         "devSeeker.codebaseIndex.embedProvider": {
           "type": "string",

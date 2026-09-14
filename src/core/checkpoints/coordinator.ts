@@ -29,6 +29,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { getLogger } from '../../infra/logger.js';
 import type { CheckpointStore } from './store.js';
+import type { SqliteCheckpointStore } from '../storage/sqlite-checkpoint-store.js';
 import type { Checkpoint, CheckpointMeta, RevertResult } from './types.js';
 import type { Message } from '../../providers/types.js';
 
@@ -42,8 +43,11 @@ export const TRACKED_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'delete_file',
 ]);
 
+/** v1.9.0: 兼容 CheckpointStore（JSON）和 SqliteCheckpointStore */
+type AnyCheckpointStore = CheckpointStore | SqliteCheckpointStore;
+
 export interface CheckpointCoordinatorOptions {
-  store: CheckpointStore;
+  store: AnyCheckpointStore;
   workspaceRoot: string;
   /** 是否启用自动快照，默认 true；禁用则 finalizeTurn 返回 undefined */
   enabled?: boolean;
@@ -58,7 +62,7 @@ export interface FinalizeArgs {
 }
 
 export class CheckpointCoordinator {
-  private readonly store: CheckpointStore;
+  private readonly store: AnyCheckpointStore;
   private readonly workspaceRoot: string;
   private enabled: boolean;
 
@@ -213,11 +217,12 @@ export class CheckpointCoordinator {
     return this.store.list(sessionId);
   }
 
-  /** 恢复某 checkpoint */
+  /** 恢复某 checkpoint（v1.9.0: 需传入 currentMessages 用于新格式 checkpoint 的 messages 还原） */
   async revert(args: {
     id: string;
     sessionId: string;
     applyFiles?: boolean;
+    currentMessages: Message[];
   }): Promise<RevertResult> {
     return this.store.revert(args);
   }

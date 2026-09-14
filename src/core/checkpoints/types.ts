@@ -52,7 +52,11 @@ export interface CheckpointMeta {
 }
 
 export interface Checkpoint extends CheckpointMeta {
-  messages: Message[];
+  /**
+   * 消息历史（v1.9.0 起默认不存储，仅老 checkpoint 兼容保留）。
+   * revert 时调用方应传入 currentMessages，由 store 按 messageCount 切片。
+   */
+  messages?: Message[];
   fileSnapshots: FileSnapshot[];
 }
 

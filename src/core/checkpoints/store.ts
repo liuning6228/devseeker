@@ -42,6 +42,7 @@ import type {
   RevertResult,
 } from './types.js';
 import { DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_PER_SESSION } from './types.js';
+import type { Message } from '../../providers/types.js';
 
 const log = getLogger('checkpoint.store');
 
@@ -89,7 +90,7 @@ export class CheckpointStore {
       messageCount: args.messages.length,
       fileCount: fileSnapshots.length,
       totalBytes,
-      messages: args.messages,
+      // v1.9.0: 不再存储全量 messages（revert 时从 session store 按 messageCount 切片）
       fileSnapshots,
     };
 
@@ -233,6 +234,12 @@ export class CheckpointStore {
      * - 'abort'：有任何冲突则报错，不恢复任何文件。
      */
     onConflict?: 'overwrite' | 'skip' | 'abort';
+    /**
+     * v1.9.0: 当前会话的完整 messages 数组（来自 session store）。
+     * 用于新格式 checkpoint（不含 messages 字段）时按 messageCount 切片还原。
+     * 老格式 checkpoint（含 messages 字段）优先使用存储的 messages（向后兼容）。
+     */
+    currentMessages: Message[];
   }): Promise<RevertResult> {
     const cp = await this.get(args.id, args.sessionId);
     if (!cp) {
@@ -301,8 +308,14 @@ export class CheckpointStore {
       }
     }
 
+    // v1.9.0: 优先使用存储的 messages（老格式兼容），否则从 currentMessages 按 messageCount 切片
+    const restoredMessages =
+      cp.messages && cp.messages.length > 0
+        ? cp.messages
+        : args.currentMessages.slice(0, cp.messageCount);
+
     return {
-      messages: cp.messages,
+      messages: restoredMessages,
       filesApplied,
       filesDeleted,
       filesSkipped,

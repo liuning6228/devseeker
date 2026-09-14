@@ -198,6 +198,7 @@ import {
   type CheckpointMeta,
   type RevertResult,
 } from '../core/checkpoints/index.js';
+import { SqliteCheckpointStore } from '../core/storage/sqlite-checkpoint-store.js';
 import { getLogger } from '../infra/logger.js';
 import { perfProbe } from '../infra/perf-probe.js';
 import { AgentError, toAgentError, ErrorCodes, classifyErrorCode, FAILOVER_STRATEGY, type FailoverReason } from '../core/errors/index.js';
@@ -3446,7 +3447,8 @@ export class DualMindChatPanel {
     if (this.checkpointCoordinator) return this.checkpointCoordinator;
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!workspaceRoot) return undefined;
-    const store = new CheckpointStore({ workspaceRoot });
+    // v1.9.0: 使用 SQLite 存储（自动从 JSON 迁移）
+    const store = new SqliteCheckpointStore({ workspaceRoot });
     this.checkpointCoordinator = new CheckpointCoordinator({ store, workspaceRoot });
     return this.checkpointCoordinator;
   }
@@ -4816,7 +4818,8 @@ export class DualMindChatPanel {
     const coordinator = this.getCheckpointCoordinator();
     if (!coordinator || !this.currentSession) return undefined;
     const sessionId = this.currentSession.id;
-    const result = await coordinator.revert({ id, sessionId });
+    // v1.9.0: 传入当前会话的 messages，用于新格式 checkpoint 按 messageCount 切片还原
+    const result = await coordinator.revert({ id, sessionId, currentMessages: this.currentSession.messages });
 
     // 丢弃当前 loop，避免 revert 中途继续追加消息
     this.taskLoop?.abort();

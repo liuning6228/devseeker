@@ -228,7 +228,9 @@ describe('CheckpointCoordinator.finalizeTurn', () => {
     const cp = await coord.finalizeTurn({ sessionId: 's1', messages: msgs });
     expect(cp).toBeDefined();
     expect(cp!.fileSnapshots).toHaveLength(0);
-    expect(cp!.messages).toEqual(msgs);
+    // v1.9.0: 新格式 checkpoint 不再存储 messages（仅记 messageCount）
+    expect(cp!.messageCount).toBe(msgs.length);
+    expect(cp!.messages).toBeUndefined();
   });
 
   it('respects forceEmpty=false → skip when files empty', async () => {
@@ -267,7 +269,7 @@ describe('CheckpointCoordinator.list / revert', () => {
     // 模拟工具已把内容改成 AFTER
     await fs.writeFile(target, 'AFTER', 'utf-8');
 
-    const res = await coord.revert({ id: cp!.id, sessionId: 's1' });
+    const res = await coord.revert({ id: cp!.id, sessionId: 's1', currentMessages: msgs });
     expect(res.filesApplied).toBe(1);
     expect(res.messages).toEqual(msgs);
     expect(await fs.readFile(target, 'utf-8')).toBe('BEFORE');
@@ -283,7 +285,7 @@ describe('CheckpointCoordinator.list / revert', () => {
     const cp = await coord.finalizeTurn({ sessionId: 's1', messages: msgs });
     await fs.writeFile(target, 'AFTER', 'utf-8');
 
-    const res = await coord.revert({ id: cp!.id, sessionId: 's1', applyFiles: false });
+    const res = await coord.revert({ id: cp!.id, sessionId: 's1', applyFiles: false, currentMessages: msgs });
     expect(res.filesApplied).toBe(0);
     expect(await fs.readFile(target, 'utf-8')).toBe('AFTER');
   });
@@ -301,7 +303,7 @@ describe('CheckpointCoordinator.list / revert', () => {
     await fs.writeFile(target, 'created', 'utf-8');
     expect(existsSync(target)).toBe(true);
 
-    const res = await coord.revert({ id: cp!.id, sessionId: 's1' });
+    const res = await coord.revert({ id: cp!.id, sessionId: 's1', currentMessages: msgs });
     expect(res.filesDeleted).toBe(1);
     expect(existsSync(target)).toBe(false);
   });
@@ -456,7 +458,7 @@ describe('CheckpointCoordinator.createStepCheckpoint (W7b2)', () => {
     // 模拟工具落盘改写
     await fs.writeFile(target, 'V2', 'utf-8');
 
-    const res = await coord.revert({ id: cp!.id, sessionId: 's1' });
+    const res = await coord.revert({ id: cp!.id, sessionId: 's1', currentMessages: msgs });
     expect(res.filesApplied).toBe(1);
     expect(await fs.readFile(target, 'utf-8')).toBe('V1');
   });
