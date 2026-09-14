@@ -322,9 +322,9 @@ export async function loadApprovalPolicy(
  */
 export interface ApprovalPolicyWritePatch {
   defaults?: Partial<import('./approval-policy.js').ApprovalPolicyTable>;
-  /** 命令安全级别 safe → auto（bash 只读命令自动执行） */
+  /** 命令安全级别 safe → auto（bash 只读命令自动执行）；undefined = 保留 yaml 现状 */
   bashRead?: boolean;
-  /** 命令安全级别 risky → auto（bash 写命令自动执行） */
+  /** 命令安全级别 risky → auto（bash 写命令自动执行）；undefined = 保留 yaml 现状 */
   bashWrite?: boolean;
 }
 
@@ -397,11 +397,18 @@ export async function writeApprovalPolicy(
     !o.command_match &&
     !o.args_contains &&
     !o.policy;
-  const overrides = (existing.overrides ?? []).filter((o) => !isUiBashRule(o));
-  if (patch.bashRead) {
+  // 三态语义：undefined = 未指定（保留 yaml 现状）。UI 单次点击只携带变更字段，
+  // 若按 falsy 处理会连带删除另一侧规则，造成 bash 读/写开关互斥的表象
+  const existingOverrides = existing.overrides ?? [];
+  const prevBashRead = existingOverrides.some((o) => isUiBashRule(o) && o.command_safety === 'safe');
+  const prevBashWrite = existingOverrides.some((o) => isUiBashRule(o) && o.command_safety === 'risky');
+  const overrides = existingOverrides.filter((o) => !isUiBashRule(o));
+  const bashRead = patch.bashRead ?? prevBashRead;
+  const bashWrite = patch.bashWrite ?? prevBashWrite;
+  if (bashRead) {
     overrides.push({ tool: 'bash', command_safety: 'safe', command_policy: 'auto' });
   }
-  if (patch.bashWrite) {
+  if (bashWrite) {
     overrides.push({ tool: 'bash', command_safety: 'risky', command_policy: 'auto' });
   }
 

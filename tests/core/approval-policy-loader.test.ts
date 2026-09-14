@@ -134,6 +134,27 @@ describe('writeApprovalPolicy round-trip', () => {
     }
   });
 
+  it('single-field patches keep the other bash rule (read/write toggles are independent)', async () => {
+    // UI 单次点击只携带变更字段：先开读、再开写，两条规则必须共存（非互斥）
+    const seqRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ap-loader-seq-'));
+    try {
+      await writeApprovalPolicy(seqRoot, { bashRead: true });
+      await writeApprovalPolicy(seqRoot, { bashWrite: true });
+      let cfg = await loadPolicyYaml(seqRoot);
+      expect(cfg.overrides).toHaveLength(2);
+      expect(cfg.overrides).toContainEqual({ tool: 'bash', command_safety: 'safe', command_policy: 'auto' });
+      expect(cfg.overrides).toContainEqual({ tool: 'bash', command_safety: 'risky', command_policy: 'auto' });
+
+      // 单独关闭写（未指定读）→ 读规则保留，不受连带删除
+      await writeApprovalPolicy(seqRoot, { bashWrite: false });
+      cfg = await loadPolicyYaml(seqRoot);
+      expect(cfg.overrides).toHaveLength(1);
+      expect(cfg.overrides).toContainEqual({ tool: 'bash', command_safety: 'safe', command_policy: 'auto' });
+    } finally {
+      await fs.rm(seqRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects write without workspace root', async () => {
     await expect(writeApprovalPolicy(undefined, { bashRead: true })).rejects.toThrow('未打开工作区');
   });
