@@ -20,6 +20,7 @@
  */
 
 import type { Mode } from '../modes/index.js';
+import { EDIT_TOOL_NAMES } from './edit-tools.js';
 
 /** 取证工具集合 —— 任意调用一次即可视为已完成取证 */
 const EVIDENCE_TOOLS = new Set([
@@ -34,13 +35,8 @@ const EVIDENCE_TOOLS = new Set([
   'lsp',
 ]);
 
-/** 被门禁拦截的编辑工具集合 */
-const EDIT_TOOLS = new Set([
-  'search_replace',
-  'write_file',
-  'append_file',
-  'delete_file',
-]);
+/** 被门禁拦截的编辑工具集合（复用全局单一事实源） */
+const EDIT_TOOLS = EDIT_TOOL_NAMES;
 
 export interface DebugModeGateDeps {
   /** 获取当前 mode（函数而非静态值，支持 mode 切换后动态取） */

@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -750,6 +750,38 @@
           "minimum": 25,
           "maximum": 500,
           "description": "Agent 单次任务的最大循环轮次（防死循环上限）。长重构/跨多文件编辑场景建议 150–300；简单问答场景 25–50 即可。rc.4 从 25 提升默认值至 150。"
+        },
+        "devSeeker.verification.gate": {
+          "type": "string",
+          "enum": [
+            "off",
+            "soft",
+            "hard"
+          ],
+          "enumDescriptions": [
+            "关闭：改完即结束，行为与 0.7.5 及之前版本一致",
+            "软门（推荐）：改完未验证时向模型注入验证指令，由模型自行执行测试",
+            "硬门：软门失效后由程序直接派发 Verify 子代理跑测试并回灌结果"
+          ],
+          "default": "soft",
+          "description": "变更验证门（CVW）。代码被编辑后是否强制先跑验证再收尾。soft 复用主对话前缀缓存、成本最低；hard 在模型忽略提示时兜底派发子代理。"
+        },
+        "devSeeker.verification.maxFixRounds": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10,
+          "description": "验证失败后允许的自动修复轮次上限。超限即放行并在回复中标注「未通过验证」，避免在同一失败上无限打转。"
+        },
+        "devSeeker.verification.fullSuite": {
+          "type": "boolean",
+          "default": false,
+          "description": "受影响测试全绿后是否再补跑一次全量测试。开启更稳但显著变慢，大仓库不建议开启。"
+        },
+        "devSeeker.verification.allowNewTests": {
+          "type": "boolean",
+          "default": true,
+          "description": "当变更文件没有对应的现有测试时，是否允许 Agent 新建最小测试用例（降级链 L2 补测级）。关闭则退回编译/类型检查验证。"
         },
         "devSeeker.logLevel": {
           "type": "string",

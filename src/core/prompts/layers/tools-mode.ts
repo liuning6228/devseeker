@@ -13,6 +13,9 @@
  * V2 增强（M3.14.9）：新增 Skills Activation Protocol 段，引导模型
  * 在匹配技能时遵循三段式激活流程，避免跳过 skill 或虚构 skill 名。
  *
+ * CVW 增强（§4.4）：agent/debug 可写模式追加 Change Verification Protocol 段
+ * （静态文本，plan/ask 只读模式不注入）。
+ *
  * 缓存边界：当 mode + skills 不变时，L1 字节级稳定；
  * 变更时 L1 之后的所有层（L2/L3/messages）从本轮起不能再命中旧缓存，
  * 但 L0 的前缀仍然命中 → 仅丢弃 mode-section 之后的部分。
@@ -24,7 +27,11 @@
  */
 
 import { renderModePromptSection, type Mode } from '../../modes/index.js';
+import { VERIFICATION_PROTOCOL_MODULE } from '../modules/verification-protocol.js';
 import type { Skill } from '../../skills/types.js';
+
+/** 可写模式（会产生代码编辑）—— 只有这些模式挂载验证协议 */
+const WRITABLE_MODES: ReadonlySet<Mode> = new Set<Mode>(['agent', 'debug']);
 
 export interface L1ToolsModeInput {
   mode: Mode;
@@ -42,6 +49,11 @@ export interface L1ToolsModeInput {
  */
 export function buildL1ToolsMode({ mode, skills }: L1ToolsModeInput): string {
   const parts: string[] = [renderModePromptSection(mode)];
+
+  // CVW §4.4：变更验证协议（静态文本，只依赖 mode，不读运行时配置）
+  if (WRITABLE_MODES.has(mode)) {
+    parts.push(VERIFICATION_PROTOCOL_MODULE);
+  }
 
   if (skills.length > 0) {
     // §M3.6 稳定前缀要求：副本 + 显式排序，防调用方遗漏

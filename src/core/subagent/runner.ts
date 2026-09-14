@@ -316,7 +316,13 @@ export async function runSubagent(
       }
 
       const stats: SubagentRunStats = { toolCalls: toolCallCount };
-      return { summary, stats };
+      // CVW · 子代理编辑清单回传主 loop（绝不让子代理成为验证门的盲区）
+      const editedFiles = loop.getEditedFiles();
+      return {
+        summary,
+        stats,
+        ...(editedFiles.length > 0 ? { editedFiles } : {}),
+      };
     } catch (e) {
       clearTimeout(timer);
       if (opts.signal) opts.signal.removeEventListener('abort', parentAbort);

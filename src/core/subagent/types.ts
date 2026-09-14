@@ -60,6 +60,14 @@ export interface SubagentResult {
   summary: string;
   stats?: SubagentRunStats;
   artifacts?: string[];
+  /**
+   * CVW · 子代理在自己 loop 内编辑成功的文件（绝对路径）。
+   *
+   * 子代理（如 Debug）持有编辑工具，其改动不经主 loop，主 agent 本可借此
+   * 绕过变更验证门。回传本字段后由主 loop 并入 editedFiles（见
+   * docs/verification-workflow-optimization-plan.md §4.3 C.5）。
+   */
+  editedFiles?: readonly string[];
 }
 
 export interface SubagentRunStats {

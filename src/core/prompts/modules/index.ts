@@ -21,6 +21,7 @@
  *   L1 会话区：
  *    10. mode-section           —— 当前 Mode 指令（core/modes/index.ts）
  *    11. skills-manifest        —— workspace + builtin 技能清单
+ *    11b. verification-protocol —— 变更验证协议（CVW §4.4，仅 agent/debug）
  *   L2 工作区：
  *    12. rules-section          —— always_on + glob 命中规则
  *    13. model-decision-index   —— 可按需 fetch 的规则目录
@@ -43,3 +44,4 @@ export { VUE_ECOSYSTEM_MODULE } from './ecosystem-vue.js';
 export { ELEMENT_PLUS_ECOSYSTEM_MODULE } from './ecosystem-element-plus.js';
 export { TONGYI_ECOSYSTEM_MODULE } from './ecosystem-tongyi.js';
 export { VLM_OCR_POLICY_MODULE } from './vlm-ocr-policy.js';
+export { VERIFICATION_PROTOCOL_MODULE } from './verification-protocol.js';

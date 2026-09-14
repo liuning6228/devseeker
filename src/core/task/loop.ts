@@ -23,10 +23,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { isAbsolute, resolve as resolvePath, relative as relativePath } from 'node:path';
 import type { IProvider } from '../../providers/base.js';
 import type { StreamEvent, ToolCall, Message } from '../../providers/types.js';
 import { ToolRegistry, ToolRunner, type ToolApprovalGate } from '../tools/registry.js';
 import { isEvidenceTool } from '../tools/debug-mode-gate.js';
+import { EDIT_TOOL_NAMES } from '../tools/edit-tools.js';
 import type { ApprovalAuditSink } from '../tools/approval-audit.js';
 import type { ITool, ToolResult } from '../tools/types.js';
 import { MessageHistory } from './history.js';
@@ -51,6 +54,24 @@ import { StreamingFileWriter } from '../tools/streaming-file-writer.js';
 import { sleepWithAbort } from '../retry/backoff.js';
 import { StreamingDiffViewProvider } from '../../ui/streaming-diff-view.js';
 import { runConcurrent } from '../subagent/thread-pool.js';
+import {
+  buildGatePrompt,
+  buildUnverifiedWarning,
+  computeAffectedTests,
+  decideGate,
+  decideTier,
+  detectTestPlan,
+  isVerificationCommand,
+  parseTestOutput,
+  parseVerifyReport,
+  renderTestSummary,
+  type GraphIndexLike,
+  type TargetingResult,
+  type TestPlan,
+  type TestRunSummary,
+  type VerificationConfig,
+  type VerificationState,
+} from '../verification/index.js';
 
 const log = getLogger('task.loop');
 
@@ -132,6 +153,8 @@ interface ToolOutcome {
   errorCode?: string;
   /** phase='parse-error' 时的原始解析错误 */
   parseError?: string;
+  /** 工具返回的结构化数据（不发回 LLM，仅程序侧消费，如子代理编辑清单） */
+  display?: Record<string, unknown>;
 }
 
 /** P0-1 · 一轮内的执行分组：并行组（只读/网络）或串行单调用 */
@@ -190,6 +213,16 @@ export interface TaskLoopConfig {
    * 由调用方（panel.ts）维护 hasEvidence 状态和 Mode 判断。
    */
   debugModeGate?: (toolName: string) => { verdict: 'allow' | 'block'; message?: string };
+  /**
+   * CVW 验证门（docs/verification-workflow-optimization-plan.md）。
+   *
+   * 不传 → 门全关，行为与历史版本完全一致（子代理 loop 即走此路径，避免双重门）。
+   */
+  verification?: {
+    config: VerificationConfig;
+    /** 可选图索引：约定映射未命中时用反向依赖定位测试 */
+    graphIndex?: GraphIndexLike | undefined;
+  };
 }
 
 /**
@@ -247,13 +280,44 @@ export class TaskLoop {
   private isDegraded = false;
   /** DebugModeGate hasEvidence：本轮 send() 生命周期内是否调过取证工具 */
   private evidenceToolCalled = false;
+
+  // ─── CVW · 验证门状态（程序侧维护，LLM 不可篡改）───
+  /**
+   * hard 门 Verify 子代理超时（**毫秒**，对齐 Agent 工具 schema：默认 120000 / 上限 600000）。
+   *
+   * 全量套件可能跑很久，方案 §6.4 / D5 要求 ≥300s；写成 `300` 会被当成 300ms，
+   * 子代理立刻被 abort，hard 门静默失效。
+   */
+  private static readonly HARD_VERIFY_TIMEOUT_MS = 300_000;
+  private readonly verificationConfig: VerificationConfig | undefined;
+  private readonly graphIndex: GraphIndexLike | undefined;
+  /** 本任务编辑过的文件（结构绝对路径） */
+  private readonly editedFiles = new Set<string>();
+  private verificationState: VerificationState = 'NotEdited';
+  private testPlan: TestPlan | undefined;
+  private lastTestSummary: TestRunSummary | undefined;
+  /** 模型实际执行过的验证命令 */
+  private lastVerifyCommand = '';
+  private gatePromptCount = 0;
+  private fixRounds = 0;
+  private hardVerifyAttempted = false;
+  /** 未验证/解析失败等需向用户明示的警示语 */
+  private gateWarning: string | undefined;
+  /** 本任务是否派过子代理（子代理可绕过 editedFiles 跟踪，需 git 兜底） */
+  private delegateUsed = false;
+  /** send() 起点的 git 脏文件快照（用于排除任务前已有改动） */
+  private gitBaseline: Set<string> | undefined;
+  /** 基线快照的在飞请求：汇入子代理编辑前必须等它落定，否则会拿空基线
+   *  把任务前就存在的脏文件全部误当成本次变更 */
+  private gitBaselinePromise: Promise<Set<string>> | undefined;
+  private delegateEditsAbsorbed = false;
   /** P0-1 · 同轮并行执行的最大工具数（read_only/network 级并发上限） */
   private static readonly MAX_PARALLEL_TOOLS = 4;
   private static readonly MAX_DEGRADE = 2;
   private static readonly DEGRADE_THRESHOLD = 3;
   private static readonly REASONING_MODEL = 'deepseek-v4-pro';
-  /** 需要路由降级的编辑工具集合 */
-  private static readonly EDIT_TOOLS = new Set(['search_replace', 'write_file', 'append_file', 'delete_file']);
+  /** 需要路由降级的编辑工具集合（复用全局单一事实源） */
+  private static readonly EDIT_TOOLS = EDIT_TOOL_NAMES;
 
 
   constructor(cfg: TaskLoopConfig) {
@@ -280,6 +344,8 @@ export class TaskLoop {
     this.contextManager = cfg.contextManager;
     this.modelOverride = cfg.modelOverride;
     this.codebaseIndex = cfg.codebaseIndex;
+    this.verificationConfig = cfg.verification?.config;
+    this.graphIndex = cfg.verification?.graphIndex;
     // §8.11.2 · 文件变更冲突检测缓存
     this.fileStateCache = cfg.workspaceRoot ? new FileStateCache() : undefined;
     // W15.8 · 流式文件写入器（需 workspaceRoot）
@@ -370,6 +436,8 @@ export class TaskLoop {
     this.promptModifier.clearAll();
     // DebugModeGate · 新任务开始时重置取证状态
     this.evidenceToolCalled = false;
+    // CVW · 新任务开始时重置验证门状态（editedFiles 等均为任务级）
+    this.resetVerificationState();
     // P0-7 · 内存诊断：send() 开始时记录基线
     const memStart = process.memoryUsage();
     log.info(
@@ -513,6 +581,17 @@ export class TaskLoop {
     return this.history.snapshot();
   }
 
+  /**
+   * CVW · 本 loop 编辑成功的文件（绝对路径）。
+   *
+   * 供 `runSubagent` 把子代理 loop 的编辑清单回传给主 loop，修补
+   * “delegate 编辑后直接收尾即可绕过验证门”的漏洞（§4.3 C.5）。
+   * 跟踪与门配置无关，因此子代理 loop（门全关）同样有值。
+   */
+  getEditedFiles(): string[] {
+    return [...this.editedFiles];
+  }
+
   // ─────────── 内部循环 ───────────
 
   /** SSE 断裂自动重推最大次数（对齐 codes.ts RETRY_TABLE 中 STREAM_BROKEN 的 attempts:5） */
@@ -539,7 +618,7 @@ export class TaskLoop {
       }
       this.emit({ type: 'turn_start', taskId: this.taskId, turn });
 
-      const outcome = await this.runOneTurn();
+      const outcome = await this.runOneTurn(turn);
 
       if (outcome === 'aborted') {
         this.emit({ type: 'task_end', taskId: this.taskId, reason: 'aborted' });
@@ -617,7 +696,7 @@ export class TaskLoop {
     return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false, errorCode: ErrorCodes.TASK_LOOP_INFINITE, errorMessage: `达到最大轮次 ${this.maxTurns}，已终止` };
   }
 
-  private async runOneTurn(): Promise<
+  private async runOneTurn(turn: number): Promise<
     | 'aborted'
     | { kind: 'completed'; assistantText: string; toolCallCount: number }
     | { kind: 'continue'; assistantText: string; toolCallCount: number }
@@ -888,8 +967,14 @@ export class TaskLoop {
       'TaskLoop: assistant message added to history',
     );
 
-    // 非工具调用 → 本轮结束
+    // 非工具调用 → 本轮结束（CVW §4.3 C.2：收尾前先过验证门）
     if (doneReason !== 'tool_use' || rawCalls.length === 0) {
+      const gate = await this.applyVerificationGate(turn, signal);
+      if (gate === 'aborted') return 'aborted';
+      if (gate === 'gated') {
+        // 门已注入验证指令 → 交还模型继续执行，不结束任务
+        return { kind: 'continue', assistantText, toolCallCount: 0 };
+      }
       return { kind: 'completed', assistantText, toolCallCount: 0 };
     }
 
@@ -1185,6 +1270,7 @@ export class TaskLoop {
       ok: result.ok,
       content: result.content,
       errorCode: result.errorCode,
+      ...(result.display ? { display: result.display } : {}),
     };
   }
 
@@ -1252,6 +1338,11 @@ export class TaskLoop {
       if (isEvidenceTool(o.call.name)) {
         this.evidenceToolCalled = true;
       }
+
+      // ─── CVW · 验证门信号采集（编辑跟踪 + 测试命令客观放行信号）───
+      // 必须在此处对 tool_result **原文**解析：ContextManager 的轻度压缩
+      // 会在上下文使用率 ≥70% 时把长 tool_result 截为头尾，事后翻找会拿到残文。
+      this.trackVerificationSignals(o);
     }
 
     this.history.addToolResult(o.call.id, finalContent, o.call.name);
@@ -1278,6 +1369,395 @@ export class TaskLoop {
     });
     // P0-7 · 工具执行完毕，关闭 Diff 编辑器
     this.streamingDiffView?.close(o.call.id);
+  }
+
+  // ─────────── CVW · 验证门（docs/verification-workflow-optimization-plan.md §4.3）───────────
+
+  /** 任务级重置：send() 入口调用，保证跨任务不串状态 */
+  private resetVerificationState(): void {
+    this.editedFiles.clear();
+    this.verificationState = 'NotEdited';
+    this.lastTestSummary = undefined;
+    this.lastVerifyCommand = '';
+    this.gatePromptCount = 0;
+    this.fixRounds = 0;
+    this.hardVerifyAttempted = false;
+    this.gateWarning = undefined;
+    this.delegateUsed = false;
+    this.delegateEditsAbsorbed = false;
+    this.gitBaseline = undefined;
+    this.gitBaselinePromise = undefined;
+    if (this.verificationConfig && this.verificationConfig.gate !== 'off') {
+      // 测试计划预热：bash 验证命令识别依赖 testPlan，而那发生在本轮工具归并时、
+      // 早于验证门的 ensureTestPlan。不预热则“模型主动跑了测试”的信号会被漏接。
+      void this.ensureTestPlan().catch((e) => {
+        log.warn({ err: String(e) }, '[Verification] test plan prewarm failed');
+      });
+      // 门开启时才付出 git 快照成本；失败静默（非 git 仓库属正常情况）
+      if (this.workspaceRoot) {
+        this.gitBaselinePromise = this.gitDirtyFiles();
+        void this.gitBaselinePromise.then((files) => {
+          this.gitBaseline = files;
+        });
+      }
+    }
+  }
+
+  /**
+   * 采集验证信号（在 applyToolOutcome 归并段内按声明顺序执行，天然并行安全）：
+   * 1. 编辑工具成功 → 记录目标文件并把状态退回 Edited（撤销此前的 Passed）；
+   * 2. bash 命中测试/构建命令 → 解析输出，据此流转 Passed / Failed；
+   * 3. get_terminal_output 在后台测试场景下补齐判定；
+   * 4. Agent 委派成功 → 打标记，收尾时用 git 兜底比对（子代理编辑不经本 loop）。
+   */
+  private trackVerificationSignals(o: ToolOutcome): void {
+    if (o.phase !== 'executed') return;
+
+    // editedFiles 跟踪不受门配置约束：子代理 loop 门全关，但它的编辑清单
+    // 需经 getEditedFiles() 回传给主 loop（§4.3 C.5）。成本仅一次 Set.add。
+    if (o.ok && TaskLoop.EDIT_TOOLS.has(o.call.name)) {
+      const fp = typeof o.args['file_path'] === 'string' ? (o.args['file_path'] as string) : undefined;
+      if (fp && this.workspaceRoot) {
+        this.editedFiles.add(isAbsolute(fp) ? fp : resolvePath(this.workspaceRoot, fp));
+      } else if (fp) {
+        this.editedFiles.add(fp);
+      }
+      // 新编辑作废此前的验证结论
+      if (this.verificationConfig && this.verificationConfig.gate !== 'off') {
+        this.verificationState = 'Edited';
+      }
+      return;
+    }
+
+    if (!this.verificationConfig || this.verificationConfig.gate === 'off') return;
+
+    if (o.ok && o.call.name === 'Agent') {
+      this.delegateUsed = true;
+      this.delegateEditsAbsorbed = false;
+      // 子代理结构化回传的编辑清单（优于 git 差集：不依赖 git 仓库、无误报）
+      const reported = o.display?.['editedFiles'];
+      if (Array.isArray(reported)) {
+        for (const f of reported) {
+          if (typeof f !== 'string' || !f) continue;
+          this.editedFiles.add(
+            this.workspaceRoot && !isAbsolute(f) ? resolvePath(this.workspaceRoot, f) : f,
+          );
+          this.verificationState = 'Edited';
+        }
+      }
+      return;
+    }
+
+    if (o.call.name === 'bash' && this.testPlan) {
+      const command = typeof o.args['command'] === 'string' ? (o.args['command'] as string) : '';
+      if (!isVerificationCommand(command, this.testPlan, [this.lastVerifyCommand])) return;
+      this.lastVerifyCommand = command;
+      // 后台执行拿不到最终结论 → 等 get_terminal_output 补齐
+      if (o.args['is_background'] === true) {
+        this.verificationState = 'Verifying';
+        return;
+      }
+      this.absorbTestOutput(o.content);
+      return;
+    }
+
+    if (o.call.name === 'get_terminal_output' && this.lastVerifyCommand && this.verificationState === 'Verifying') {
+      this.absorbTestOutput(o.content);
+    }
+  }
+
+  /** 解析测试输出并流转状态（解析失败不阻塞，只加警示） */
+  private absorbTestOutput(rawContent: string): void {
+    const summary = parseTestOutput(rawContent, this.testPlan?.framework);
+    this.lastTestSummary = summary;
+    if (summary.status === 'passed') {
+      this.verificationState = 'Passed';
+      this.gateWarning = undefined;
+    } else if (summary.status === 'failed') {
+      this.verificationState = 'Failed';
+      this.fixRounds++;
+    } else {
+      // parse-error：模型确实跑了命令，不再反复拦截，改为放行 + 标注
+      this.verificationState = 'Passed';
+      this.gateWarning = buildUnverifiedWarning('parse-error');
+    }
+    log.info(
+      { state: this.verificationState, status: summary.status, passed: summary.passed, failed: summary.failed },
+      '[Verification] test output absorbed',
+    );
+  }
+
+  /**
+   * 收尾拦截（§4.3 C.2）。
+   *
+   * @returns 'allow' 放行收尾 / 'gated' 已注入验证指令需继续 / 'aborted' 用户中止
+   */
+  private async applyVerificationGate(
+    turn: number,
+    signal: AbortSignal,
+  ): Promise<'allow' | 'gated' | 'aborted'> {
+    const cfg = this.verificationConfig;
+    if (!cfg || cfg.gate === 'off') return 'allow';
+    // 零开销路径：本任务既没编辑也没派子代理
+    if (this.editedFiles.size === 0 && !this.delegateUsed) return 'allow';
+
+    await this.absorbDelegateEdits();
+    if (signal.aborted) return 'aborted';
+    if (this.editedFiles.size === 0) return 'allow';
+
+    const plan = await this.ensureTestPlan();
+    if (signal.aborted) return 'aborted';
+
+    let targeting: TargetingResult;
+    try {
+      targeting = await computeAffectedTests({
+        workspaceRoot: this.workspaceRoot,
+        editedFiles: this.editedFiles,
+        plan,
+        graphIndex: this.graphIndex,
+      });
+    } catch (e) {
+      log.warn({ err: String(e) }, '[Verification] targeting failed; falling back to full suite');
+      targeting = { testFiles: [], command: plan.testCommand, source: 'none', fullSuite: Boolean(plan.testCommand) };
+    }
+    if (signal.aborted) return 'aborted';
+
+    const tier = decideTier(plan, targeting.testFiles.length > 0, cfg.allowNewTests);
+    const decision = decideGate({
+      config: cfg,
+      state: this.verificationState,
+      editedFileCount: this.editedFiles.size,
+      turn,
+      maxTurns: this.maxTurns,
+      gatePromptCount: this.gatePromptCount,
+      fixRounds: this.fixRounds,
+      tier,
+      hardAttempted: this.hardVerifyAttempted,
+    });
+
+    log.info(
+      {
+        action: decision.action, reason: decision.reason, tier,
+        state: this.verificationState, editedFiles: this.editedFiles.size,
+        targets: targeting.testFiles.length, source: targeting.source,
+      },
+      '[Verification] gate decision',
+    );
+
+    if (decision.action === 'allow') {
+      const warning = decision.warning ?? this.gateWarning;
+      if (warning) {
+        this.emit({ type: 'text_delta', taskId: this.taskId, text: `\n\n${warning}\n` });
+        this.gateWarning = undefined;
+      }
+      return 'allow';
+    }
+
+    const command = tier === 'L3-build'
+      ? (plan.buildCommand ?? plan.typecheckCommand ?? '')
+      : targeting.command;
+
+    if (decision.action === 'hard-verify') {
+      return this.runHardVerify({ command, tier, targeting, plan }, signal);
+    }
+
+    // soft：注入验证指令（history 尾部追加，前缀缓存全命中）
+    this.gatePromptCount++;
+    this.verificationState = 'Verifying';
+    this.history.addUser(buildGatePrompt({
+      tier,
+      editedFiles: this.displayPaths(),
+      plan,
+      command,
+      testFiles: targeting.testFiles,
+      attempt: this.gatePromptCount,
+      lastSummary: this.lastTestSummary,
+      note: targeting.note,
+    }));
+    return 'gated';
+  }
+
+  /**
+   * hard 门：程序化派发 Verify 子代理（只读工具集，不会自己改测试作弊）。
+   *
+   * 走注册表里的 `Agent` 工具，从而复用其审批/隔离/超时链路；
+   * 工具不可用（如单测环境未注册）时降级为 soft 提示。
+   */
+  private async runHardVerify(
+    ctx: { command: string; tier: ReturnType<typeof decideTier>; targeting: TargetingResult; plan: TestPlan },
+    signal: AbortSignal,
+  ): Promise<'allow' | 'gated' | 'aborted'> {
+    this.hardVerifyAttempted = true;
+    if (!this.toolRegistry.get('Agent')) {
+      log.warn('[Verification] Agent tool unavailable; hard gate degraded to soft');
+      this.gatePromptCount++;
+      this.verificationState = 'Verifying';
+      this.history.addUser(buildGatePrompt({
+        tier: ctx.tier,
+        editedFiles: this.displayPaths(),
+        plan: ctx.plan,
+        command: ctx.command,
+        testFiles: ctx.targeting.testFiles,
+        attempt: this.gatePromptCount,
+        lastSummary: this.lastTestSummary,
+        note: ctx.targeting.note,
+      }));
+      return 'gated';
+    }
+
+    const prompt = [
+      '对以下变更执行验证，不要修改任何文件：',
+      `变更文件：${this.displayPaths().join(', ')}`,
+      ctx.command ? `建议命令：${ctx.command}` : '未提供命令，请自行判定最小验证方式。',
+      '报告格式：Status / Commands run / Counts / First failure(path#Lline) / Next step。',
+    ].join('\n');
+
+    const toolCallId = randomUUID();
+    this.emit({
+      type: 'tool_exec_start', taskId: this.taskId, toolCallId,
+      name: 'Agent', args: { subagent_type: 'Verify' }, startTime: Date.now(),
+    });
+    let result: ToolResult;
+    try {
+      result = await this.toolRunner.run({
+        toolCallId,
+        name: 'Agent',
+        args: {
+          subagent_type: 'Verify',
+          description: 'CVW 变更验证',
+          prompt,
+          timeout: TaskLoop.HARD_VERIFY_TIMEOUT_MS,
+        },
+        workspaceRoot: this.workspaceRoot,
+        signal,
+        taskId: this.taskId,
+      });
+    } catch (e) {
+      result = { ok: false, content: `Error: ${String(e)}` };
+    }
+    this.emit({
+      type: 'tool_exec_end', taskId: this.taskId, toolCallId, name: 'Agent',
+      ok: result.ok, contentPreview: result.ok ? '' : truncate(result.content, 500), endTime: Date.now(),
+    });
+    if (signal.aborted) return 'aborted';
+
+    if (!result.ok) {
+      // 子代理自身失败（非测试失败）→ 不冤枉变更，退回 soft 让模型自查
+      log.warn({ content: truncate(result.content, 200) }, '[Verification] hard verify dispatch failed');
+      this.gateWarning = buildUnverifiedWarning('no-test-run');
+      this.verificationState = 'Exceeded';
+      return 'allow';
+    }
+
+    // 子代理回传的是自然语言报告（`Status: ✅ PASSED`），不是框架原始输出。
+    // 必须先试 parseVerifyReport——否则框架解析器全 miss 得到 parse-error，
+    // 而 absorbTestOutput 对 parse-error 一律放行，`❌ FAILED` 会被误判为通过。
+    const summary = parseVerifyReport(result.content)
+      ?? parseTestOutput(result.content, this.testPlan?.framework);
+    this.lastTestSummary = summary;
+    log.info(
+      { status: summary.status, passed: summary.passed, failed: summary.failed },
+      '[Verification] hard verify report parsed',
+    );
+
+    if (summary.status === 'passed') {
+      this.verificationState = 'Passed';
+      this.gateWarning = undefined;
+      this.emit({
+        type: 'text_delta', taskId: this.taskId,
+        text: `\n\n✅ 验证通过（Verify 子代理）：${summary.passed} passed\n`,
+      });
+      return 'allow';
+    }
+
+    if (summary.status === 'parse-error') {
+      // 子代理跑完了但结论不明（报告格式不符/仅部分验证）→ 不再二次拦截，
+      // 放行并向用户明示未获验证，把判断权交回人。
+      this.verificationState = 'Exceeded';
+      const warning = buildUnverifiedWarning('parse-error');
+      this.emit({ type: 'text_delta', taskId: this.taskId, text: `\n\n${warning}\n` });
+      this.gateWarning = undefined;
+      return 'allow';
+    }
+
+    this.verificationState = 'Failed';
+    this.fixRounds++;
+    this.history.addUser(renderTestSummary(summary, ctx.command)
+      + '\n[Verification Gate] 程序化验证未通过，请修复后重新验证；不得通过删除或跳过测试让其变绿。');
+    return 'gated';
+  }
+
+  /** 探测测试计划（每任务一次，探测器内部另有工作区级缓存） */
+  private async ensureTestPlan(): Promise<TestPlan> {
+    this.testPlan ??= await detectTestPlan(this.workspaceRoot);
+    return this.testPlan;
+  }
+
+  /**
+   * 子代理编辑兜底（§4.3 C.5）：Debug 子代理持有编辑工具，其改动不经本 loop，
+   * 主 agent 可借此绕过验证门。用 git 脏文件差集把这些改动并入 editedFiles。
+   */
+  private async absorbDelegateEdits(): Promise<void> {
+    if (!this.delegateUsed || this.delegateEditsAbsorbed) return;
+    this.delegateEditsAbsorbed = true;
+    if (!this.workspaceRoot) return;
+    // 基线未落定就停：拿空基线做差集会把任务前就脏的文件全部误认为本次变更
+    const baseline = this.gitBaseline ?? (this.gitBaselinePromise ? await this.gitBaselinePromise : undefined);
+    if (!baseline) return;
+    const current = await this.gitDirtyFiles();
+    if (current.size === 0) return;
+    let added = 0;
+    for (const rel of current) {
+      if (baseline.has(rel)) continue;
+      this.editedFiles.add(resolvePath(this.workspaceRoot, rel));
+      added++;
+    }
+    if (added > 0) {
+      if (this.verificationState === 'NotEdited' || this.verificationState === 'Passed') {
+        this.verificationState = 'Edited';
+      }
+      log.info({ added }, '[Verification] absorbed subagent edits via git status');
+    }
+  }
+
+  /** `git status --porcelain` 的脏文件相对路径集合；非 git 仓库/失败返回空集 */
+  private async gitDirtyFiles(): Promise<Set<string>> {
+    const root = this.workspaceRoot;
+    if (!root) return new Set();
+    return new Promise<Set<string>>((resolvePromise) => {
+      execFile(
+        'git',
+        ['status', '--porcelain', '-uall'],
+        { cwd: root, timeout: 5_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+        (err, stdout) => {
+          if (err) {
+            resolvePromise(new Set());
+            return;
+          }
+          const out = new Set<string>();
+          for (const line of stdout.split('\n')) {
+            if (line.length < 4) continue;
+            // 形如 ` M src/a.ts` / `?? new.ts` / `R  old -> new`
+            const path = line.slice(3).trim();
+            const arrow = path.lastIndexOf(' -> ');
+            const finalPath = arrow >= 0 ? path.slice(arrow + 4) : path;
+            const unquoted = finalPath.replace(/^"|"$/g, '');
+            if (unquoted) out.add(unquoted);
+          }
+          resolvePromise(out);
+        },
+      );
+    });
+  }
+
+  /** 编辑文件的展示路径（工作区相对，POSIX） */
+  private displayPaths(): string[] {
+    const root = this.workspaceRoot;
+    return [...this.editedFiles].map((abs) => {
+      if (!root) return abs;
+      const rel = relativePath(root, abs);
+      return !rel || rel.startsWith('..') ? abs : rel.replace(/\\/g, '/');
+    });
   }
 
   private emit(event: TaskEvent): void {
@@ -1347,10 +1827,8 @@ async function injectPostEditDiagnostics(
   history: MessageHistory,
 ): Promise<void> {
   if (!workspaceRoot) return;
-  // 检查是否有编辑工具
-  const editCalls = rawCalls.filter(c =>
-    c.name === 'search_replace' || c.name === 'write_file',
-  );
+  // 检查是否有编辑工具（EDIT_TOOL_NAMES 为单一事实源，含 append_file / delete_file）
+  const editCalls = rawCalls.filter(c => EDIT_TOOL_NAMES.has(c.name));
   if (editCalls.length === 0) return;
 
   // 仅限 VSCode extension host 环境，import * as vscode 时做 dynamic import 保护
@@ -1415,7 +1893,8 @@ async function buildEditContextForTurn(
   // 收集编辑工具的目标文件路径
   const targetFiles = new Set<string>();
   for (const call of rawCalls) {
-    if (call.name !== 'search_replace' && call.name !== 'write_file') continue;
+    // delete_file 无需检索编辑上下文（目标文件将被删除）
+    if (!EDIT_TOOL_NAMES.has(call.name) || call.name === 'delete_file') continue;
     try {
       const parsed = JSON.parse(call.argsRaw) as Record<string, unknown>;
       const fp = typeof parsed.file_path === 'string' ? parsed.file_path : undefined;
@@ -1455,9 +1934,8 @@ async function injectPostEditVerification(
   codebaseIndex: Exclude<TaskLoopConfig['codebaseIndex'], undefined>,
   history: MessageHistory,
 ): Promise<void> {
-  const editCalls = rawCalls.filter(c =>
-    c.name === 'search_replace' || c.name === 'write_file',
-  );
+  // delete_file 不参与引用验证（目标文件已不存在，verifyReferences 无意义）
+  const editCalls = rawCalls.filter(c => EDIT_TOOL_NAMES.has(c.name) && c.name !== 'delete_file');
   if (editCalls.length === 0) return;
 
   const { verifyReferences, formatReferenceIssues } = await import(

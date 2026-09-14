@@ -371,6 +371,10 @@ function formatSubagentResult(agentType: string, description: string, result: im
       subagentType: agentType,
       description,
       summaryPreview: result.summary.slice(0, 200),
+      // CVW · 子代理编辑清单：由主 loop 的验证门并入 editedFiles（§4.3 C.5）
+      ...(result.editedFiles && result.editedFiles.length > 0
+        ? { editedFiles: [...result.editedFiles] }
+        : {}),
     },
   };
 }

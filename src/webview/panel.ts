@@ -169,6 +169,10 @@ import { loadApprovalPolicy, loadPolicyYaml, getDefaultPolicyPath, writeApproval
 import { DEFAULT_POLICY } from '../core/tools/approval-policy.js';
 import { isEditTool, getBlockedMessage } from '../core/tools/debug-mode-gate.js';
 import {
+  normalizeVerificationConfig,
+  type GraphIndexLike,
+} from '../core/verification/index.js';
+import {
   ModeManager,
   MODE_INFO,
   ALL_MODES,
@@ -2521,6 +2525,19 @@ export class DualMindChatPanel {
     // 同步加载策略（异步不阻塞 ToolRunner 构造，decideApproval 在 run 时才执行）
     const { overrides, policyTable } = await loadPolicy();
 
+    // CVW · 变更验证门配置（docs/verification-workflow-optimization-plan.md §4.7）
+    const verificationConfig = normalizeVerificationConfig({
+      gate: cfg.get<string>('verification.gate'),
+      maxFixRounds: cfg.get<number>('verification.maxFixRounds'),
+      fullSuite: cfg.get<boolean>('verification.fullSuite'),
+      allowNewTests: cfg.get<boolean>('verification.allowNewTests'),
+    });
+    // 图索引仅在已常驻时供验证门反查测试；此处只触发后台加载，不 await
+    // （建图可达数十秒，绝不能阻塞用户消息发送；本轮未就绪就走约定映射）
+    if (verificationConfig.gate !== 'off') {
+      void this.getGraphIndex().catch(() => {});
+    }
+
     const loop = new TaskLoop({
       provider,
       toolRegistry: this.toolRegistry,
@@ -2540,6 +2557,11 @@ export class DualMindChatPanel {
         : (tool) => isToolAllowedInMode(tool, this.modeManager.getCurrent()),
       // W8 · Context Management：根据当前 provider 的 contextWindow 动态压缩
       contextManager: new ContextManager({ contextWindow: provider.contextWindow }),
+      // CVW · 变更验证门：编辑后未验证不得收尾
+      verification: {
+        config: verificationConfig,
+        graphIndex: this.verificationGraphIndex(),
+      },
       // S2 · DebugModeGate
       debugModeGate: (toolName: string) => {
         const mode = this.modeManager.getCurrent();
@@ -3983,6 +4005,32 @@ export class DualMindChatPanel {
       }
     }
     return idx;
+  }
+
+  /**
+   * CVW · 验证门用图索引视图（惰求值代理）。
+   *
+   * TaskLoop 构造时图索引可能尚未建好，但验证门真正查询发生在“模型改完代码”之后
+   * （至少数秒后），彼时大概率已就绪。因此返回一个每次调用才读
+   * `this.graphIndex` 的代理；未就绪返回空数组，验证门自动退回约定映射。
+   */
+  private verificationGraphIndex(): GraphIndexLike {
+    return {
+      findCallers: (symbolName, filePath) => {
+        try {
+          return this.graphIndex?.findCallers(symbolName, filePath) ?? [];
+        } catch {
+          return [];
+        }
+      },
+      findSymbolsByPathPrefix: (prefix, limit) => {
+        try {
+          return this.graphIndex?.findSymbolsByPathPrefix(prefix, limit) ?? [];
+        } catch {
+          return [];
+        }
+      },
+    };
   }
 
   /**
