@@ -25,8 +25,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveToolsets, applyBlockedTools } from '../../src/core/subagent/toolset-resolver.js';
-import type { ToolsetName } from '../../src/core/subagent/types.js';
+import { resolveToolsets, applyBlockedTools, isDelegateBlocked } from '../../src/core/subagent/toolset-resolver.js';
+import { getDefinitionForPreset } from '../../src/core/subagent/definitions.js';
+import type { PresetName, ToolsetName } from '../../src/core/subagent/types.js';
 import { normalizeIsolation, canSpawn, DEFAULT_ISOLATION } from '../../src/core/subagent/delegation-config.js';
 import { runConcurrent, Semaphore } from '../../src/core/subagent/thread-pool.js';
 import { doesTaskNeedPlanning, extractFeatures } from '../../src/core/modes/decision-tree.js';
@@ -74,17 +75,92 @@ describe('T30: AgentTool preset explorer + mode fork', () => {
     expect(filtered.has('read_file')).toBe(true);
     expect(filtered.has('search_codebase')).toBe(true);
   });
+
+  it('search toolset 解析真实存在的符号工具名（F-5 幽灵名）', () => {
+    const tools = resolveToolsets(['search']);
+    // 修复后：真实注册名 workspace_symbol / document_symbol
+    expect(tools.has('workspace_symbol')).toBe(true);
+    expect(tools.has('document_symbol')).toBe(true);
+    // 幽灵名 search_symbol 不应再出现
+    expect(tools.has('search_symbol')).toBe(false);
+  });
+
+  it('isDelegateBlocked 大小写不敏感（F-10）', () => {
+    expect(isDelegateBlocked('agent')).toBe(true);
+    expect(isDelegateBlocked('Agent')).toBe(true);
+    expect(isDelegateBlocked('AGENT')).toBe(true);
+    expect(isDelegateBlocked('send_message')).toBe(true);
+    expect(isDelegateBlocked('Send_Message')).toBe(true);
+    // delegate_task 已不在黑名单（并非实际工具名）
+    expect(isDelegateBlocked('delegate_task')).toBe(false);
+    expect(isDelegateBlocked('read_file')).toBe(false);
+  });
+
+  it('applyBlockedTools 大小写不敏感且拦 send_message（F-10）', () => {
+    const allowed = new Set<string>(['read_file', 'Agent', 'send_message', 'Skill']);
+    const filtered = applyBlockedTools(allowed);
+    expect(filtered.has('Agent')).toBe(false);
+    expect(filtered.has('send_message')).toBe(false);
+    expect(filtered.has('Skill')).toBe(false);
+    expect(filtered.has('read_file')).toBe(true);
+  });
 });
 
-// ─────────── T31: AgentTool preset implementer ───────────
+// ─────────── T31: 子代理只读不变量 ───────────
 
-describe('T31: AgentTool preset implementer with file+terminal', () => {
-  it('resolveToolsets implements 有 file+terminal 权限', () => {
-    const tools = resolveToolsets(['search', 'file', 'terminal']);
-    expect(tools.has('search_replace')).toBe(true);
-    expect(tools.has('write_file')).toBe(true);
-    expect(tools.has('bash')).toBe(true);
-    expect(tools.has('get_terminal_output')).toBe(true);
+describe('T31: 子代理只读不变量（设计目标：只读调研/验证，不写工作区）', () => {
+  it('file toolset 已去写工具（只留读文件 / 列目录 / grep）', () => {
+    const tools = resolveToolsets(['file']);
+    expect(tools.has('read_file')).toBe(true);
+    expect(tools.has('list_dir')).toBe(true);
+    expect(tools.has('grep_code')).toBe(true);
+    expect(tools.has('search_replace')).toBe(false);
+    expect(tools.has('write_file')).toBe(false);
+    expect(tools.has('append_file')).toBe(false);
+    expect(tools.has('delete_file')).toBe(false);
+  });
+
+  it('debug toolset 不含 search_replace（Debug 只诊断不修改）', () => {
+    const tools = resolveToolsets(['debug']);
+    expect(tools.has('trace_error')).toBe(true);
+    expect(tools.has('search_replace')).toBe(false);
+  });
+
+  it('applyBlockedTools 移除全部写工具与主会话状态工具（EDIT_TOOL_NAMES 单一事实源）', () => {
+    const banned = ['search_replace', 'write_file', 'append_file', 'delete_file', 'todo_write', 'switch_mode'];
+    const filtered = applyBlockedTools(new Set<string>(['read_file', 'search_codebase', ...banned]));
+    for (const b of banned) {
+      expect(filtered.has(b), `${b} should be blocked`).toBe(false);
+      expect(isDelegateBlocked(b)).toBe(true);
+    }
+    expect(filtered.has('read_file')).toBe(true);
+    expect(filtered.has('search_codebase')).toBe(true);
+  });
+
+  it('任何 toolset 组合都解析不出写工具（含 file/debug/plan/verify/terminal）', () => {
+    const combos: ToolsetName[][] = [
+      ['search', 'file', 'terminal'],
+      ['debug'],
+      ['plan'],
+      ['review'],
+      ['verify'],
+    ];
+    const WRITE_TOOLS = ['search_replace', 'write_file', 'append_file', 'delete_file'];
+    for (const combo of combos) {
+      const filtered = applyBlockedTools(resolveToolsets(combo));
+      for (const w of WRITE_TOOLS) {
+        expect(filtered.has(w), `${combo.join('+')} must not expose ${w}`).toBe(false);
+      }
+    }
+  });
+
+  it('implementer preset 已移除，旧调用降级为只读 explore（不报错中断）', () => {
+    const def = getDefinitionForPreset('implementer' as unknown as PresetName);
+    expect(def).toBeDefined();
+    expect(def!.type).toBe('explore');
+    for (const w of ['search_replace', 'write_file', 'append_file', 'delete_file']) {
+      expect(def!.allowedTools.has(w)).toBe(false);
+    }
   });
 });
 

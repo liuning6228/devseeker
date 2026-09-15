@@ -252,3 +252,35 @@ describe('BashTool · W7b4a is_background', () => {
     expect(r.errorCode).toBe(ErrorCodes.TOOL_EXEC_UNSAFE_BLOCKED);
   });
 });
+
+describe('BashTool - 子代理只读守卫（自动拒绝，不弹审批）', () => {
+  const delegateCtx = () => ({
+    ...ctx(),
+    delegate: { role: 'Verify', allowBashWrite: false },
+  });
+
+  it('子代理上下文：写工作区命令被自动拒绝（SUBAGENT_TOOL_NOT_ALLOWED）', async () => {
+    const tool = new BashTool({ terminalManager: createMockTerminalManager() } as BashToolDeps);
+    const r = await tool.execute({ command: 'echo hi > a.txt' }, delegateCtx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.SUBAGENT_TOOL_NOT_ALLOWED);
+    expect(r.content).toContain('只读角色');
+    expect(r.content).toContain('主 Agent 执行');
+  });
+
+  it('子代理上下文：只读 / 验证类命令自动放行到执行阶段', async () => {
+    const tool = new BashTool({ terminalManager: createMockTerminalManager() } as BashToolDeps);
+    const r = await tool.execute(
+      { command: 'node -e "process.stdout.write(\'ok\')"' },
+      delegateCtx(),
+    );
+    expect(r.errorCode).not.toBe(ErrorCodes.SUBAGENT_TOOL_NOT_ALLOWED);
+    expect(r.ok).toBe(true);
+  });
+
+  it('主 Agent 上下文（无 delegate）：不受该守卫约束', async () => {
+    const tool = new BashTool({ terminalManager: createMockTerminalManager() } as BashToolDeps);
+    const r = await tool.execute({ command: 'node -e "process.stdout.write(\'x\')"' }, ctx());
+    expect(r.errorCode).not.toBe(ErrorCodes.SUBAGENT_TOOL_NOT_ALLOWED);
+  });
+});

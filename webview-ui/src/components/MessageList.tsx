@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import type { UiMessage, TextPart } from '../state/reducer';
+import type { ApprovalRequestPayload } from '../protocol';
 import { MessageItem, type OpenFileRequest } from './MessageItem';
 import { streamController } from '../stream/StreamController';
 
@@ -13,14 +14,12 @@ export interface MessageListProps {
   onRevertHunk?: (relPath: string, hunkUnified: string, nonce: string) => void;
   /** W15.6 · 已被 revert 的 hunk nonce 集合 */
   revertedHunks?: Set<string>;
-  /** 内联审批：等待审批的 toolCallId 集合 */
-  pendingApprovalToolIds?: Set<string>;
+  /** 内联审批：全部待审批请求（toolCallId → payload，单一事实源） */
+  pendingApprovals?: Record<string, ApprovalRequestPayload>;
   /** 内联审批响应回调 */
   onApprovalResponse?: (toolCallId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => void;
   /** 当前流式消息的 streamId（用于 StreamController DOM 锚点绑定） */
   currentStreamMsgId?: string;
-  /** 当前审批请求的风险级别 */
-  riskLevel?: 'safe' | 'risky';
 }
 
 /**
@@ -40,7 +39,7 @@ export interface MessageListProps {
  * - 流式消息无内容时显示骨架屏
  * - 修正数据模型引用 m.isStreaming → m.parts.some(...)
  */
-export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovalToolIds, onApprovalResponse, currentStreamMsgId, riskLevel }: MessageListProps): JSX.Element {
+export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovals, onApprovalResponse, currentStreamMsgId }: MessageListProps): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
   const messagesLenRef = useRef(messages.length);
@@ -153,10 +152,9 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
               onOpenTerminal={onOpenTerminal}
               onRevertHunk={onRevertHunk}
               revertedHunks={revertedHunks}
-              pendingApprovalToolIds={pendingApprovalToolIds}
+              pendingApprovals={pendingApprovals}
               onApprovalResponse={onApprovalResponse}
               currentStreamMsgId={currentStreamMsgId}
-              riskLevel={riskLevel}
               // Step 2: 流式消息无内容时显示骨架屏
               skeleton={isMsgStreaming(m) && m.parts.every((p) => p.kind !== 'text' || !p.text)}
             />

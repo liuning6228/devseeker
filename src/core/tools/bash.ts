@@ -31,6 +31,7 @@ import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js
 import { ErrorCodes } from '../errors/index.js';
 import { getLogger } from '../../infra/logger.js';
 import { classifyCommand, findBlacklistReason } from './safety-classifier.js';
+import { findWorkspaceMutationReason } from '../subagent/delegate-guards.js';
 import type { ITerminalPool } from './terminal-pool.js';
 import { VscodeTerminalManager } from './vscode-terminal.js';
 import {
@@ -199,6 +200,20 @@ export class BashTool implements ITool<BashArgs, ToolResult> {
         ErrorCodes.TOOL_EXEC_UNSAFE_BLOCKED,
         `命令被安全策略拒绝：${reason}`,
       );
+    }
+    // 2b. 子代理只读守卫（自动拒绝，**不弹审批**）
+    //   设计：子代理自动执行、不需用户看着；但绝不能修改工作区。
+    //   命中写类命令 → 立即拒绝并引导改用只读方式；测试/构建/读取类自动放行。
+    if (ctx.delegate && !ctx.delegate.allowBashWrite) {
+      const mutation = findWorkspaceMutationReason(command);
+      if (mutation) {
+        return fail(
+          ErrorCodes.SUBAGENT_TOOL_NOT_ALLOWED,
+          `子代理（${ctx.delegate.role}）是只读角色，拒绝执行会修改工作区的命令：${mutation}。`
+          + '请改用只读方式（读取 / 运行测试 / 构建 / git status|diff|log）获取信息；'
+          + '需要改动的代码请写进你的最终报告，由主 Agent 执行。',
+        );
+      }
     }
     // 兼容：历史 DANGEROUS_PATTERNS 已被 classifier 覆盖（保留数组仅供阅读）
     void DANGEROUS_PATTERNS;

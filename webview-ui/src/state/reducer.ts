@@ -43,6 +43,40 @@ export interface ToolCallPart {
   startTime?: number;
   /** Step 9: 执行耗时 ms（Extension 侧端到端计算） */
   duration?: number;
+  /** Agent 工具专用：子代理过程状态（由 subagent_event 累积，卡片渲染） */
+  subagent?: SubagentState;
+}
+
+/** 子代理的单个工具步骤 */
+export interface SubagentStep {
+  name: string;
+  toolId: string;
+  status: 'running' | 'done' | 'error';
+  /** 步骤开始时间戳（运行中步骤的实时耗时用） */
+  startTime?: number;
+  /** 步骤耗时 ms（完成后回填） */
+  durationMs?: number;
+}
+
+/** 子代理过程状态（仅 UI，来自 Agent 工具的事件桥） */
+export interface SubagentState {
+  agentType: string;
+  /** 派发描述（subagent_start 携带） */
+  description: string;
+  status: 'running' | 'done' | 'error';
+  steps: SubagentStep[];
+  /** 正文尾部（截断保留，避免无限增长） */
+  textTail: string;
+  /** 工具调用次数（由 subagent_end 终态确认） */
+  toolCalls: number;
+  /** 完成摘要（subagent_end 携带） */
+  summary?: string;
+  /** 子代理启动时间戳（已用时 / ETA 计算基准） */
+  startTime?: number;
+  /** 步数预算（def.maxTurns），进度与 ETA 估算用 */
+  maxTurns?: number;
+  /** 总耗时 ms（subagent_end 终态回填） */
+  durationMs?: number;
 }
 
 export type MessagePart = TextPart | ToolCallPart;
@@ -52,6 +86,11 @@ export interface UiMessage {
   role: MessageRole;
   parts: MessagePart[];
   reasoning?: string;
+  /**
+   * 本消息所属轮次的流式会话 id（`stream-{taskId}-t{turn}`）。
+   * 用于把 DOM 直写的流式文本在轮次/任务结束时**写回正确的消息**（多轮场景关键）。
+   */
+  streamId?: string;
 }
 
 export interface UsageSnapshot {
@@ -117,10 +156,13 @@ export interface AppState {
   indexProgress?: IndexProgressPayload;
   indexStatus?: IndexStatusPayload;
   modeStatus?: ModeStatusPayload;
-  /** 当前 pending 的审批请求；一次仅一个 */
+  /** 最新一条待审批请求（兼容保留；完整集合见 pendingApprovals） */
   approvalRequest?: ApprovalRequestPayload;
-  /** 等待审批的 toolCallId 集合（与 ToolCard 关联） */
-  pendingApprovalToolIds: Set<string>;
+  /**
+   * 全部待审批请求：toolCallId → payload（单一事实源）。
+   * 支撑：并发多审批不串扰 / 卡片缺失时覆盖层兜底 / 重放幂等归位。
+   */
+  pendingApprovals: Record<string, ApprovalRequestPayload>;
   /** W7e4 · Agent 维护的 todo 列表 */
   todoList: TodoItem[];
   /** W-UI2 · 用户已 Accept 的文件 relPath 列表（Accept 是纯UI状态，不做 FS 操作） */
@@ -145,7 +187,7 @@ export const initialState: AppState = {
   acceptedFiles: [],
   rejectedFiles: [],
   pendingPreviews: [],
-  pendingApprovalToolIds: new Set(),
+  pendingApprovals: {},
   revertedHunks: new Set(),
   toolCallIndex: new Map(),
 };
@@ -163,7 +205,10 @@ export type Action =
   | { type: 'INDEX_STATUS'; payload: IndexStatusPayload }
   | { type: 'MODE_STATUS'; payload: ModeStatusPayload }
   | { type: 'APPROVAL_REQUEST'; payload: ApprovalRequestPayload }
-  | { type: 'APPROVAL_CLEAR' }
+  /** 单条审批结束（用户已作答）：按 toolCallId 或 requestId 精确移除 */
+  | { type: 'APPROVAL_CLEAR'; toolCallId?: string; requestId?: string }
+  /** 任务收尾：清空全部待审批 */
+  | { type: 'APPROVAL_CLEAR_ALL' }
   | { type: 'TOOL_DIFF'; payload: ToolDiffPayload }
   | { type: 'REVERT_RESULT'; checkpointId: string; ok: boolean; message?: string }
   | { type: 'REVERT_HUNK_RESULT'; nonce: string; ok: boolean; message?: string }
@@ -172,12 +217,17 @@ export type Action =
   | { type: 'ACCEPT_ALL'; relPaths: string[] }
   | { type: 'REJECT_FILE'; relPath: string }
   | { type: 'REJECT_ALL'; relPaths: string[] }
+  /** K5 · 拒绝回执：把“是否真回滚”写入 diff 卡（无 checkpoint 场景按 relPath 路由） */
+  | { type: 'REJECT_RESULT'; relPath: string; ok: boolean; message?: string }
   | { type: 'PREVIEW_REQUEST'; payload: PendingPreview }
   | { type: 'PREVIEW_DISMISS'; toolCallId: string }
   | { type: 'PREFILL_INPUT'; text: string; nonce: number; isInlineEdit?: boolean }
   | { type: 'CLEAR_ERROR' }
-  /** 方案 B：流结束，将最终文本注入 reducer，触发 MarkdownRenderer 切换 */
-  | { type: 'TEXT_FINISH'; text: string };
+  /**
+   * 轮次收敛：把某轮流式文本写回对应消息（由 streamId 定位）。
+   * 取代旧的 TEXT_FINISH（后者只能写"最后一条"，多轮场景会写错消息）。
+   */
+  | { type: 'TURN_FINALIZE'; streamId: string; text: string };
 
 /* ─────────── Reducer ─────────── */
 
@@ -215,7 +265,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // 新建/切换会话时清除 todo、diff 预览、pending previews 等跨会话残留状态
         todoList: [],
         pendingPreviews: [],
-        pendingApprovalToolIds: new Set(),
+        pendingApprovals: {},
         revertedHunks: new Set(),
         toolCallIndex: new Map(),
         // 清除残留的弹窗状态，避免会话切换后显示已取消的弹窗
@@ -248,22 +298,39 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, modeStatus: action.payload };
 
     case 'APPROVAL_REQUEST': {
-      const nextIds = new Set(state.pendingApprovalToolIds);
-      if (action.payload.toolCallId) nextIds.add(action.payload.toolCallId);
-      // 同时更新对应 ToolCard 的状态为 running（显示审批按钮）
+      // 单一事实源：按 toolCallId 归位（多审批并发不再互相覆盖）
+      const pendingApprovals = action.payload.toolCallId
+        ? { ...state.pendingApprovals, [action.payload.toolCallId]: action.payload }
+        : state.pendingApprovals;
+      // 同时更新对应 ToolCard 状态为 running（内联审批面板）
       const msgUpdated = updateToolPart(state, action.payload.toolCallId, (p) => ({
         ...p,
         status: 'running' as const,
         argsPreview: action.payload.argsPreview,
       }));
-      return { ...msgUpdated, approvalRequest: action.payload, pendingApprovalToolIds: nextIds };
+      return { ...msgUpdated, pendingApprovals, approvalRequest: action.payload };
     }
 
     case 'APPROVAL_CLEAR': {
-      const nextIds = new Set(state.pendingApprovalToolIds);
-      if (state.approvalRequest?.toolCallId) nextIds.delete(state.approvalRequest.toolCallId);
-      return { ...state, approvalRequest: undefined, pendingApprovalToolIds: nextIds };
+      const pendingApprovals = { ...state.pendingApprovals };
+      for (const [tcId, payload] of Object.entries(pendingApprovals)) {
+        if (
+          (action.toolCallId !== undefined && tcId === action.toolCallId) ||
+          (action.requestId !== undefined && payload.requestId === action.requestId)
+        ) {
+          delete pendingApprovals[tcId];
+        }
+      }
+      const remaining = Object.values(pendingApprovals);
+      return {
+        ...state,
+        pendingApprovals,
+        approvalRequest: remaining.length > 0 ? remaining[remaining.length - 1] : undefined,
+      };
     }
+
+    case 'APPROVAL_CLEAR_ALL':
+      return { ...state, pendingApprovals: {}, approvalRequest: undefined };
 
     case 'TOOL_DIFF':
       return updateToolPart(state, action.payload.toolCallId, (p) => ({
@@ -310,6 +377,16 @@ export function reducer(state: AppState, action: Action): AppState {
         acceptedFiles: state.acceptedFiles.filter((p) => p !== action.relPath),
       };
 
+    case 'REJECT_RESULT': {
+      // 拒绝回执（K5）：写入 revertState；失败时撤回“已拒绝”声明（UI 不能声称未发生的回滚）
+      const patched = patchRevertStateByRelPath(state, action.relPath, {
+        ok: action.ok,
+        ...(action.message !== undefined ? { message: action.message } : {}),
+      });
+      if (action.ok) return patched;
+      return { ...patched, rejectedFiles: patched.rejectedFiles.filter((p) => p !== action.relPath) };
+    }
+
     case 'REJECT_ALL': {
       const rejectSet = new Set([...state.rejectedFiles, ...action.relPaths]);
       const acceptSet = new Set(state.acceptedFiles);
@@ -345,8 +422,8 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'TASK_EVENT':
       return reduceTaskEvent(state, action.event);
 
-    case 'TEXT_FINISH':
-      return reduceTextFinish(state, action.text);
+    case 'TURN_FINALIZE':
+      return reduceTurnFinalize(state, action.streamId, action.text);
 
     default:
       return state;
@@ -358,17 +435,24 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
     case 'task_start':
       return { ...state, currentTaskId: ev.taskId, taskStatus: 'running' };
 
-    case 'turn_start':
-      // 方案 B：StreamController 接管文本渲染，reducer 仍然记录消息结构，
-      // 同时设置 currentStreamMsgId 供 MessageItem 做 DOM 锚点绑定
+    case 'turn_start': {
+      // 方案 B：StreamController 接管文本渲染，reducer 记录消息结构 + 本轮的 streamId，
+      // 供 MessageItem 做 DOM 锚点绑定与轮次收敛（TURN_FINALIZE）时定位消息。
+      const streamId = `stream-${ev.taskId}-t${ev.turn}`;
       return {
         ...state,
-        currentStreamMsgId: `stream-${ev.taskId}-t${ev.turn}`,
+        currentStreamMsgId: streamId,
         messages: [
           ...state.messages,
-          { id: nextId('a'), role: 'assistant', parts: [{ kind: 'text', text: '', isStreaming: true }] },
+          {
+            id: nextId('a'),
+            role: 'assistant',
+            streamId,
+            parts: [{ kind: 'text', text: '', isStreaming: true }],
+          },
         ],
       };
+    }
 
     case 'text_delta':
       // 方案 B：由 App.tsx → StreamController 接管 DOM 直写。
@@ -416,6 +500,86 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
         duration: p.startTime && ev.endTime ? ev.endTime - p.startTime : undefined, // Step 9
       }));
 
+    case 'subagent_event': {
+      // 子代理过程事件（Agent 工具派生）→ 按 parentToolCallId 归位到对应卡片。
+      // 仅 UI 旁路：不进入主消息流，也不影响 LLM history。
+      const p = ev.progress;
+      return updateToolPart(state, ev.parentToolCallId, (part) => {
+        const prev: SubagentState = part.subagent ?? {
+          agentType: ev.agentType,
+          description: '',
+          status: 'running',
+          steps: [],
+          textTail: '',
+          toolCalls: 0,
+        };
+        switch (p.type) {
+          case 'subagent_start':
+            return {
+              ...part,
+              subagent: {
+                ...prev,
+                agentType: p.agentType,
+                description: p.description,
+                status: 'running',
+                startTime: p.startTime,
+                ...(p.maxTurns ? { maxTurns: p.maxTurns } : {}),
+              },
+            };
+          case 'subagent_text':
+            return { ...part, subagent: { ...prev, textTail: appendSubagentText(prev.textTail, p.text) } };
+          case 'subagent_tool_start':
+            return {
+              ...part,
+              subagent: {
+                ...prev,
+                steps: [
+                  ...prev.steps,
+                  {
+                    name: p.name,
+                    toolId: p.toolId,
+                    status: 'running',
+                    ...(p.startTime !== undefined ? { startTime: p.startTime } : {}),
+                  },
+                ],
+              },
+            };
+          case 'subagent_tool_end':
+            return {
+              ...part,
+              subagent: {
+                ...prev,
+                steps: prev.steps.map((s) =>
+                  s.toolId === p.toolId
+                    ? {
+                        ...s,
+                        status: p.ok ? ('done' as const) : ('error' as const),
+                        ...(p.durationMs !== undefined ? { durationMs: p.durationMs } : {}),
+                      }
+                    : s,
+                ),
+              },
+            };
+          case 'subagent_usage':
+            // 成本记账由 extension 侧处理（panel.ts），卡片不展示
+            return part;
+          case 'subagent_end':
+            return {
+              ...part,
+              subagent: {
+                ...prev,
+                status: p.ok ? 'done' : 'error',
+                summary: p.summary,
+                toolCalls: p.toolCalls,
+                ...(p.durationMs !== undefined ? { durationMs: p.durationMs } : {}),
+              },
+            };
+          default:
+            return part;
+        }
+      });
+    }
+
     case 'usage':
       return {
         ...state,
@@ -439,17 +603,47 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
         },
       };
 
-    case 'task_end':
-      // 任务结束 → 清除 isStreaming + 清空 currentStreamMsgId
+    case 'task_end': {
+      // K3 终态收敛：任何结束时仍在 pending/running 的工具卡统一收敛，不留僵尸卡片。
+      // （abort 检查在“每组工具开始前”，已声明未执行的调用永远没有 exec_end）
+      const aborted = ev.reason === 'aborted';
+      const maxTurns = ev.reason === 'max_turns';
+      const converged: AppState = {
+        ...state,
+        messages: state.messages.map((msg) => {
+          let changed = false;
+          const parts = msg.parts.map((p) => {
+            if (p.kind === 'tool' && (p.status === 'pending' || p.status === 'running')) {
+              changed = true;
+              return {
+                ...p,
+                status: 'error' as const,
+                errorCode: maxTurns ? 'TASK.LOOP.INFINITE' : aborted ? 'TASK.LOOP.ABORTED' : 'TASK.LOOP.ENDED',
+                contentPreview: maxTurns
+                  ? '达到最大轮次，该工具调用未完成'
+                  : aborted
+                    ? '任务已中止，该工具调用未完成'
+                    : '任务已结束，该工具调用未完成',
+              };
+            }
+            return p;
+          });
+          return changed ? { ...msg, parts } : msg;
+        }),
+      };
+      // 任务结束 → 清除 isStreaming + 清空 currentStreamMsgId + 清空待审批（K4：不再无人应答）
       return {
-        ...finalizeStreaming(state),
+        ...finalizeStreaming(converged),
         currentStreamMsgId: undefined,
+        pendingApprovals: {},
+        approvalRequest: undefined,
         taskStatus: ev.reason === 'error' ? 'error' : 'idle',
         lastError:
           ev.reason === 'error'
             ? { code: ev.errorCode, message: ev.errorMessage }
             : undefined,
       };
+    }
 
     default:
       return state;
@@ -489,6 +683,27 @@ function fallbackAppendTextDelta(state: AppState, text: string): AppState {
  * reduceTextFinish — 流结束，将最终文本写入最后一条 assistant 消息的 text part，
  * 关闭 isStreaming。配合 finalizeStreaming 完成 MarkdownRenderer 切换。
  */
+/**
+ * 轮次收敛：把某轮流式文本写回对应消息（按 streamId 定位）。
+ * 硬约束：必须在 finalizeStreaming 之前调用（否则流式 part 已定型为空文本）。
+ * 找不到对应消息（历史恢复/异常）时回退到"最后一条 assistant 文本 part"的旧行为。
+ */
+function reduceTurnFinalize(state: AppState, streamId: string, text: string): AppState {
+  const messages = [...state.messages];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.streamId !== streamId) continue;
+    const parts = [...msg.parts];
+    const textIdx = parts.findIndex((p) => p.kind === 'text');
+    const nextPart: MessagePart = { kind: 'text', text, isStreaming: false };
+    if (textIdx >= 0) parts[textIdx] = nextPart;
+    else parts.push(nextPart);
+    messages[i] = { ...msg, parts };
+    return { ...state, messages };
+  }
+  return reduceTextFinish(state, text);
+}
+
 function reduceTextFinish(state: AppState, text: string): AppState {
   const messages = [...state.messages];
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -534,9 +749,18 @@ function appendReasoning(state: AppState, text: string): AppState {
   }
   messages[lastIdx] = {
     ...lastMsg,
-    reasoning: (lastMsg.reasoning ?? '') + text,
+    reasoning: capReasoning((lastMsg.reasoning ?? '') + text),
   };
   return { ...state, messages };
+}
+
+/** K7 有界：reasoning 在 UI 侧保留上限（保留尾部）；与子代理 textTail / H7 截断策略对齐 */
+const REASONING_MAX_CHARS = 20_000;
+const REASONING_TRUNCATED_MARK = '\n…[推理内容已截断]';
+
+function capReasoning(text: string): string {
+  if (text.length <= REASONING_MAX_CHARS) return text;
+  return REASONING_TRUNCATED_MARK + text.slice(text.length - REASONING_MAX_CHARS);
 }
 
 function appendToolCall(state: AppState, toolCallId: string, name: string): AppState {
@@ -559,6 +783,14 @@ function appendToolCall(state: AppState, toolCallId: string, name: string): AppS
   return { ...state, messages };
 }
 
+/** 子代理卡片文本尾部保留上限（字符）：防止无限增长拖垮渲染 */
+const SUBAGENT_TEXT_TAIL_MAX = 2000;
+
+function appendSubagentText(prev: string, add: string): string {
+  const next = prev + add;
+  return next.length > SUBAGENT_TEXT_TAIL_MAX ? next.slice(next.length - SUBAGENT_TEXT_TAIL_MAX) : next;
+}
+
 function updateToolPart(
   state: AppState,
   toolCallId: string,
@@ -569,6 +801,26 @@ function updateToolPart(
     if (idx === -1) return msg;
     const parts = [...msg.parts];
     parts[idx] = patcher(parts[idx] as ToolCallPart);
+    return { ...msg, parts };
+  });
+  return { ...state, messages };
+}
+
+/**
+ * 按 relPath 定位 diff part 并写入 revertState。
+ * 拒绝回执专用：H4 场景（无 checkpoint）无法按 checkpointId 路由。
+ */
+function patchRevertStateByRelPath(
+  state: AppState,
+  relPath: string,
+  revertState: { ok: boolean; message?: string },
+): AppState {
+  const messages = state.messages.map((msg) => {
+    const idx = msg.parts.findIndex((p) => p.kind === 'tool' && p.diff?.relPath === relPath);
+    if (idx === -1) return msg;
+    const parts = [...msg.parts];
+    const target = parts[idx] as ToolCallPart;
+    parts[idx] = { ...target, revertState };
     return { ...msg, parts };
   });
   return { ...state, messages };

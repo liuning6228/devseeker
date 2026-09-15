@@ -188,3 +188,38 @@ describe('detectLineNumberPrefix', () => {
     expect(detectLineNumberPrefix('normal code\nwithout prefixes')).toBeNull();
   });
 });
+
+describe('ReadFileTool - 子代理路径白名单（角色范围工具层硬执行）', () => {
+  const tool = new ReadFileTool();
+
+  it('Guide 角色：白名单外路径拒绝（SUBAGENT_TOOL_NOT_ALLOWED）', async () => {
+    const r = await tool.execute(
+      { file_path: 'hello.txt' },
+      {
+        ...ctx(),
+        delegate: { role: 'Guide', allowBashWrite: false, readPathPrefixes: ['.devseeker/', 'docs/', 'AGENTS.md'] },
+      },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.SUBAGENT_TOOL_NOT_ALLOWED);
+    expect(r.content).toContain('仅允许读取');
+  });
+
+  it('Guide 角色：白名单内路径正常读取', async () => {
+    const r = await tool.execute(
+      { file_path: 'sub/nested.md' },
+      {
+        ...ctx(),
+        delegate: { role: 'Guide', allowBashWrite: false, readPathPrefixes: ['sub/'] },
+      },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('Title');
+  });
+
+  it('主 Agent（无 delegate）：不受路径白名单约束', async () => {
+    const r = await tool.execute({ file_path: 'hello.txt' }, ctx());
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('line1');
+  });
+});

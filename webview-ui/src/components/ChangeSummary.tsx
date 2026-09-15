@@ -1,6 +1,28 @@
 import { useMemo, useState } from 'react';
 import type { ToolDiffPayload, TodoItem } from '../protocol';
 
+/** H8 · 与主 loop 的 TRACKED_WRITE_TOOLS 对齐：会改工作区文件的工具名 */
+const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'write_file',
+  'append_file',
+  'search_replace',
+  'delete_file',
+]);
+
+/** H8 · 从 argsPreview 提取文件路径（流式未完成 JSON 时走正则兜底） */
+function relPathFromArgs(argsPreview?: string): string {
+  if (!argsPreview) return '';
+  try {
+    const obj = JSON.parse(argsPreview);
+    if (typeof obj?.file_path === 'string') return obj.file_path;
+    if (typeof obj?.path === 'string') return obj.path;
+  } catch {
+    /* 流式 JSON 可能不完整 */
+  }
+  const m = argsPreview.match(/"(?:file_path|path)"\s*:\s*"([^"]+)"/);
+  return m ? m[1] : '';
+}
+
 /**
  * W-UI2 · 聚合后的变更文件项（按 relPath 去重，多次编辑累加行差，保留最新 checkpointId 以便 revert）
  */
@@ -14,6 +36,8 @@ export interface ChangedFileItem {
   reverted: boolean;
   /** 累计修改次数 */
   edits: number;
+  /** H8 · 写工具成功但未捕获到 diff（如无工作区/diff 事件丢失）→ 仅提示，不可 accept/reject */
+  noDiff?: boolean;
 }
 
 export interface ChangeSummaryProps {
@@ -235,6 +259,8 @@ export function ChangeSummary({
                 const isRejected = rejectedSet.has(f.relPath);
                 const isReverted = f.reverted;
                 const isPending = !isAccepted && !isRejected && !isReverted;
+                /** H4：无 checkpoint 时拒绝无法回滚，按钮需显式提示（不能只声称“已拒绝”） */
+                const canRevert = Boolean(f.latestCheckpointId);
                 return (
                   <li
                     key={f.relPath}
@@ -256,6 +282,9 @@ export function ChangeSummary({
                       <span className="change-summary__file-del">-{f.removed}</span>
                     </span>
                     {/* W-UI2 · 状态标签 */}
+                    {f.noDiff && (
+                      <span className="change-summary__file-status" title="未捕获 diff（无法回滚）">未捕获 diff</span>
+                    )}
                     {isAccepted && (
                       <span className="change-summary__file-status change-summary__file-status--accepted">已接受</span>
                     )}
@@ -265,8 +294,8 @@ export function ChangeSummary({
                     {isReverted && (
                       <span className="change-summary__file-status change-summary__file-status--reverted">已回滚</span>
                     )}
-                    {/* W-UI2 · 行内 ✓ accept / ✗ reject 按钮（只在 pending 时） */}
-                    {isPending && onAcceptFile && onRejectFile && (
+                    {/* W-UI2 · 行内 ✓ accept / ✗ reject 按钮（只在 pending 时；无 diff 不可回滚 → 禁用） */}
+                    {isPending && !f.noDiff && onAcceptFile && onRejectFile && (
                       <span className="change-summary__file-actions">
                         <button
                           type="button"
@@ -281,7 +310,7 @@ export function ChangeSummary({
                           type="button"
                           className="change-summary__file-reject"
                           onClick={() => onRejectFile(f.relPath)}
-                          title="拒绝该文件的修改（回滚到修改前）"
+                          title={canRevert ? '拒绝该文件的修改（回滚到修改前）' : '该文件无 checkpoint：仅清除编辑器装饰，内容不会回滚'}
                           aria-label="拒绝"
                         >
                           ✗ 拒绝
@@ -307,7 +336,15 @@ export function ChangeSummary({
 export function aggregateChangedFiles(
   messages: ReadonlyArray<{
     parts: ReadonlyArray<
-      | { kind: 'tool'; diff?: ToolDiffPayload; revertState?: { ok: boolean } }
+      | {
+          kind: 'tool';
+          /** H8：无 diff 时的兜底识别（写工具 + 成功 + 有路径参数） */
+          name?: string;
+          status?: 'pending' | 'running' | 'success' | 'error';
+          argsPreview?: string;
+          diff?: ToolDiffPayload;
+          revertState?: { ok: boolean };
+        }
       | { kind: 'text'; text: string }
     >;
   }>,
@@ -317,7 +354,24 @@ export function aggregateChangedFiles(
     for (const part of msg.parts) {
       if (part.kind !== 'tool') continue;
       const diff = part.diff;
-      if (!diff) continue;
+      if (!diff) {
+        // H8：写工具成功但无 diff 事件（如无工作区 / diff 捕获失败）→ 也必须出现在清单里，
+        // 否则用户据此判断改动范围会漏项。标记 noDiff，禁用 accept/reject（无 checkpoint 可回滚）。
+        if (part.name && WRITE_TOOL_NAMES.has(part.name) && part.status === 'success') {
+          const relPath = relPathFromArgs(part.argsPreview);
+          if (relPath && !map.has(relPath)) {
+            map.set(relPath, {
+              relPath,
+              added: 0,
+              removed: 0,
+              edits: 1,
+              reverted: false,
+              noDiff: true,
+            });
+          }
+        }
+        continue;
+      }
       const prev = map.get(diff.relPath);
       const revertedNow = part.revertState?.ok === true;
       if (prev) {

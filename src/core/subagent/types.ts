@@ -19,6 +19,7 @@
  */
 
 import type { Message } from '../../providers/types.js';
+import { EDIT_TOOL_NAMES } from '../tools/edit-tools.js';
 
 /** 内置子代理 type（常量与类型窄化） */
 export type BuiltinSubagentType = 'Browser' | 'Research' | 'Guide' | 'Verify' | 'Vision' | 'RequirementAnalyzer' | 'Debug';
@@ -63,9 +64,9 @@ export interface SubagentResult {
   /**
    * CVW · 子代理在自己 loop 内编辑成功的文件（绝对路径）。
    *
-   * 子代理（如 Debug）持有编辑工具，其改动不经主 loop，主 agent 本可借此
-   * 绕过变更验证门。回传本字段后由主 loop 并入 editedFiles（见
-   * docs/verification-workflow-optimization-plan.md §4.3 C.5）。
+   * 设计上子代理为**只读**（写工具被 DELEGATE_BLOCKED_TOOLS 硬禁），
+   * 本字段正常恒为空。保留作为纵深防御：万一未来出现绕过（自定义 agent /
+   * 新增工具未入库），主 loop 仍能把这批写动作并入验证门，不被绕过。
    */
   editedFiles?: readonly string[];
 }
@@ -82,6 +83,19 @@ export interface SubagentDefinition {
   readonly allowedTools: ReadonlySet<string>;
   readonly systemPrompt: string;
   readonly maxTurns: number;
+  /**
+   * 该角色的期望单次执行上限（ms）。缺省回退 runner 的 DEFAULT_TIMEOUT_MS。
+   * 不同角色任务形态差异大：Verify/Debug 可能跑长测试，Browser/Vision 很快——
+   * 用固定 120s 会把长任务中途杀死（旧 BUG）。
+   */
+  readonly timeoutMs?: number;
+  /**
+   * read_file 允许的路径前缀（相对 workspaceRoot）；缺省 = 全工作区。
+   * 由 runner 注入到子代理 ToolContext.delegate，在工具层硬执行角色范围。
+   */
+  readonly readPathPrefixes?: readonly string[];
+  /** 网络工具允许的 host 白名单；缺省 = 不限。同样在工具层硬执行。 */
+  readonly urlHostWhitelist?: readonly string[];
   readonly description?: string;
   readonly isBuiltin?: boolean;
   readonly filePath?: string;
@@ -116,11 +130,12 @@ export type ToolsetName =
  */
 export const TOOLSETS: Record<ToolsetName, readonly string[]> = {
   search: [
-    'search_codebase', 'get_repo_map', 'search_symbol', 'lsp', 'grep_code',
+    'search_codebase', 'get_repo_map', 'workspace_symbol', 'document_symbol', 'lsp', 'grep_code',
     'read_file', 'list_dir', 'search_knowledge',
   ],
   file: [
-    'read_file', 'search_replace', 'write_file', 'append_file', 'delete_file',
+    // 只读文件检查：子代理不写工作区（写工具在 DELEGATE_BLOCKED_TOOLS 硬禁）
+    'read_file', 'list_dir', 'grep_code',
   ],
   terminal: ['bash', 'get_terminal_output'],
   web: ['search_web', 'fetch_content', 'read_url'],
@@ -138,7 +153,7 @@ export const TOOLSETS: Record<ToolsetName, readonly string[]> = {
     'grep_code', 'get_problems',
   ],
   debug: [
-    'read_file', 'search_replace', 'trace_error', 'goto_definition',
+    'read_file', 'trace_error', 'goto_definition',
     'find_references', 'call_hierarchy', 'bash', 'get_terminal_output',
     'get_problems', 'lsp', 'search_codebase', 'grep_code',
   ],
@@ -146,18 +161,32 @@ export const TOOLSETS: Record<ToolsetName, readonly string[]> = {
 };
 
 /**
- * DELEGATE_BLOCKED_TOOLS：所有子代理中永远不可用的工具。
- * 硬编码不可配置（DESIGN-1.md §4.4 L1 安全）
+ * DELEGATE_BLOCKED_TOOLS：所有子代理中永远不可用的工具（大小写不敏感匹配）。
+ * 硬编码不可配置（DESIGN-1.md §4.4 L1 安全）。
+ *
+ * 子代理的设计定位：**只读调研员 / 验证员**（上下文隔离 + 能力收窄），
+ * 一切写工作区的动作与主会话状态变更都由主 Agent 独占（它才持有
+ * approval / checkpoint / 验证门）。因此本名单硬禁三类：
+ * - 写入类（EDIT_TOOL_NAMES：search_replace / write_file / append_file / delete_file）
+ *   —— 直接复用单一事实源，新增编辑工具时自动继承拦截，无需改这里；
+ * - 派发类（agent / create_agent / send_message）—— 防递归派生或续跑其他子代理；
+ * - 交互 / 主会话状态类（ask_user_question / skill / todo_write / switch_mode）
+ *   —— 子代理不与用户交互，也不得篡改主会话的交互模式与任务清单。
+ *
+ * 注：这里全部小写，实际匹配在 toolset-resolver / runner 里做大小写归一，
+ *     因此真实工具名 `Agent`（首字母大写）也能被拦住。
  */
 export const DELEGATE_BLOCKED_TOOLS: readonly string[] = [
-  'agent', 'create_agent', 'delegate_task', 'ask_user_question', 'skill',
+  ...EDIT_TOOL_NAMES,
+  'agent', 'create_agent', 'send_message',
+  'ask_user_question', 'skill',
+  'todo_write', 'switch_mode',
 ];
 
-/** Preset 名称（叶子角色快捷方式） */
+/** Preset 名称（叶子角色快捷方式，全部为只读角色） */
 export type PresetName =
   | 'explore'
   | 'planner'
-  | 'implementer'
   | 'reviewer'
   | 'verifier'
   | 'general';
@@ -177,8 +206,13 @@ export interface DelegateTaskArgs {
   // 角色（来自 Hermes）
   role?: 'leaf' | 'orchestrator';
 
-  // 上下文模式（三层，Cline fork 增强）
-  mode?: 'fork' | 'fresh' | 'inherit';
+  /**
+   * 上下文继承模式。
+   * - 'fresh'（默认）：独立上下文，零继承
+   * - 'fork'：继承父的 forkContextMessages + cacheSafeParams，共享 prompt cache
+   * （'inherit' 已移除：V1 未实现，留着只会被静默降级为 fresh、误导调用方）
+   */
+  mode?: 'fork' | 'fresh';
 
   // 三层安全隔离
   isolation?: {

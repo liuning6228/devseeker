@@ -363,6 +363,8 @@ export class DualMindChatPanel {
       reject: (e: Error) => void;
       onAbort: () => void;
       signal: AbortSignal;
+      /** 重放用：原始推送载荷（webview 重载后需原样重发） */
+      payload: { requestId: string; questions: AskQuestionItem[] };
     }
   >();
   /** 审批内联卡片 pending：requestId → resolve */
@@ -376,6 +378,8 @@ export class DualMindChatPanel {
       /** 用户点 Stop 时解除挂起（与 askPending 同构，避免 TaskLoop 永久挂死） */
       onAbort?: () => void;
       signal?: AbortSignal;
+      /** 重放用：原始推送载荷（webview 重载后需原样重发） */
+      payload: ApprovalRequestPayload;
     }
   >();
   /**
@@ -1628,6 +1632,8 @@ export class DualMindChatPanel {
         this.pushModeStatus();
         // W7e4 · 恢复上次持久化的 todo 列表
         this.pushTodoList(this.getTodos());
+        // K4 可达性：重放等待中的审批/提问（webview 重载后 pending 状态已丢，卡片消失）
+        this.replayPendingInteractions();
         // 首次打开尝试自动恢复最近 session
         this.tryRestoreLatestSession();
         break;
@@ -1805,12 +1811,28 @@ export class DualMindChatPanel {
 
       case 'reject_diff': {
         // W-UI2 · webview Reject 单文件 → 回滚该文件 + 清除 inline diff 装饰 + 更新 EditorChangeBar
+        // 卡片契约 K5：UI 声明（已拒绝）必须等于实际动作——成功/失败/无 checkpoint 都要回执
         if (msg.checkpointId) {
-          this.handleRevertStep(msg.checkpointId).catch((e: unknown) =>
-            log.error({ err: String(e), checkpointId: msg.checkpointId }, 'reject_diff revert failed'),
+          this.handleRevertStep(msg.checkpointId).then(
+            () => this.post({ type: 'reject_result', relPath: msg.relPath, ok: true }),
+            (e: unknown) => {
+              log.error({ err: String(e), checkpointId: msg.checkpointId }, 'reject_diff revert failed');
+              this.post({
+                type: 'reject_result',
+                relPath: msg.relPath,
+                ok: false,
+                message: `回滚失败：${e instanceof Error ? e.message : String(e)}`,
+              });
+            },
           );
         } else {
           log.warn({ relPath: msg.relPath }, 'reject_diff: no checkpointId, cannot revert');
+          this.post({
+            type: 'reject_result',
+            relPath: msg.relPath,
+            ok: false,
+            message: '该文件没有可用的 checkpoint：仅清除了编辑器装饰，内容未回滚',
+          });
         }
         // 清除 inline diff 装饰
         if (DualMindChatPanel.inlineDiffController) {
@@ -1833,11 +1855,26 @@ export class DualMindChatPanel {
         const files = msg.files;
         for (const file of files) {
           if (file.checkpointId) {
-            this.handleRevertStep(file.checkpointId).catch((e: unknown) =>
-              log.error({ err: String(e), checkpointId: file.checkpointId }, 'reject_all_diffs revert failed'),
+            this.handleRevertStep(file.checkpointId).then(
+              () => this.post({ type: 'reject_result', relPath: file.relPath, ok: true }),
+              (e: unknown) => {
+                log.error({ err: String(e), checkpointId: file.checkpointId }, 'reject_all_diffs revert failed');
+                this.post({
+                  type: 'reject_result',
+                  relPath: file.relPath,
+                  ok: false,
+                  message: `回滚失败：${e instanceof Error ? e.message : String(e)}`,
+                });
+              },
             );
           } else {
             log.warn({ relPath: file.relPath }, 'reject_all_diffs: no checkpointId for file, skipping');
+            this.post({
+              type: 'reject_result',
+              relPath: file.relPath,
+              ok: false,
+              message: '该文件没有可用的 checkpoint：内容未回滚',
+            });
           }
         }
         // 清除所有 inline diff 装饰
@@ -2690,14 +2727,19 @@ export class DualMindChatPanel {
               '[dbg T-UI2] tool_exec_end MISSING pendingDiff',
             );
           }
-          // 成本累计
-          if (event.type === 'usage' && this.activeProviderId) {
+          // 成本累计（主会话 usage + 子代理 subagent_usage）
+          const usagePayload = event.type === 'usage'
+            ? event
+            : event.type === 'subagent_event' && event.progress.type === 'subagent_usage'
+              ? event.progress
+              : undefined;
+          if (usagePayload && this.activeProviderId) {
             const tracked = this.costTracker.record(
               this.activeProviderId,
               {
-                promptTokens: event.promptTokens,
-                completionTokens: event.completionTokens,
-                cachedTokens: event.cachedTokens,
+                promptTokens: usagePayload.promptTokens,
+                completionTokens: usagePayload.completionTokens,
+                cachedTokens: usagePayload.cachedTokens,
               },
               provider.pricing,
               {
@@ -3532,6 +3574,7 @@ export class DualMindChatPanel {
         cwd: (args as Record<string, unknown>)?.cwd as string | undefined,
         onAbort,
         signal: ctx.signal,
+        payload,
       });
       ctx.signal.addEventListener('abort', onAbort, { once: true });
     });
@@ -5135,7 +5178,13 @@ export class DualMindChatPanel {
         }
         resolve({ answers: [], cancelled: true });
       };
-      this.askPending.set(requestId, { resolve, reject, onAbort, signal });
+      this.askPending.set(requestId, {
+        resolve,
+        reject,
+        onAbort,
+        signal,
+        payload: { requestId, questions },
+      });
       signal.addEventListener('abort', onAbort, { once: true });
       this.post({
         type: 'ask_question',
@@ -5230,6 +5279,30 @@ export class DualMindChatPanel {
       entry.resolve({ approved: false });
     }
     this.approvalPending.clear();
+  }
+
+  /**
+   * 重放所有等待中的交互请求（webview 挂载/重载时调用）。
+   *
+   * 卡片契约 K4：【审批/提问必须无限等待且可作答】——等待的前提是 UI 可达。
+   * webview 的 pending 状态是内存态（重载即丢），因此以扩展侧 Map 为唯一事实源重发；
+   * 必须复用同一 requestId，保证用户响应能对上原 Promise（幂等：webview 侧按 requestId 去重）。
+   */
+  private replayPendingInteractions(): void {
+    if (this.approvalPending.size > 0) {
+      log.info({ count: this.approvalPending.size }, 'replaying pending approval_request(s) to webview');
+      for (const [requestId, entry] of this.approvalPending) {
+        this.post({ type: 'approval_request', payload: entry.payload });
+        log.info({ requestId, tool: entry.toolName }, 'replayed approval_request');
+      }
+    }
+    if (this.askPending.size > 0) {
+      log.info({ count: this.askPending.size }, 'replaying pending ask_question(s) to webview');
+      for (const [requestId, entry] of this.askPending) {
+        this.post({ type: 'ask_question', payload: entry.payload });
+        log.info({ requestId }, 'replayed ask_question');
+      }
+    }
   }
 
   /**

@@ -57,14 +57,22 @@ export function resolveToolsets(names: ToolsetName[]): Set<string> {
 }
 
 /**
+ * 判定某工具名是否在 DELEGATE_BLOCKED_TOOLS 中（大小写不敏感）。
+ * runner 展开 `'*'` 通配符时复用此判定，保证 `Agent` 等首字母大写工具也被拦住。
+ */
+export function isDelegateBlocked(name: string): boolean {
+  const lower = name.toLowerCase();
+  return DELEGATE_BLOCKED_TOOLS.some((b) => b.toLowerCase() === lower);
+}
+
+/**
  * 对白名单应用 DELEGATE_BLOCKED_TOOLS 过滤。
- * 移除永远不可用的工具。
+ * 移除永远不可用的工具（大小写不敏感）。
  */
 export function applyBlockedTools(allowed: Set<string>): Set<string> {
-  const blocked = new Set(DELEGATE_BLOCKED_TOOLS);
   const result = new Set<string>();
   for (const t of allowed) {
-    if (!blocked.has(t)) result.add(t);
+    if (!isDelegateBlocked(t)) result.add(t);
   }
   return result;
 }

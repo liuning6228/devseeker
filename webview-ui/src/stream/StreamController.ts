@@ -125,6 +125,20 @@ export class StreamController {
     return finalText;
   }
 
+  /**
+   * 批量收敛全部进行中的流式会话（task_end 调用）。
+   * 返回 sid → 完整文本；DOM 内容保留（仅移除 active 标记）。
+   * 调用方应在 task_end 收敛（finalizeStreaming）**之前**把文本写回对应消息。
+   */
+  finishAll(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const sid of [...this.sessions.keys()]) {
+      const text = this.finish(sid);
+      if (text !== undefined) out.set(sid, text);
+    }
+    return out;
+  }
+
   /** 取消流：保留已显示内容，不清除 */
   cancel(streamId: string): string | undefined {
     const sess = this.sessions.get(streamId);

@@ -29,6 +29,7 @@ import type {
   StreamEvent,
 } from '../../src/providers/types.js';
 import type { SubagentRunnerDeps } from '../../src/core/subagent/index.js';
+import type { TaskEvent } from '../../src/shared/protocol.js';
 import { initLogger } from '../../src/infra/logger.js';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -55,6 +56,9 @@ class ScriptedProvider implements IProvider {
   }
   async countTokens(): Promise<number> {
     return 0;
+  }
+  updateApiKey(): void {
+    // no-op（IProvider 接口要求，测试无需轮换 Key）
   }
 }
 
@@ -117,7 +121,6 @@ describe('AgentTool - arg validation', () => {
 
   it('rejects invalid subagent_type', async () => {
     const res = await tool.execute(
-      // @ts-expect-error intentional bad input
       { subagent_type: 'UnknownOne', description: 'x', prompt: 'y' },
       buildCtx(),
     );
@@ -236,8 +239,15 @@ describe('AgentTool - success path', () => {
 describe('AgentTool - failure path', () => {
   it('maps runSubagent failure to ok:false', async () => {
     const provider = new ScriptedProvider();
-    // 子代理 completed 但无文本 → runSubagent 抛 SUBAGENT_FAILED
-    provider.push([{ type: 'done', reason: 'stop' }]);
+    // 子代理 Provider 报不可重试错误 → runSubagent 抛 SUBAGENT_FAILED
+    // （空文本 done 现在会降级为非空说明并返回 ok:true，不再算失败）
+    provider.push([
+      {
+        type: 'error',
+        error: { code: ErrorCodes.PROVIDER_RATE_LIMITED, message: 'rate limited', retryable: false },
+      },
+      { type: 'done', reason: 'error' },
+    ]);
     const tool = new AgentTool({ getRunnerDeps: () => buildDeps(provider) });
 
     const res = await tool.execute(
@@ -250,6 +260,20 @@ describe('AgentTool - failure path', () => {
     expect(res.content).toMatch(/子代理 Browser/);
   });
 
+  it('completed with empty summary → ok:true with degraded note', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([{ type: 'done', reason: 'stop' }]);
+    const tool = new AgentTool({ getRunnerDeps: () => buildDeps(provider) });
+
+    const res = await tool.execute(
+      { subagent_type: 'Browser', description: 'x', prompt: 'y' },
+      buildCtx(),
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.content).toMatch(/Browser/);
+  });
+
   it('aborted via ctx.signal → ok:false with interrupted code', async () => {
     const provider: IProvider = {
       id: 'hang',
@@ -257,6 +281,7 @@ describe('AgentTool - failure path', () => {
       contextWindow: 1000,
       pricing: { inputPerMillion: 0, outputPerMillion: 0, currency: 'CNY' },
       countTokens: async () => 0,
+      updateApiKey: () => {},
       probe: async () => ({ ok: true, latencyMs: 0 }),
       createMessage: ({ signal }) =>
         (async function* (): AsyncGenerator<StreamEvent> {
@@ -289,5 +314,124 @@ describe('AgentTool - failure path', () => {
     );
     expect(res.ok).toBe(false);
     expect(res.errorCode).toBe(ErrorCodes.SUBAGENT_INTERRUPTED_BY_RESTART);
+  });
+});
+
+describe('AgentTool - subagent event bridge (P0)', () => {
+  it('ctx.emitChildEvent 收到 subagent_start → subagent_end，parentToolCallId 正确归位', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([
+      { type: 'text_delta', text: '调查结论' },
+      { type: 'done', reason: 'stop' },
+    ]);
+    const tool = new AgentTool({ getRunnerDeps: () => buildDeps(provider) });
+    const events: TaskEvent[] = [];
+    const ctx: ToolContext = {
+      ...buildCtx(),
+      toolCallId: 'call-bridge-1',
+      emitChildEvent: (ev) => events.push(ev),
+    };
+
+    const res = await tool.execute(
+      { subagent_type: 'Browser', description: '调查 X', prompt: 'y' },
+      ctx,
+    );
+
+    expect(res.ok).toBe(true);
+    type SubagentTaskEvent = Extract<TaskEvent, { type: 'subagent_event' }>;
+    const subEvents = events.filter((e): e is SubagentTaskEvent => e.type === 'subagent_event');
+    const progress = subEvents.map((e) => e.progress);
+
+    // 首帧：卡片进入 running 态，且能按 parentToolCallId 归位
+    expect(subEvents[0]).toMatchObject({
+      type: 'subagent_event',
+      parentToolCallId: 'call-bridge-1',
+      agentType: 'Browser',
+    });
+    expect(progress[0]).toMatchObject({
+      type: 'subagent_start',
+      agentType: 'Browser',
+      description: '调查 X',
+    });
+    // 文本合并 + 终态（真实 summary）
+    expect(progress).toContainEqual({ type: 'subagent_text', text: '调查结论' });
+    expect(progress[progress.length - 1]).toMatchObject({
+      type: 'subagent_end',
+      ok: true,
+      summary: '调查结论',
+      toolCalls: 0,
+    });
+  });
+
+  it('无 emitChildEvent（无 UI 通道）时不报错，返回值与旧版一致', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([
+      { type: 'text_delta', text: 'ok' },
+      { type: 'done', reason: 'stop' },
+    ]);
+    const tool = new AgentTool({ getRunnerDeps: () => buildDeps(provider) });
+
+    const res = await tool.execute(
+      { subagent_type: 'Browser', description: 'x', prompt: 'y' },
+      buildCtx(),
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.content).toContain('ok');
+  });
+});
+
+describe('AgentTool - 后台子代理结果回流（结果契约闭环）', () => {
+  it('background 完成 → 摘要经 ctx.injectContext 注入主 loop 上下文', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([
+      { type: 'text_delta', text: '后台调研结论' },
+      { type: 'done', reason: 'stop' },
+    ]);
+    const tool = new AgentTool({ getRunnerDeps: () => buildDeps(provider) });
+    const notes: string[] = [];
+    const ctx: ToolContext = {
+      ...buildCtx(),
+      toolCallId: 'c-bg-1',
+      injectContext: (text) => notes.push(text),
+    };
+
+    const res = await tool.execute(
+      { subagent_type: 'Browser', description: '后台调研', prompt: 'y', background: true },
+      ctx,
+    );
+    expect(res.ok).toBe(true);
+
+    // 等后台 runFn 完成（脚本 provider 需若干微任务）
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('<background_subagent_result');
+    expect(notes[0]).toContain('后台调研结论');
+    expect(notes[0]).toContain('agent_id="bg_');
+  });
+
+  it('前台（非 background）结果作为工具返回值，不注入上下文', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([
+      { type: 'text_delta', text: 'ok' },
+      { type: 'done', reason: 'stop' },
+    ]);
+    const tool = new AgentTool({ getRunnerDeps: () => buildDeps(provider) });
+    const notes: string[] = [];
+    const ctx: ToolContext = {
+      ...buildCtx(),
+      toolCallId: 'c-fg-1',
+      injectContext: (t) => notes.push(t),
+    };
+
+    const res = await tool.execute(
+      { subagent_type: 'Browser', description: 'x', prompt: 'y' },
+      ctx,
+    );
+
+    expect(res.ok).toBe(true);
+    expect(notes).toHaveLength(0);
+    expect(res.content).toContain('ok');
   });
 });

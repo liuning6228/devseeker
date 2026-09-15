@@ -31,7 +31,7 @@ import { ToolRegistry, ToolRunner, type ToolApprovalGate } from '../tools/regist
 import { isEvidenceTool } from '../tools/debug-mode-gate.js';
 import { EDIT_TOOL_NAMES } from '../tools/edit-tools.js';
 import type { ApprovalAuditSink } from '../tools/approval-audit.js';
-import type { ITool, ToolResult } from '../tools/types.js';
+import type { ITool, ToolResult, DelegateCapabilityPolicy } from '../tools/types.js';
 import { MessageHistory } from './history.js';
 import type { TaskEvent } from './events.js';
 import { AgentError, ErrorCodes, toAgentError } from '../errors/index.js';
@@ -74,6 +74,14 @@ import {
 } from '../verification/index.js';
 
 const log = getLogger('task.loop');
+
+/**
+ * 成功后也需要把结果截断写入 contentPreview 的工具（用于卡片展示）。
+ * get_terminal_output：轮询后台终端的输出——此前只进 LLM、UI 永远空白（卡片契约 H7）。
+ */
+const RESULT_PREVIEW_TOOLS: ReadonlySet<string> = new Set(['get_terminal_output']);
+/** 上述工具的成功结果预览截断长度（与子代理 textTail / H5 策略对齐） */
+const RESULT_PREVIEW_MAX = 2000;
 
 /**
  * 截断 argsRaw 中大字段，防止历史消息内存爆炸。
@@ -191,6 +199,12 @@ export interface TaskLoopConfig {
    * - 执行时二次校验：LLM 若调了非白名单工具，直接返回拒绝结果（不走到 tool.execute）
    */
   toolFilter?: TaskLoopToolFilter;
+  /**
+   * 可选：子代理能力策略（runner 注入到子代理 loop）。
+   * 透传到每次工具调用的 ToolContext.delegate，由 bash / read_file / 网络工具
+   * 在工具层执行只读约束（子代理自动执行、不弹审批）。主 loop 不设。
+   */
+  delegate?: DelegateCapabilityPolicy;
   /** 可选：Context 管理器（W8）；不传则不压缩 */
   contextManager?: ContextManager;
   /**
@@ -293,6 +307,13 @@ export class TaskLoop {
   private readonly graphIndex: GraphIndexLike | undefined;
   /** 本任务编辑过的文件（结构绝对路径） */
   private readonly editedFiles = new Set<string>();
+  /**
+   * 外部注入的「下一轮上下文便签」队列（如后台子代理完成回报）。
+   * 由 injectContextNote() 入队，runUntilTerminal 在每轮开始前 drain 进 history。
+   */
+  private pendingContextNotes: string[] = [];
+  /** 子代理能力策略（主 loop 不设） */
+  private readonly delegate?: DelegateCapabilityPolicy;
   private verificationState: VerificationState = 'NotEdited';
   private testPlan: TestPlan | undefined;
   private lastTestSummary: TestRunSummary | undefined;
@@ -341,6 +362,7 @@ export class TaskLoop {
     this.onEvent = cfg.onEvent;
     this.hookManager = cfg.hookManager;
     this.toolFilter = cfg.toolFilter;
+    this.delegate = cfg.delegate;
     this.contextManager = cfg.contextManager;
     this.modelOverride = cfg.modelOverride;
     this.codebaseIndex = cfg.codebaseIndex;
@@ -599,6 +621,29 @@ export class TaskLoop {
   /** SSE 断裂重推退避基数（ms） */
   private static readonly STREAM_BROKEN_BACKOFF_MS = 1500;
 
+  /**
+   * 外部注入上下文便签（如后台子代理完成回报）：入队，下一轮请求前进入 history。
+   * 与 onEvent/事件流的区别：这条信息**进入 LLM 上下文**，而不是只给 UI 看。
+   */
+  injectContextNote(note: string): void {
+    if (typeof note !== 'string' || note.trim().length === 0) return;
+    this.pendingContextNotes.push(note);
+  }
+
+  /** 把待注入便签写入 history（作为合成 user 消息，与验证门提示同型）并告知 UI */
+  private drainContextNotes(): void {
+    if (this.pendingContextNotes.length === 0) return;
+    const notes = this.pendingContextNotes.splice(0);
+    for (const note of notes) {
+      this.history.addUser(note);
+    }
+    this.emit({
+      type: 'text_delta',
+      taskId: this.taskId,
+      text: `\n\n📥 [后台子代理回报已注入上下文（${notes.length} 条）]\n`,
+    });
+  }
+
   private async runUntilTerminal(): Promise<{
     toolCalls: number;
     finalAssistantText: string;
@@ -617,6 +662,9 @@ export class TaskLoop {
         return { toolCalls: totalToolCalls, finalAssistantText: lastAssistantText, ok: false, errorCode: ErrorCodes.TASK_LOOP_ABORTED, errorMessage: '用户已中止任务' };
       }
       this.emit({ type: 'turn_start', taskId: this.taskId, turn });
+
+      // 后台子代理回报等外部便签：在下一轮开始前注入 history（进入 LLM 上下文）
+      this.drainContextNotes();
 
       const outcome = await this.runOneTurn(turn);
 
@@ -1247,6 +1295,12 @@ export class TaskLoop {
           });
         }
       },
+      // 子代理（Agent 工具）内部进度 → 主会话事件流（仅 UI 旁路，不进 history）
+      onChildEvent: (ev: TaskEvent) => this.emit(ev),
+      // 后台子代理等异步结果的上下文注入通道（进入 LLM 上下文）
+      onInjectContext: (text: string) => this.injectContextNote(text),
+      // 子代理能力策略：仅子代理 loop 会带（主 loop 为 undefined）
+      ...(this.delegate ? { delegate: this.delegate } : {}),
     });
     // 工具执行完毕，停止空闲 flush 并推送最后剩余的 buffer
     stopOutputFlush();
@@ -1351,7 +1405,9 @@ export class TaskLoop {
     // - 失败时传 finalContent（含可能的 healing hint 或原始错误文本），
     //   让 webview 显示错误信息给用户看到
     // - 成功时传空，由 webview 保留已有的流式终端输出
-    const endContentPreview = !o.ok ? truncate(finalContent, 500) : '';
+    const endContentPreview = !o.ok || RESULT_PREVIEW_TOOLS.has(o.call.name)
+      ? truncate(finalContent, o.ok ? RESULT_PREVIEW_MAX : 500)
+      : '';
     this.emit({
       type: 'tool_exec_end',
       taskId: this.taskId,
@@ -1376,6 +1432,8 @@ export class TaskLoop {
   /** 任务级重置：send() 入口调用，保证跨任务不串状态 */
   private resetVerificationState(): void {
     this.editedFiles.clear();
+    // 注：pendingContextNotes 不在此清空——便签语义是「送达下一轮」；
+    // send() 前的注入（如刚刚完成的后台子代理回报）必须能被本轮 drain 到。
     this.verificationState = 'NotEdited';
     this.lastTestSummary = undefined;
     this.lastVerifyCommand = '';
@@ -1613,6 +1671,9 @@ export class TaskLoop {
     ].join('\n');
 
     const toolCallId = randomUUID();
+    // 先发 tool_start 建立 UI 卡片：否则 tool_exec_start / 子代理进度事件在 webview
+    // 侧找不到归属卡片（reducer updateToolPart 对不存在的卡片直接 no-op），硬验证过程不可见。
+    this.emit({ type: 'tool_start', taskId: this.taskId, toolCallId, name: 'Agent' });
     this.emit({
       type: 'tool_exec_start', taskId: this.taskId, toolCallId,
       name: 'Agent', args: { subagent_type: 'Verify' }, startTime: Date.now(),
@@ -1631,6 +1692,8 @@ export class TaskLoop {
         workspaceRoot: this.workspaceRoot,
         signal,
         taskId: this.taskId,
+        // 硬验证子代理的进度同样归位到其 Agent 卡片（CVW 路径）
+        onChildEvent: (ev: TaskEvent) => this.emit(ev),
       });
     } catch (e) {
       result = { ok: false, content: `Error: ${String(e)}` };

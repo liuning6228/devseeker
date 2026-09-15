@@ -15,10 +15,11 @@
  * - 执行工具调用，处理：超时 / 取消 / 参数校验 / AgentError 归一化
  */
 
-import type { ITool, ToolContext, ToolResult } from './types.js';
+import type { ITool, ToolContext, ToolResult, DelegateCapabilityPolicy } from './types.js';
 import type { FileStateCache } from './file-state-cache.js';
 import { toToolSchema } from './types.js';
 import type { ToolSchema } from '../../providers/types.js';
+import type { TaskEvent } from '../../shared/protocol.js';
 import { AgentError, ErrorCodes, toAgentError } from '../errors/index.js';
 import { getLogger } from '../../infra/logger.js';
 import type { HookManager, PreToolCallPayload, PostToolCallPayload } from '../hooks/index.js';
@@ -86,6 +87,18 @@ export interface RunToolOptions {
    * 仅在支持流式输出的工具（如 bash）中触发，用于向 UI 推送中间输出。
    */
   onOutput?: (output: string) => void;
+  /**
+   * 嵌套子任务事件回调（如 Agent 工具转发子代理进度）。
+   * 透传到 ToolContext.emitChildEvent，仅 UI 旁路，不进 history。
+   */
+  onChildEvent?: (ev: TaskEvent) => void;
+  /**
+   * 主 loop 的「下一轮上下文便签」注入回调（如后台子代理完成回报）。
+   * 透传到 ToolContext.injectContext —— 这是进入 LLM 上下文的旁路。
+   */
+  onInjectContext?: (text: string) => void;
+  /** 子代理能力策略（runner 注入到子代理 loop；主 loop 不设） */
+  delegate?: DelegateCapabilityPolicy;
 }
 
 /**
@@ -171,6 +184,9 @@ export class ToolRunner {
       toolCallId: opts.toolCallId,
       fileStateCache: opts.fileStateCache,
       emitOutput: opts.onOutput,
+      emitChildEvent: opts.onChildEvent,
+      ...(opts.onInjectContext ? { injectContext: opts.onInjectContext } : {}),
+      ...(opts.delegate ? { delegate: opts.delegate } : {}),
     };
 
     // 「终端运行」标记：审批 redirect 时设置，在 tool.execute() 前注入 terminalMode='user_visible'

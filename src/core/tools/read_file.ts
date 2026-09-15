@@ -28,6 +28,7 @@ import { promises as fs } from 'node:fs';
 import { resolve as resolvePath, relative, isAbsolute, extname } from 'node:path';
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';
 import { formatWithLineNumbers } from './result-formatter.js';
+import { isDelegatePathAllowed } from '../subagent/delegate-guards.js';
 import { ErrorCodes } from '../errors/index.js';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -130,6 +131,15 @@ export class ReadFileTool implements ITool<ReadFileArgs, ToolResult> {
       return fail(
         ErrorCodes.TOOL_EXEC_PERMISSION_DENIED,
         `拒绝读取工作区外的文件：${file_path}`,
+      );
+    }
+
+    // 2b. 子代理角色范围（如 Guide 仅允许 .devseeker/ + docs/ + AGENTS.md）
+    const readPrefixes = ctx.delegate?.readPathPrefixes;
+    if (readPrefixes && readPrefixes.length > 0 && !isDelegatePathAllowed(rel, readPrefixes)) {
+      return fail(
+        ErrorCodes.SUBAGENT_TOOL_NOT_ALLOWED,
+        `子代理（${ctx.delegate!.role}）仅允许读取：${readPrefixes.join(' / ')}；拒绝：${file_path}`,
       );
     }
 

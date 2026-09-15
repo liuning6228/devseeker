@@ -13,6 +13,11 @@
  *              不含 search_codebase → 回答 "怎么配 DevSeeker"，不搜项目业务代码
  * - Verify   : bash + get_terminal_output + read_file + list_dir + get_problems + search_codebase
  *              跑测试/构建/类型检查，只读不写；失败时定位 first failure + 接下步建议
+ *
+ * 只读不变量：子代理的设计定位是**只读调研/验证员**（不写工作区、不派生、不与用户交互）。
+ * 写工具（EDIT_TOOL_NAMES）与主会话状态工具在 DELEGATE_BLOCKED_TOOLS 硬禁，
+ * 由 runner 的 toolFilter 对所有路径（内置 def / 自定义 agent / preset / toolsets）统一拦截。
+ * 因此下面任何 def 即使误列写工具也无法生效。
  */
 
 import type { SubagentDefinition, SubagentRegistry, SubagentType, ToolsetName, PresetName } from './types.js';
@@ -166,6 +171,7 @@ export const BROWSER_DEFINITION: SubagentDefinition = {
   allowedTools: BROWSER_TOOLS,
   systemPrompt: BROWSER_PROMPT,
   maxTurns: 15,
+  timeoutMs: 120_000,
   description: 'Pure web browsing: search + fetch + summarize URLs.',
   isBuiltin: true,
 };
@@ -175,15 +181,38 @@ export const RESEARCH_DEFINITION: SubagentDefinition = {
   allowedTools: RESEARCH_TOOLS,
   systemPrompt: RESEARCH_PROMPT,
   maxTurns: 20,
+  timeoutMs: 180_000,
   description: 'Deep research combining local codebase + web resources.',
   isBuiltin: true,
 };
+
+/** Guide 允许读取的路径前缀白名单（相对 workspaceRoot）。 */
+export const GUIDE_READ_PATH_PREFIXES: readonly string[] = [
+  '.devseeker/',
+  'docs/',
+  'AGENTS.md',
+];
+
+/** Guide 允许 fetch 的官方文档域名白名单。 */
+export const GUIDE_URL_HOST_WHITELIST: readonly string[] = [
+  'code.visualstudio.com',
+  'modelcontextprotocol.io',
+  'docs.github.com',
+  'nodejs.org',
+  'typescriptlang.org',
+  'vitest.dev',
+];
 
 export const GUIDE_DEFINITION: SubagentDefinition = {
   type: 'Guide',
   allowedTools: GUIDE_TOOLS,
   systemPrompt: GUIDE_PROMPT,
   maxTurns: 12,
+  timeoutMs: 90_000,
+  // 角色范围在工具层硬执行（此前只有 prompt 承诺，白名单是装饰）：
+  // 仅 .devseeker/ + docs/ + AGENTS.md 可读，仅官方文档域名可 fetch
+  readPathPrefixes: GUIDE_READ_PATH_PREFIXES,
+  urlHostWhitelist: GUIDE_URL_HOST_WHITELIST,
   description: 'Product guide: how to configure / use DevSeeker.',
   isBuiltin: true,
 };
@@ -193,6 +222,8 @@ export const VERIFY_DEFINITION: SubagentDefinition = {
   allowedTools: VERIFY_TOOLS,
   systemPrompt: VERIFY_PROMPT,
   maxTurns: 20,
+  // 验证员要跑测试/构建/类型检查：默认 120s 会把长用例中途杀死，预算按 bash 上限（300s）给足
+  timeoutMs: 300_000,
   description: 'Run tests / type-check / build and report pass/fail.',
   isBuiltin: true,
 };
@@ -202,6 +233,7 @@ export const VISION_DEFINITION: SubagentDefinition = {
   allowedTools: new Set<string>(),
   systemPrompt: VISION_PROMPT,
   maxTurns: 1,
+  timeoutMs: 60_000,
   description: '分析图片内容并返回文字描述',
   isBuiltin: true,
 };
@@ -221,6 +253,7 @@ export const REQUIREMENT_ANALYZER_DEFINITION: SubagentDefinition = {
   allowedTools: new Set<string>(TOOLSETS.search),
   systemPrompt: REQUIREMENT_ANALYZER_PROMPT,
   maxTurns: 15,
+  timeoutMs: 120_000,
   description: 'Analyze codebase and produce structured requirements analysis for Spec workflow.',
   isBuiltin: true,
 };
@@ -230,18 +263,19 @@ export const REQUIREMENT_ANALYZER_DEFINITION: SubagentDefinition = {
 const DEBUG_PROMPT = [
   'You are the **Debug** subagent of DevSeeker — a systematic bug diagnosis specialist.',
   '',
-  'Scope: diagnose bugs by tracing error propagation, analyzing stack traces, and identifying root causes.',
-  'You have access to `trace_error` for error chain tracing, `search_replace` for minimal fixes, and diagnostic tools.',
+  'Scope: diagnose bugs by tracing error propagation, analyzing stack traces, and locating root causes.',
+  'You are READ-ONLY toward the workspace — you reproduce, gather evidence, and PROPOSE fixes;',
+  'the main agent applies the actual edits (it owns approval / checkpoint / verification).',
   '',
   'Rules:',
-  '- Follow the 5-step debug methodology: Reproduce → Evidence → Locate → Fix → Verify.',
+  '- Follow the 4-step methodology: Reproduce → Evidence → Locate → Propose.',
   '- Start with `trace_error` to trace the error propagation chain (pass error message/stack).',
   '- Use `get_problems` to collect compiler/linter diagnostics.',
   '- Use `search_codebase` and `grep_code` to find related code paths.',
   '- Form hypotheses BEFORE proposing fixes. Rank by likelihood.',
-  '- Make minimal fixes — do not refactor unrelated code.',
-  '- Verify fixes with `bash` (run tests) or `get_problems`.',
-  '- When done, reply with a structured report: Root Cause / Evidence / Fix / Verification.',
+  '- Propose the MINIMAL fix as a precise description or unified diff snippet (you cannot apply it).',
+  '- Reproduce with `bash` (run the failing test) — never edit files to make a test pass.',
+  '- When done, reply with a structured report: Root Cause / Evidence / Proposed Fix / Verification.',
 ].join('\n');
 
 const DEBUG_TOOLS = new Set<string>(TOOLSETS.debug);
@@ -251,6 +285,8 @@ export const DEBUG_DEFINITION: SubagentDefinition = {
   allowedTools: DEBUG_TOOLS,
   systemPrompt: DEBUG_PROMPT,
   maxTurns: 20,
+  // 诊断要复现（跑测试/回放）：预算与 Verify 对齐
+  timeoutMs: 300_000,
   description: 'Systematic bug diagnosis: trace errors, analyze stack traces, locate root causes.',
   isBuiltin: true,
 };
@@ -276,8 +312,11 @@ const BUILTIN_DEFS: readonly SubagentDefinition[] = [
 ];
 
 export function getSubagentDefinition(type: SubagentType): SubagentDefinition | undefined {
-  if (type === 'Browser' || type === 'Research' || type === 'Guide' || type === 'Verify' || type === 'Vision' || type === 'RequirementAnalyzer' || type === 'Debug') {
-    return BY_TYPE[type];
+  if (typeof type !== 'string') return undefined;
+  // 大小写不敏感 + trim 归一：模型传 'verify' / 'browser' / ' Verify ' 都能命中内置定义。
+  const norm = type.trim().toLowerCase();
+  for (const key of Object.keys(BY_TYPE) as (keyof typeof BY_TYPE)[]) {
+    if (key.toLowerCase() === norm) return BY_TYPE[key];
   }
   return undefined;
 }
@@ -318,23 +357,6 @@ export function createSubagentRegistry(customs: readonly SubagentDefinition[]): 
   };
 }
 
-/** Guide 允许读取的路径前缀白名单（相对 workspaceRoot）。 */
-export const GUIDE_READ_PATH_PREFIXES: readonly string[] = [
-  '.devseeker/',
-  'docs/',
-  'AGENTS.md',
-];
-
-/** Guide 允许 fetch 的官方文档域名白名单。 */
-export const GUIDE_URL_HOST_WHITELIST: readonly string[] = [
-  'code.visualstudio.com',
-  'modelcontextprotocol.io',
-  'docs.github.com',
-  'nodejs.org',
-  'typescriptlang.org',
-  'vitest.dev',
-];
-
 // ─────────── Phase 5：TOOLSET_PRESETS 映射表 ───────────
 
 /**
@@ -345,7 +367,6 @@ export const GUIDE_URL_HOST_WHITELIST: readonly string[] = [
 export const TOOLSET_PRESETS: Record<PresetName, ToolsetName[]> = {
   explore: ['search'],
   planner: ['search', 'plan'],
-  implementer: ['search', 'file', 'terminal'],
   reviewer: ['search', 'review'],
   verifier: ['search', 'verify'],
   general: ['all'],
@@ -391,26 +412,6 @@ const PLANNER_PROMPT = [
   '- Do NOT modify the workspace directly.',
 ].join('\n');
 
-const IMPLEMENTER_PROMPT = [
-  'You are an **implementer** subagent — a code implementation specialist.',
-  '',
-  'Goal: implement code changes as specified in a plan file or task description.',
-  'You have full file + terminal tools to write and verify code.',
-  '',
-  'Workflow:',
-  '1. Read the plan (if provided) or task description to understand exactly what to change.',
-  '2. Read existing files to understand current implementation.',
-  '3. Apply changes using `search_replace` or `write_file`. Prefer search_replace.',
-  '4. Verify with `bash` (run tests / type-check / build) after each meaningful change.',
-  '5. Iterate: if verification fails, fix and re-verify.',
-  '',
-  'Rules:',
-  '- Do NOT change files outside the scope of the plan.',
-  '- Do NOT refactor unrelated code ("while you are at it").',
-  '- Use the least invasive change that satisfies the requirement.',
-  '- After completing all changes, summarize what was done and verification results.',
-].join('\n');
-
 const REVIEWER_PROMPT = [
   'You are a **reviewer** subagent — a code review specialist.',
   '',
@@ -430,25 +431,35 @@ const REVIEWER_PROMPT = [
   '- Output a single Markdown summary with sections per finding type.',
 ].join('\n');
 
+/**
+ * @deprecated 历史写入型 preset 名：设计上已移除（子代理只读）。
+ * 仅用于向后兼容——模型可能仍按旧文档传 `preset:'implementer'`，此时降级为
+ * explore 只读能力，而不是报错中断任务。
+ */
+type LegacyPresetName = 'implementer';
+
 /** 通过 preset 查找对应的 SubagentDefinition。若旧 definition 中已有同名定义则复用。 */
-export function getDefinitionForPreset(preset: PresetName): SubagentDefinition | undefined {
+export function getDefinitionForPreset(preset: PresetName | LegacyPresetName): SubagentDefinition | undefined {
   switch (preset) {
     case 'explore': {
       // explore 复用 RESEARCH_DEFINITION 的白名单但裁剪到纯 search
       const allowed = new Set<string>(TOOLSETS.search);
-      return { type: 'explore', allowedTools: allowed, systemPrompt: EXPLORE_PROMPT, maxTurns: 15, isBuiltin: true, description: 'Read-only codebase explorer.' };
+      return { type: 'explore', allowedTools: allowed, systemPrompt: EXPLORE_PROMPT, maxTurns: 15, timeoutMs: 120_000, isBuiltin: true, description: 'Read-only codebase explorer.' };
     }
     case 'planner': {
       const allowed = new Set<string>([...TOOLSETS.search, ...TOOLSETS.plan]);
-      return { type: 'planner', allowedTools: allowed, systemPrompt: PLANNER_PROMPT, maxTurns: 15, isBuiltin: true, description: 'Structured plan designer.' };
+      return { type: 'planner', allowedTools: allowed, systemPrompt: PLANNER_PROMPT, maxTurns: 15, timeoutMs: 120_000, isBuiltin: true, description: 'Structured plan designer.' };
     }
     case 'implementer': {
-      const allowed = new Set<string>([...TOOLSETS.search, ...TOOLSETS.file, ...TOOLSETS.terminal]);
-      return { type: 'implementer', allowedTools: allowed, systemPrompt: IMPLEMENTER_PROMPT, maxTurns: 25, isBuiltin: true, description: 'Code implementer with file+terminal tools.' };
+      // 设计上不存在写入型子代理：子代理只做只读调研/验证，写工作区由主 Agent 独占。
+      // 保留分支以兼容旧调用（模型可能仍传 preset:'implementer'）——降级为
+      // explore 能力（纯只读检索），而不是报错中断任务。
+      const allowed = new Set<string>(TOOLSETS.search);
+      return { type: 'explore', allowedTools: allowed, systemPrompt: EXPLORE_PROMPT, maxTurns: 15, timeoutMs: 120_000, isBuiltin: true, description: 'Read-only codebase explorer.' };
     }
     case 'reviewer': {
       const allowed = new Set<string>([...TOOLSETS.search, ...TOOLSETS.review]);
-      return { type: 'reviewer', allowedTools: allowed, systemPrompt: REVIEWER_PROMPT, maxTurns: 15, isBuiltin: true, description: 'Code reviewer — read-only, outputs findings.' };
+      return { type: 'reviewer', allowedTools: allowed, systemPrompt: REVIEWER_PROMPT, maxTurns: 15, timeoutMs: 150_000, isBuiltin: true, description: 'Code reviewer — read-only, outputs findings.' };
     }
     case 'verifier':
     case 'general':

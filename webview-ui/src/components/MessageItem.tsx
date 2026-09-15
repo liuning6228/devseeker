@@ -1,6 +1,8 @@
-import { useMemo, useRef, memo } from 'react';
-import type { MessagePart, UiMessage } from '../state/reducer';
+import { Fragment, memo, useMemo, useRef, useState } from 'react';
+import type { MessagePart, ToolCallPart, UiMessage } from '../state/reducer';
+import type { ApprovalRequestPayload } from '../protocol';
 import { ToolCard } from './ToolCard';
+import { SubagentGroupBar } from './chat/SubagentGroupBar';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { streamController } from '../stream/StreamController';
 import { motion } from '../lib/motion.js';
@@ -22,14 +24,12 @@ export interface MessageItemProps {
   onRevertHunk?: (relPath: string, hunkUnified: string, nonce: string) => void;
   /** W15.6 · 已被 revert 的 hunk nonce 集合 */
   revertedHunks?: Set<string>;
-  /** 内联审批：等待审批的 toolCallId 集合 */
-  pendingApprovalToolIds?: Set<string>;
+  /** 内联审批：全部待审批请求（toolCallId → payload） */
+  pendingApprovals?: Record<string, ApprovalRequestPayload>;
   /** 内联审批响应回调 */
   onApprovalResponse?: (toolCallId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => void;
   /** 当前流式消息的 streamId（StreamController DOM 锚点绑定用） */
   currentStreamMsgId?: string;
-  /** 当前审批请求的风险级别 */
-  riskLevel?: 'safe' | 'risky';
   /** Step 2: 流式消息无内容时显示骨架屏 */
   skeleton?: boolean;
 }
@@ -41,9 +41,24 @@ const ROLE_LABEL: Record<UiMessage['role'], string> = {
   system: 'System',
 };
 
-function MessageItemImpl({ message, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovalToolIds, onApprovalResponse, currentStreamMsgId, riskLevel, skeleton }: MessageItemProps): JSX.Element {
+function MessageItemImpl({ message, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovals, onApprovalResponse, currentStreamMsgId, skeleton }: MessageItemProps): JSX.Element {
   const hasAnyVisible = useMemo(() => message.parts.some(isVisible), [message.parts]);
+
+  // 并行子代理分组视图：同一条消息内 ≥2 个子代理卡片时聚合展示（仅本地 UI 状态）
+  const subagentPartIndices = useMemo(() => {
+    const idx: number[] = [];
+    message.parts.forEach((p, i) => {
+      if (p.kind === 'tool' && p.subagent !== undefined) idx.push(i);
+    });
+    return idx;
+  }, [message.parts]);
+  const [groupCollapsed, setGroupCollapsed] = useState(false);
+
   if (!hasAnyVisible && !message.reasoning) return <></>;
+
+  const isGrouped = subagentPartIndices.length >= 2;
+  const firstSubagentIdx = subagentPartIndices[0] ?? -1;
+  const groupStates = subagentPartIndices.map((pi) => (message.parts[pi] as ToolCallPart).subagent!).filter(Boolean);
 
   return (
     <motion.div
@@ -70,15 +85,28 @@ function MessageItemImpl({ message, onRevert, onOpenFile, onOpenTerminal, onReve
         {/* 这样 tool card 的固定高度先抢占位置，文字流式追加时不会造成视觉跳跃 */}
         {message.parts.map((part, i) => {
           if (part.kind !== 'tool') return null;
+          // 分组折叠时隐藏子代理卡片（分组条保留）
+          const hidePart = isGrouped && groupCollapsed && part.subagent !== undefined;
           return (
-            <PartRenderer key={i} part={part} onRevert={onRevert} onOpenFile={onOpenFile} onOpenTerminal={onOpenTerminal} onRevertHunk={onRevertHunk} revertedHunks={revertedHunks} pendingApprovalToolIds={pendingApprovalToolIds} onApprovalResponse={onApprovalResponse} streamId={currentStreamMsgId ?? message.id} riskLevel={riskLevel} />
+            <Fragment key={i}>
+              {isGrouped && i === firstSubagentIdx && (
+                <SubagentGroupBar
+                  states={groupStates}
+                  collapsed={groupCollapsed}
+                  onToggle={() => setGroupCollapsed((v) => !v)}
+                />
+              )}
+              {!hidePart && (
+                <PartRenderer part={part} onRevert={onRevert} onOpenFile={onOpenFile} onOpenTerminal={onOpenTerminal} onRevertHunk={onRevertHunk} revertedHunks={revertedHunks} approvalPayload={pendingApprovals?.[part.toolCallId]} onApprovalResponse={onApprovalResponse} streamId={message.streamId ?? currentStreamMsgId ?? message.id} />
+              )}
+            </Fragment>
           );
         })}
         {/* text part 统一放在 tool part 下方 */}
         {message.parts.map((part, i) => {
           if (part.kind === 'tool') return null;
           return (
-            <PartRenderer key={i} part={part} onRevert={onRevert} onOpenFile={onOpenFile} onOpenTerminal={onOpenTerminal} onRevertHunk={onRevertHunk} revertedHunks={revertedHunks} pendingApprovalToolIds={pendingApprovalToolIds} onApprovalResponse={onApprovalResponse} streamId={currentStreamMsgId ?? message.id} riskLevel={riskLevel} />
+            <PartRenderer key={i} part={part} onRevert={onRevert} onOpenFile={onOpenFile} onOpenTerminal={onOpenTerminal} onRevertHunk={onRevertHunk} revertedHunks={revertedHunks} onApprovalResponse={onApprovalResponse} streamId={message.streamId ?? currentStreamMsgId ?? message.id} />
           );
         })}
       </div>
@@ -93,10 +121,9 @@ function PartRenderer({
   onOpenTerminal,
   onRevertHunk,
   revertedHunks,
-  pendingApprovalToolIds,
+  approvalPayload,
   onApprovalResponse,
   streamId,
-  riskLevel,
 }: {
   part: MessagePart;
   onRevert?: (checkpointId: string) => void;
@@ -104,10 +131,10 @@ function PartRenderer({
   onOpenTerminal?: (command: string) => void;
   onRevertHunk?: (relPath: string, hunkUnified: string, nonce: string) => void;
   revertedHunks?: Set<string>;
-  pendingApprovalToolIds?: Set<string>;
+  /** 该工具卡对应的待审批请求（undefined = 未等待审批） */
+  approvalPayload?: ApprovalRequestPayload;
   onApprovalResponse?: (toolCallId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => void;
   streamId?: string;
-  riskLevel?: 'safe' | 'risky';
 }): JSX.Element {
   if (part.kind === 'text') {
     const isStreaming = part.isStreaming;
@@ -127,6 +154,7 @@ function PartRenderer({
       status={part.status}
       argsPreview={part.argsPreview}
       contentPreview={part.contentPreview}
+      subagent={part.subagent}
       errorCode={part.errorCode}
       diff={part.diff}
       revertState={part.revertState}
@@ -134,10 +162,10 @@ function PartRenderer({
       onRevertHunk={onRevertHunk}
       revertedHunks={revertedHunks}
       onOpenTerminal={onOpenTerminal}
-      awaitingApproval={pendingApprovalToolIds?.has(part.toolCallId)}
-      riskLevel={riskLevel}
+      awaitingApproval={approvalPayload !== undefined}
+      approvalPayload={approvalPayload}
       onApprovalResponse={
-        pendingApprovalToolIds?.has(part.toolCallId) && onApprovalResponse
+        approvalPayload !== undefined && onApprovalResponse
           ? (decision) => onApprovalResponse(part.toolCallId, decision)
           : undefined
       }

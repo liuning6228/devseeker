@@ -70,6 +70,29 @@ export interface SkillInfo {
 
 // ─────────── TaskEvent（TaskLoop → Webview） ───────────
 
+/**
+ * 子代理进度事件（UI 专用，不进 history / 不发回 LLM）。
+ * 由 Agent 工具把 runSubagent 的内部 TaskEvent 归一化后上报，
+ * 经 subagent_event 嵌套转发到 webview，由子代理卡片渲染。
+ */
+export type SubagentProgressEvent =
+  | {
+      type: 'subagent_start';
+      agentType: string;
+      description: string;
+      /** 子代理启动时间戳（已用时 / ETA 计算基准） */
+      startTime: number;
+      /** 步数预算（def.maxTurns），用于进度与 ETA 估算；缺省则不展示 */
+      maxTurns?: number;
+    }
+  /** 子代理正文增量（text_delta 映射，bridge 侧已做合并节流） */
+  | { type: 'subagent_text'; text: string }
+  | { type: 'subagent_tool_start'; name: string; toolId: string; startTime?: number }
+  | { type: 'subagent_tool_end'; name: string; toolId: string; ok: boolean; durationMs?: number }
+  /** 子代理自身 LLM 调用的 token 消耗（用于成本记账） */
+  | { type: 'subagent_usage'; promptTokens: number; completionTokens: number; cachedTokens?: number }
+  | { type: 'subagent_end'; ok: boolean; summary: string; toolCalls: number; durationMs?: number };
+
 export type TaskEvent =
   | { type: 'task_start'; taskId: string; userInput: string }
   | { type: 'turn_start'; taskId: string; turn: number }
@@ -156,6 +179,20 @@ export type TaskEvent =
       score: number;
       signals: Array<{ type: string; severity: number; question: string }>;
       message: string;
+    }
+  /**
+   * 子代理过程事件（Agent 工具 → UI 卡片）。
+   * parentToolCallId 关联主会话中 Agent 工具调用的 toolCallId，
+   * webview 据此把子代理进度归位到对应卡片；主消息流与 LLM history 不受影响。
+   */
+  | {
+      type: 'subagent_event';
+      taskId: string;
+      /** 主会话中触发本次子代理的 Agent 工具调用 id */
+      parentToolCallId: string;
+      /** 子代理类型（Browser / Research / preset 名等，用于展示） */
+      agentType: string;
+      progress: SubagentProgressEvent;
     };
 
 // ─────────── Webview → Extension ───────────
@@ -646,6 +683,12 @@ export type WebviewOutboundMessage =
       ok: boolean;
       message?: string;
     }
+  /**
+   * 拒绝（reject_diff / reject_all_diffs）的执行回执。
+   * 以 relPath 为路由键：覆盖“无 checkpoint 无法回滚”的场景（checkpointId 路由无法覆盖）。
+   * 卡片契约 K5：UI 声明（已拒绝）必须等于实际动作（是否真回滚）。
+   */
+  | { type: 'reject_result'; relPath: string; ok: boolean; message?: string }
   /** W15.6 · hunk revert 完成回执 */
   | {
       type: 'revert_hunk_result';

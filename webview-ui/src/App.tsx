@@ -116,8 +116,8 @@ function AppWithNav(): JSX.Element {
   const [settingsApprovalConfig, setSettingsApprovalConfig] = useState<ApprovalPolicyConfigPayload | null>(null);
   // ask_user_question 弹窗状态（提升到 AppWithNav 层级，确保所有视图下都能弹窗）
   const [askQuestion, setAskQuestion] = useState<AskQuestionPayload | null>(null);
-  // approval_request 审批弹窗状态（非聊天视图时展示独立覆盖层）
-  const [approvalRequest, setApprovalRequest] = useState<ApprovalRequestPayload | null>(null);
+  // approval_request 审批弹窗状态（非聊天视图时展示独立覆盖层；支持多个并发）
+  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequestPayload[]>([]);
 
   // 监听 extension host 推送的 model_config + ask_question + approval_request + history
   useEffect(() => {
@@ -139,18 +139,23 @@ function AppWithNav(): JSX.Element {
         setAskQuestion(msg.payload as AskQuestionPayload);
       }
       if (msg?.type === 'approval_request') {
-        setApprovalRequest(msg.payload as ApprovalRequestPayload);
+        const payload = msg.payload as ApprovalRequestPayload;
+        // 按 requestId 幂等 upsert（重放/重复推送不会插入多张卡）
+        setApprovalRequests((prev) => [
+          ...prev.filter((p) => p.requestId !== payload.requestId),
+          payload,
+        ]);
       }
       // 会话切换/清空历史时清除残留弹窗状态，避免用户看到已取消的弹窗
       if (msg?.type === 'history') {
         setAskQuestion(null);
-        setApprovalRequest(null);
+        setApprovalRequests([]);
       }
       // Stop / dispose 等场景：panel 侧 cancelAllPending 已释放 Promise，
       // 但 webview 侧的弹窗 UI 需要主动关掉
       if (msg?.type === 'dismiss_pending_dialogs') {
         setAskQuestion(null);
-        setApprovalRequest(null);
+        setApprovalRequests([]);
       }
     }
     window.addEventListener('message', onMessage);
@@ -177,10 +182,22 @@ function AppWithNav(): JSX.Element {
   const handleApprovalRespond = useCallback(
     (requestId: string, decision: 'allow_once' | 'remember' | 'deny') => {
       postToHost({ type: 'approval_response', requestId, decision });
-      setApprovalRequest(null);
+      setApprovalRequests((prev) => prev.filter((p) => p.requestId !== requestId));
+      // 桥接：通知 AppInner 的 reducer 同步清除同一请求（两个视图各自的渲染状态）
+      window.dispatchEvent(new CustomEvent('dsv:approval-resolved', { detail: { requestId } }));
     },
     [],
   );
+
+  // 聊天侧（内联/孤儿覆盖层）作答后，同步清除本组件的待审批列表（双份渲染状态的桥接）
+  useEffect(() => {
+    const onResolved = (ev: Event): void => {
+      const requestId = (ev as CustomEvent<{ requestId?: string }>).detail?.requestId;
+      if (requestId) setApprovalRequests((prev) => prev.filter((p) => p.requestId !== requestId));
+    };
+    window.addEventListener('dsv:approval-resolved', onResolved);
+    return () => window.removeEventListener('dsv:approval-resolved', onResolved);
+  }, []);
 
   // 进入 settings 视图时主动请求一次当前配置
   useEffect(() => {
@@ -221,9 +238,15 @@ function AppWithNav(): JSX.Element {
               }))}
             />
           )}
-          {currentView === 'chat' && (
+          {/*
+           * 聊天视图：**保持挂载**（仅切换可见性）。
+           * 条件渲染会在切到 Settings/History 时卸载 AppInner → reducer 状态（消息/卡片/流式会话）全丢；
+           * 重挂后 ready 只会收到空 history（panel.tryRestoreLatestSession 仅推空消息 + 会话列表），
+           * 导致**整段对话从界面消失**（H12 同族，同一会话内即可触发）。保持挂载可避免状态丢失。
+           */}
+          <div className="h-full" style={{ display: currentView === 'chat' ? undefined : 'none' }}>
             <AppInner onNavigate={handleNavigate} currentView={currentView} />
-          )}
+          </div>
           {currentView === 'settings' && (
             <SettingsView config={settingsModelConfig} searchConfig={settingsSearchConfig} embedConfig={settingsEmbedConfig} approvalConfig={settingsApprovalConfig} onBack={() => handleNavigate('chat')} />
           )}
@@ -262,13 +285,12 @@ function AppWithNav(): JSX.Element {
           onCancel={handleCancelAsk}
         />
       )}
-      {/* approval_request 审批覆盖层：非聊天视图时展示（聊天视图内由 ToolCard 内联处理） */}
-      {approvalRequest && currentView !== 'chat' && (
+      {/* approval_request 审批覆盖层：非聊天视图展示全部待审批（聊天视图内联 + 孤儿兜底） */}
+      {approvalRequests.length > 0 && currentView !== 'chat' && (
         <div className="ask-modal-overlay">
-          <ApprovalCard
-            payload={approvalRequest}
-            onRespond={handleApprovalRespond}
-          />
+          {approvalRequests.map((p) => (
+            <ApprovalCard key={p.requestId} payload={p} onRespond={handleApprovalRespond} />
+          ))}
         </div>
       )}
     </PlatformProvider>
@@ -314,8 +336,16 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
         case 'task_event': {
           const event = msg.event as TaskEvent;
 
-          // turn_start 时注册 StreamController 会话
+          // turn_start：先把上一轮的流式文本写回其消息（否则中间轮文本在 task_end 后丢失），
+          // 再注册本轮会话；MessageItem 用 message.streamId 绑定锚点（不再共用"当前轮" sid）
           if (event.type === 'turn_start') {
+            const prevSid = streamMsgIdRef.current;
+            if (prevSid) {
+              const prevText = streamController.finish(prevSid);
+              if (prevText !== undefined) {
+                dispatch({ type: 'TURN_FINALIZE', streamId: prevSid, text: prevText });
+              }
+            }
             const sid = `stream-${event.taskId}-t${event.turn}`;
             streamMsgIdRef.current = sid;
             streamController.register(sid);
@@ -327,16 +357,13 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             break;
           }
 
-          // task_end 时：先完成 StreamController，再 dispatch
+          // task_end：批量收敛所有未闭合轮次（必须在 reducer 的 finalizeStreaming 之前写回）
           if (event.type === 'task_end') {
-            const sid = streamMsgIdRef.current;
-            if (sid) {
-              const finalText = streamController.finish(sid);
-              if (finalText !== undefined) {
-                dispatch({ type: 'TEXT_FINISH', text: finalText });
-              }
-              streamMsgIdRef.current = null;
+            const all = streamController.finishAll();
+            for (const [sid, text] of all) {
+              dispatch({ type: 'TURN_FINALIZE', streamId: sid, text });
             }
+            streamMsgIdRef.current = null;
           }
 
           dispatch({ type: 'TASK_EVENT', event });
@@ -404,8 +431,8 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
           break;
         case 'dismiss_pending_dialogs':
           // approval 的双重状态：AppWithNav 的 useState 已在 onMessage 里清除，
-          // 这里清 reducer 里的 approvalRequest + pendingApprovalToolIds
-          dispatch({ type: 'APPROVAL_CLEAR' });
+          // 这里清 reducer 里的全部待审批
+          dispatch({ type: 'APPROVAL_CLEAR_ALL' });
           break;
         case 'approval_request':
           dispatch({
@@ -425,6 +452,15 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             checkpointId: msg.checkpointId,
             ok: msg.ok,
             ...(msg.message !== undefined ? { message: msg.message } : {}),
+          });
+          break;
+        case 'reject_result':
+          // K5：拒绝回执——失败/无 checkpoint 时撤销“已拒绝”声明并展示原因
+          dispatch({
+            type: 'REJECT_RESULT',
+            relPath: msg.relPath as string,
+            ok: msg.ok as boolean,
+            ...(typeof msg.message === 'string' ? { message: msg.message } : {}),
           });
           break;
         case 'revert_hunk_result':
@@ -528,23 +564,25 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
 
   // QuestionCard 已提升到 AppWithNav 层级，AppInner 不再处理 ask_question 弹窗
 
+  /** 审批响应：投递给宿主 + 精确清除本地对应项（多审批并发不误删） */
   const handleApprovalResponse = useCallback(
-    (requestId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => {
+    (requestId: string, toolCallId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => {
       postToHost({ type: 'approval_response', requestId, decision });
-      dispatch({ type: 'APPROVAL_CLEAR' });
+      dispatch({ type: 'APPROVAL_CLEAR', toolCallId });
+      // 桥接：通知 AppWithNav 的非聊天覆盖层同步移除同一请求
+      window.dispatchEvent(new CustomEvent('dsv:approval-resolved', { detail: { requestId } }));
     },
     [],
   );
 
-  /** 内联审批：从 ToolCard 点击同意/拒绝，携带 toolCallId 映射回 requestId */
+  /** 内联审批：从 ToolCard 点击同意/拒绝，按 toolCallId 路由到对应 requestId */
   const handleApprovalResponseWithToolCallId = useCallback(
-    (_toolCallId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => {
-      // 当前 approvalRequest 的 toolCallId 应匹配；直接复用已有的 requestId
-      if (state.approvalRequest) {
-        handleApprovalResponse(state.approvalRequest.requestId, decision);
-      }
+    (toolCallId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => {
+      const payload = state.pendingApprovals[toolCallId];
+      if (!payload) return;
+      handleApprovalResponse(payload.requestId, toolCallId, decision);
     },
-    [state.approvalRequest, handleApprovalResponse],
+    [state.pendingApprovals, handleApprovalResponse],
   );
 
   const handleRevertStep = useCallback((checkpointId: string) => {
@@ -633,6 +671,31 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
     () => aggregateChangedFiles(state.messages),
     [state.messages],
   );
+
+  /**
+   * 孤儿审批：待审批请求中**没有内联宿主卡片**的（如 webview 重载/会话恢复后
+   * 历史只剩纯文本）→ 聊天视图也必须能作答，否则违反卡片契约 K4。
+   */
+  const orphanApprovals = useMemo(
+    () =>
+      Object.values(state.pendingApprovals).filter(
+        (p) =>
+          !state.messages.some((m) =>
+            m.parts.some((x) => x.kind === 'tool' && x.toolCallId === p.toolCallId),
+          ),
+      ),
+    [state.pendingApprovals, state.messages],
+  );
+
+  // 非聊天视图的覆盖层作答后，同步清除本组件的待审批（双份渲染状态的桥接）
+  useEffect(() => {
+    const onResolved = (ev: Event): void => {
+      const requestId = (ev as CustomEvent<{ requestId?: string }>).detail?.requestId;
+      if (requestId) dispatch({ type: 'APPROVAL_CLEAR', requestId });
+    };
+    window.addEventListener('dsv:approval-resolved', onResolved);
+    return () => window.removeEventListener('dsv:approval-resolved', onResolved);
+  }, []);
 
   // W-UI2 · 单文件 Accept：通知 extension 清除 inline diff 装饰
   const handleAcceptFile = useCallback((relPath: string) => {
@@ -1033,10 +1096,24 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             onRejectFile={handleRejectFile}
             onRejectAll={handleRejectAll}
           />
-          <MessageList messages={state.messages} onRevert={handleRevertStep} onOpenFile={handleOpenFile} onOpenTerminal={handleOpenTerminal} onRevertHunk={handleRevertHunk} revertedHunks={state.revertedHunks} pendingApprovalToolIds={state.pendingApprovalToolIds} onApprovalResponse={handleApprovalResponseWithToolCallId} currentStreamMsgId={state.currentStreamMsgId} riskLevel={state.approvalRequest?.riskLevel} />
+          <MessageList messages={state.messages} onRevert={handleRevertStep} onOpenFile={handleOpenFile} onOpenTerminal={handleOpenTerminal} onRevertHunk={handleRevertHunk} revertedHunks={state.revertedHunks} pendingApprovals={state.pendingApprovals} onApprovalResponse={handleApprovalResponseWithToolCallId} currentStreamMsgId={state.currentStreamMsgId} />
         </div>
       </div>
       {/* 审批已内联到 ToolCard header 中，不再使用独立 ApprovalCard */}
+      {/* 孤儿审批兜底：待审批请求无内联宿主卡片时，聊天视图也必须可作答（K4 可达性） */}
+      {orphanApprovals.length > 0 && (
+        <div className="ask-modal-overlay">
+          {orphanApprovals.map((p) => (
+            <ApprovalCard
+              key={p.requestId}
+              payload={p}
+              onRespond={(_requestId, decision) =>
+                handleApprovalResponse(p.requestId, p.toolCallId, decision)
+              }
+            />
+          ))}
+        </div>
+      )}
       <PreviewBanner
         previews={state.pendingPreviews}
         onOpen={handleOpenPreview}

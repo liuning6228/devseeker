@@ -103,6 +103,45 @@ afterEach(() => {});
 
 // ─────────── 测试 ───────────
 
+describe('TaskLoop - 外部上下文注入（后台子代理回报闭环）', () => {
+  it('injectContextNote：便签在第一轮请求前进入 LLM 上下文（history）', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([
+      { type: 'text_delta', text: 'ok' },
+      { type: 'done', reason: 'stop' },
+    ]);
+    const loop = new TaskLoop({
+      provider,
+      toolRegistry: new ToolRegistry(),
+      systemPrompt: 'you are helpful',
+    });
+
+    loop.injectContextNote('<background_subagent_result>后台结论</background_subagent_result>');
+    await loop.send('hi');
+
+    const history = loop.getHistorySnapshot();
+    const joined = JSON.stringify(history);
+    expect(joined).toContain('background_subagent_result');
+    expect(joined).toContain('后台结论');
+  });
+
+  it('injectContextNote：空便签静默忽略', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([{ type: 'done', reason: 'stop' }]);
+    const loop = new TaskLoop({
+      provider,
+      toolRegistry: new ToolRegistry(),
+      systemPrompt: 'you are helpful',
+    });
+
+    loop.injectContextNote('   ');
+    await loop.send('hi');
+
+    const joined = JSON.stringify(loop.getHistorySnapshot());
+    expect(joined).not.toContain('background_subagent_result');
+  });
+});
+
 describe('TaskLoop', () => {
   it('completes single turn without tool calls', async () => {
     const provider = new ScriptedProvider();

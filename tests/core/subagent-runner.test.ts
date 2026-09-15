@@ -21,6 +21,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { runSubagent } from '../../src/core/subagent/index.js';
+import type { SubagentDefinition, SubagentRegistry } from '../../src/core/subagent/index.js';
 import { ToolRegistry, type ITool, type ToolResult } from '../../src/core/tools/index.js';
 import type { IProvider } from '../../src/providers/base.js';
 import type {
@@ -67,6 +68,10 @@ class ScriptedProvider implements IProvider {
   async countTokens(): Promise<number> {
     return 0;
   }
+
+  updateApiKey(): void {
+    // no-op（IProvider 接口要求，测试无需轮换 Key）
+  }
 }
 
 class FakeReadFileTool implements ITool<{ path: string }, ToolResult> {
@@ -104,6 +109,17 @@ class FakeGetTerminalOutputTool implements ITool<Record<string, unknown>, ToolRe
   readonly description = 'fake';
   readonly parameters = { type: 'object', properties: {} };
   readonly safetyLevel = 'read_only' as const;
+  async execute(): Promise<ToolResult> {
+    return { ok: true, content: '' };
+  }
+}
+
+/** 任意名字的假工具：用于验证 runner 硬拦截（写工具 / 派生工具 / 主会话状态工具） */
+class FakeNamedTool implements ITool<Record<string, unknown>, ToolResult> {
+  readonly description = 'fake';
+  readonly parameters = { type: 'object', properties: {} };
+  readonly safetyLevel = 'workspace_write' as const;
+  constructor(readonly name: string) {}
   async execute(): Promise<ToolResult> {
     return { ok: true, content: '' };
   }
@@ -281,6 +297,56 @@ describe('runSubagent - tool filtering', () => {
     expect(names).not.toContain('search_web');
     expect(names).not.toContain('Agent');
   });
+
+  it('硬不变量：def 白名单里就算列了写工具，子代理也拿不到（runner 对所有路径统一拦截）', async () => {
+    const provider = new ScriptedProvider();
+    provider.push([
+      { type: 'text_delta', text: 'ok' },
+      { type: 'done', reason: 'stop' },
+    ]);
+
+    // 模拟内置 def 误列 / 自定义 agent 声明写工具的场景（旧实现只在 '*' 分支过 blocked，可被绕）
+    const rogueDef: SubagentDefinition = {
+      type: 'RogueWriter',
+      allowedTools: new Set<string>([
+        'read_file', 'search_replace', 'write_file', 'append_file', 'delete_file',
+        'Agent', 'todo_write',
+      ]),
+      systemPrompt: 'rogue',
+      maxTurns: 5,
+      isBuiltin: true,
+    };
+    const registry: SubagentRegistry = {
+      resolve: (t: string) => (t === 'RogueWriter' ? rogueDef : undefined),
+      list: () => [rogueDef],
+    };
+
+    const reg = new ToolRegistry();
+    reg.register(new FakeNamedTool('read_file'));
+    reg.register(new FakeNamedTool('search_replace'));
+    reg.register(new FakeNamedTool('write_file'));
+    reg.register(new FakeNamedTool('append_file'));
+    reg.register(new FakeNamedTool('delete_file'));
+    reg.register(new FakeNamedTool('Agent'));
+    reg.register(new FakeNamedTool('todo_write'));
+
+    await runSubagent(
+      { provider, toolRegistry: reg, registry },
+      { invocation: { subagent_type: 'RogueWriter', description: 'x', prompt: 'y' } },
+    );
+
+    const tools = provider.calls[0].tools ?? [];
+    const names = tools.map((t) => t.function.name);
+    // 白名单内的读工具可见
+    expect(names).toContain('read_file');
+    // 写工具 / 派生工具 / 主会话状态工具一律不可见
+    expect(names).not.toContain('search_replace');
+    expect(names).not.toContain('write_file');
+    expect(names).not.toContain('append_file');
+    expect(names).not.toContain('delete_file');
+    expect(names).not.toContain('Agent');
+    expect(names).not.toContain('todo_write');
+  });
 });
 
 describe('runSubagent - system prompt', () => {
@@ -330,21 +396,25 @@ describe('runSubagent - summary extraction', () => {
     expect(result.summary).toBe('Hello World');
   });
 
-  it('throws SUBAGENT_FAILED when completed with empty summary', async () => {
+  it('completed with empty summary → degrades to a non-empty note instead of throwing', async () => {
     const provider = new ScriptedProvider();
     provider.push([
       // 只给 done，不发任何 text
       { type: 'done', reason: 'stop' },
     ]);
 
-    await expect(
-      runSubagent(
-        { provider, toolRegistry: buildRegistry() },
-        {
-          invocation: { subagent_type: 'Browser', description: 'x', prompt: 'y' },
-        },
-      ),
-    ).rejects.toMatchObject({ code: ErrorCodes.SUBAGENT_FAILED });
+    // 旧行为：空 summary 硬抛 SUBAGENT_FAILED。
+    // 新行为：子代理正常结束但无正文时降级返回一段说明，不再让已完成的工作作废。
+    const result = await runSubagent(
+      { provider, toolRegistry: buildRegistry() },
+      {
+        invocation: { subagent_type: 'Browser', description: 'x', prompt: 'y' },
+      },
+    );
+
+    expect(result.summary.length).toBeGreaterThan(0);
+    expect(result.summary).toMatch(/Browser/);
+    expect(result.stats?.toolCalls).toBe(0);
   });
 });
 
@@ -406,6 +476,7 @@ describe('runSubagent - cancellation & timeout', () => {
       contextWindow: 1000,
       pricing: { inputPerMillion: 0, outputPerMillion: 0, currency: 'CNY' },
       countTokens: async () => 0,
+      updateApiKey: () => {},
       probe: async () => ({ ok: true, latencyMs: 0 }),
       createMessage: ({ signal }) =>
         (async function* (): AsyncGenerator<StreamEvent> {
@@ -438,6 +509,7 @@ describe('runSubagent - cancellation & timeout', () => {
       contextWindow: 1000,
       pricing: { inputPerMillion: 0, outputPerMillion: 0, currency: 'CNY' },
       countTokens: async () => 0,
+      updateApiKey: () => {},
       probe: async () => ({ ok: true, latencyMs: 0 }),
       createMessage: ({ signal }) =>
         (async function* (): AsyncGenerator<StreamEvent> {
@@ -460,6 +532,47 @@ describe('runSubagent - cancellation & timeout', () => {
             timeout: 50,
           },
         },
+      ),
+    ).rejects.toMatchObject({ code: ErrorCodes.SUBAGENT_INTERRUPTED_BY_RESTART });
+  });
+
+  it('角色级超时：invocation 未给 timeout 时用 def.timeoutMs（修复「长任务被 120s 默认值杀死」）', async () => {
+    const provider: IProvider = {
+      id: 'hang-def-timeout',
+      capabilities: ['text'],
+      contextWindow: 1000,
+      pricing: { inputPerMillion: 0, outputPerMillion: 0, currency: 'CNY' },
+      countTokens: async () => 0,
+      updateApiKey: () => {},
+      probe: async () => ({ ok: true, latencyMs: 0 }),
+      createMessage: ({ signal }) =>
+        (async function* (): AsyncGenerator<StreamEvent> {
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) return resolve();
+            signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+          yield { type: 'done', reason: 'aborted' };
+        })(),
+    };
+
+    // def 级预算 50ms；修复前会回退到 120s 默认值（测试超时失败）
+    const fastDef: SubagentDefinition = {
+      type: 'FastTimeout',
+      allowedTools: new Set<string>(['read_file']),
+      systemPrompt: 'x',
+      maxTurns: 5,
+      timeoutMs: 50,
+      isBuiltin: true,
+    };
+    const registry: SubagentRegistry = {
+      resolve: (t: string) => (t === 'FastTimeout' ? fastDef : undefined),
+      list: () => [fastDef],
+    };
+
+    await expect(
+      runSubagent(
+        { provider, toolRegistry: buildRegistry(), registry },
+        { invocation: { subagent_type: 'FastTimeout', description: 'x', prompt: 'y' } },
       ),
     ).rejects.toMatchObject({ code: ErrorCodes.SUBAGENT_INTERRUPTED_BY_RESTART });
   });

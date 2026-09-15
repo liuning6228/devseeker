@@ -48,7 +48,7 @@ import { runBackgroundAgent } from './background-agent.js';
 import { getLogger } from '../../infra/logger.js';
 import { FORK_BOILERPLATE_TAG, buildForkSystemPrompt, isInsideFork } from './fork-agent.js';
 import { canSpawn, normalizeIsolation, type IsolationConfig } from './delegation-config.js';
-import { resolveToolsets, applyBlockedTools } from './toolset-resolver.js';
+import { resolveToolsets, applyBlockedTools, isDelegateBlocked } from './toolset-resolver.js';
 import type { Message } from '../../providers/types.js';
 
 const log = getLogger('subagent.runner');
@@ -184,7 +184,15 @@ export async function runSubagent(
   }
 
   // ── 构建 toolFilter ──
-  const toolFilter: TaskLoopToolFilter = (tool) => def.allowedTools.has(tool.name);
+  // 硬不变量（所有路径统一）：无论 def 白名单来自内置 def / 自定义 agent / preset /
+  // toolsets，`isDelegateBlocked` 一律先过一遍 —— 子代理只做只读调研与验证，
+  // 拿不到写工具（EDIT_TOOL_NAMES）、派生工具与主会话状态工具。
+  // 此前的实现只在 `'*'` 通配分支叠加 blocked 过滤，导致内置 def（如 Debug 的
+  // search_replace）/ 自定义 agent 声明的写工具能绕过白名单直达子代理。
+  // 白名单含 `'*'` 时表示“除 blocked 外的全量工具”（toolsets:['all'] / preset:'general'）。
+  const allowsWildcard = def.allowedTools.has('*');
+  const toolFilter: TaskLoopToolFilter = (tool) =>
+    !isDelegateBlocked(tool.name) && (allowsWildcard || def.allowedTools.has(tool.name));
 
   // ── Fork 上下文构建 ──
   const isFork = opts.mode === 'fork';
@@ -201,7 +209,12 @@ export async function runSubagent(
     }
   }
 
-  const timeoutMs = inv.timeout && inv.timeout > 0 ? inv.timeout : DEFAULT_TIMEOUT_MS;
+  // 超时优先级：调用方显式 timeout > 角色期望上限（def.timeoutMs）> 全局默认。
+  // 修复：旧实现忽略角色差异，Verify/Debug 跑长测试会被 120s 默认值中途杀死，
+  // 而 prompt 却告诉它们 bash 上限 300s（自相矛盾）。
+  const timeoutMs = inv.timeout && inv.timeout > 0
+    ? inv.timeout
+    : (def.timeoutMs && def.timeoutMs > 0 ? def.timeoutMs : DEFAULT_TIMEOUT_MS);
 
   // ContextManager
   const ctxWindow = inv.subagent_type === 'Vision'
@@ -224,11 +237,15 @@ export async function runSubagent(
 
   for (let attempt = 0; attempt <= MAX_STREAM_BROKEN_RETRIES; attempt++) {
     let lastAssistantText = '';
+    // 保留最后一个非空轮次的文本：若模型最后一轮只发工具调用/只出推理，
+    // 仍能回退到上一轮的正文作为 summary，避免“结束但未返回任何文本”硬失败。
+    let lastNonEmptyText = '';
     let toolCallCount = 0;
     let endReason: TaskEvent | null = null;
 
     const collect = (ev: TaskEvent): void => {
       if (ev.type === 'turn_start') {
+        if (lastAssistantText.trim().length > 0) lastNonEmptyText = lastAssistantText;
         lastAssistantText = '';
       } else if (ev.type === 'text_delta') {
         lastAssistantText += ev.text;
@@ -240,19 +257,30 @@ export async function runSubagent(
       opts.onEvent?.(ev);
     };
 
-    // 模型隔离
-    const effectiveProvider = deps.modelOverride
-      ? (deps.provider)
-      : inv.subagent_type === 'Vision' && deps.visionProvider
+    // 模型隔离：Vision 子代理走视觉 provider，其余走主 provider。
+    // modelOverride 不在此处选 provider（旧代码误用三元短路了 Vision 分支），
+    // 而是透传给 TaskLoop（见下）——它复用同一 provider 的 baseURL/apiKey，仅覆盖 model name。
+    const effectiveProvider =
+      inv.subagent_type === 'Vision' && deps.visionProvider
         ? deps.visionProvider
         : deps.provider;
 
-    // System prompt：fork 模式下注入递归保护标签
+    // System prompt：
+    // 1) useNewPrompt 显式开启且为内置 → 用新版 Agent 模板；
+    // 2) def.systemPrompt 非空 → 用它（内置 6 种只读 prompt / preset prompt / 自定义 agent）；
+    // 3) 兜底：动态 def（toolsets/preset:'general'|'verifier'）的 systemPrompt 为空串时，
+    //    回退到 buildAgentPrompt，避免子代理零角色定义（旧 BUG：空 prompt → 不知要输出总结 → 空 summary 报错）。
     let effectiveSystemPrompt: string;
     if (deps.useNewPrompt && def.isBuiltin) {
       effectiveSystemPrompt = buildAgentPrompt({ goal: inv.prompt });
-    } else {
+    } else if (def.systemPrompt && def.systemPrompt.trim().length > 0) {
       effectiveSystemPrompt = def.systemPrompt;
+    } else {
+      effectiveSystemPrompt = buildAgentPrompt({
+        goal: inv.prompt,
+        depth: effectiveDepth,
+        ...(isolation ? { maxDepth: isolation.maxDepth } : {}),
+      });
     }
     if (isFork) {
       effectiveSystemPrompt = buildForkSystemPrompt(effectiveSystemPrompt, effectiveDepth, isolation?.maxDepth ?? 3);
@@ -263,9 +291,21 @@ export async function runSubagent(
       toolRegistry: deps.toolRegistry,
       systemPrompt: effectiveSystemPrompt,
       ...(deps.workspaceRoot ? { workspaceRoot: deps.workspaceRoot } : {}),
+      ...(deps.modelOverride ? { modelOverride: deps.modelOverride } : {}),
       maxTurns: def.maxTurns,
       onEvent: collect,
       toolFilter,
+      // 子代理能力策略：自动执行、**不弹审批**；但工具层硬约束"不改工作区 + 不越出角色范围"
+      delegate: {
+        role: def.type,
+        allowBashWrite: false,
+        ...(def.readPathPrefixes && def.readPathPrefixes.length > 0
+          ? { readPathPrefixes: def.readPathPrefixes }
+          : {}),
+        ...(def.urlHostWhitelist && def.urlHostWhitelist.length > 0
+          ? { urlHostWhitelist: def.urlHostWhitelist }
+          : {}),
+      },
       contextManager,
     });
 
@@ -307,12 +347,21 @@ export async function runSubagent(
         });
       }
 
-      const summary = lastAssistantText.trim();
+      const summary = (lastAssistantText.trim() || lastNonEmptyText.trim());
       if (summary.length === 0) {
-        throw new AgentError({
-          code: ErrorCodes.SUBAGENT_FAILED,
-          message: `子代理 ${def.type} 结束但未返回任何文本（已执行 ${toolCallCount} 次工具调用）`,
-        });
+        // 降级：子代理正常结束（completed）但未输出正文。
+        // 旧版在此硬抛 SUBAGENT_FAILED——但工作可能已做完（已执行 N 次工具），
+        // 仅因没“说话”就全盘作废代价过大。改为返回带工具轨迹的降级总结。
+        const degraded = toolCallCount > 0
+          ? `（子代理 ${def.type} 已执行 ${toolCallCount} 次工具调用但未输出文本总结。请基于上述工具执行结果继续，必要时重新派发并在 prompt 里明确要求输出总结。）`
+          : `（子代理 ${def.type} 未执行任何工具也未输出文本。）`;
+        const stats: SubagentRunStats = { toolCalls: toolCallCount };
+        const editedFiles = loop.getEditedFiles();
+        return {
+          summary: degraded,
+          stats,
+          ...(editedFiles.length > 0 ? { editedFiles } : {}),
+        };
       }
 
       const stats: SubagentRunStats = { toolCalls: toolCallCount };

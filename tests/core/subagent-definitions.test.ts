@@ -22,6 +22,7 @@ import {
   GUIDE_DEFINITION,
   VERIFY_DEFINITION,
   getSubagentDefinition,
+  getDefinitionForPreset,
   GUIDE_READ_PATH_PREFIXES,
   GUIDE_URL_HOST_WHITELIST,
   ALL_SUBAGENT_TYPES,
@@ -100,6 +101,31 @@ describe('SubagentDefinition', () => {
     expect(VERIFY_DEFINITION.allowedTools.has('Agent')).toBe(false);
   });
 
+  it('Debug def: 诊断工具齐全，但无写工具（只诊断不修改）', () => {
+    const def = getSubagentDefinition('Debug')!;
+    const tools = def.allowedTools;
+    expect(tools.has('trace_error')).toBe(true);
+    expect(tools.has('get_problems')).toBe(true);
+    expect(tools.has('bash')).toBe(true);
+    // 子代理只读：不持有任何写工具（旧版 Debug 持有 search_replace）
+    expect(tools.has('search_replace')).toBe(false);
+    expect(tools.has('write_file')).toBe(false);
+    expect(tools.has('append_file')).toBe(false);
+    expect(tools.has('delete_file')).toBe(false);
+  });
+
+  it('只读不变量：所有内置 def 均不含写工具 / 派生工具（设计目标：只读调研验证）', () => {
+    const WRITE_TOOLS = ['search_replace', 'write_file', 'append_file', 'delete_file'];
+    for (const type of ALL_SUBAGENT_TYPES) {
+      const def = getSubagentDefinition(type);
+      expect(def, `missing def: ${type}`).toBeDefined();
+      for (const w of WRITE_TOOLS) {
+        expect(def!.allowedTools.has(w), `${type} must not have ${w}`).toBe(false);
+      }
+      expect(def!.allowedTools.has('Agent'), `${type} must not have Agent`).toBe(false);
+    }
+  });
+
   it('systemPrompt contains key clauses', () => {
     expect(BROWSER_DEFINITION.systemPrompt).toMatch(/Browser/);
     expect(BROWSER_DEFINITION.systemPrompt).toMatch(/search_web/);
@@ -127,6 +153,18 @@ describe('SubagentDefinition', () => {
     expect(getSubagentDefinition('Vision')).toBeDefined();
   });
 
+  it('getSubagentDefinition is case-insensitive and trims (F-4)', () => {
+    // 模型常把 subagent_type 写成小写/带空格，不归一会打不中定义 → 零工具
+    expect(getSubagentDefinition('browser' as unknown as Parameters<typeof getSubagentDefinition>[0])).toBe(BROWSER_DEFINITION);
+    expect(getSubagentDefinition('  RESEARCH  ' as unknown as Parameters<typeof getSubagentDefinition>[0])).toBe(RESEARCH_DEFINITION);
+    expect(getSubagentDefinition('vErIfY' as unknown as Parameters<typeof getSubagentDefinition>[0])).toBe(VERIFY_DEFINITION);
+  });
+
+  it('getSubagentDefinition returns undefined for unknown / non-string', () => {
+    expect(getSubagentDefinition('NoSuchAgent' as unknown as Parameters<typeof getSubagentDefinition>[0])).toBeUndefined();
+    expect(getSubagentDefinition(undefined as unknown as Parameters<typeof getSubagentDefinition>[0])).toBeUndefined();
+  });
+
   it('Guide read-path prefixes cover .devseeker/ + docs/ + AGENTS.md', () => {
     expect(GUIDE_READ_PATH_PREFIXES).toContain('.devseeker/');
     expect(GUIDE_READ_PATH_PREFIXES).toContain('docs/');
@@ -143,6 +181,27 @@ describe('SubagentDefinition', () => {
     for (const def of [BROWSER_DEFINITION, RESEARCH_DEFINITION, GUIDE_DEFINITION, VERIFY_DEFINITION, getSubagentDefinition('Vision')!]) {
       expect(def.maxTurns).toBeGreaterThanOrEqual(1);
       expect(def.maxTurns).toBeLessThanOrEqual(30);
+    }
+  });
+
+  it('每个内置 def 都有角色级超时预算（timeoutMs，≤600s）', () => {
+    for (const type of ALL_SUBAGENT_TYPES) {
+      const def = getSubagentDefinition(type)!;
+      expect(def.timeoutMs, `${type} missing timeoutMs`).toBeGreaterThan(0);
+      expect(def.timeoutMs!, `${type} budget over schema cap`).toBeLessThanOrEqual(600_000);
+    }
+  });
+
+  it('长任务角色给足预算：Verify / Debug = 300s（对齐 bash 上限，不再被 120s 默认值杀死）', () => {
+    expect(getSubagentDefinition('Verify')!.timeoutMs).toBe(300_000);
+    expect(getSubagentDefinition('Debug')!.timeoutMs).toBe(300_000);
+  });
+
+  it('preset def 也带角色级超时预算', () => {
+    for (const preset of ['explore', 'planner', 'reviewer'] as const) {
+      const def = getDefinitionForPreset(preset);
+      expect(def, `missing preset: ${preset}`).toBeDefined();
+      expect(def!.timeoutMs).toBeGreaterThan(0);
     }
   });
 });

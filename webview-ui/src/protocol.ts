@@ -7,6 +7,7 @@
 
 export type {
   TaskEvent,
+  SubagentProgressEvent,
   WebviewInboundMessage,
   WebviewOutboundMessage,
   ProviderStatusPayload,

@@ -24,10 +24,17 @@ describe('resolveToolsets', () => {
     expect(r.has('write_file')).toBe(false);
   });
 
-  it('file toolset 不含 search/terminal 工具', () => {
+  it('file toolset 不含 search/terminal 工具，且不含任何写工具（只读不变量）', () => {
     const r = resolveToolsets(['file']);
     expect(r.has('search_codebase')).toBe(false);
     expect(r.has('bash')).toBe(false);
+    expect(r.has('search_replace')).toBe(false);
+    expect(r.has('write_file')).toBe(false);
+    expect(r.has('append_file')).toBe(false);
+    expect(r.has('delete_file')).toBe(false);
+    // 只读能力保留
+    expect(r.has('read_file')).toBe(true);
+    expect(r.has('list_dir')).toBe(true);
   });
 
   it('search+file 的并集正确', () => {

@@ -25,6 +25,25 @@ export type ToolSafetyLevel =
  * 随 TaskLoop 注入，给工具访问工作区、取消信号、日志等。
  */
 import type { FileStateCache } from './file-state-cache.js';
+import type { TaskEvent } from '../../shared/protocol.js';
+
+/**
+ * 子代理能力策略（由 runner 按 def 注入到子代理 loop 的 ToolContext）。
+ *
+ * 设计目标：子代理**自动执行、不弹审批**；约束在工具层硬执行——
+ * 不改工作区 + 不越出角色范围，而不是靠用户看着。
+ * 主 Agent 不设置此字段（undefined = 无约束）。
+ */
+export interface DelegateCapabilityPolicy {
+  /** 子代理角色名（Browser / Verify / Debug...，用于拒绝提示与审计） */
+  role: string;
+  /** 是否允许 bash 修改工作区。子代理为只读角色 → 恒 false（保留字段以便未来扩展） */
+  allowBashWrite: boolean;
+  /** read_file 允许的路径前缀（相对 workspaceRoot，带 / 为目录，否则精确文件）；缺省 = 全工作区 */
+  readPathPrefixes?: readonly string[];
+  /** 网络工具允许的 host 白名单（支持子域后缀匹配）；缺省 = 不限 */
+  urlHostWhitelist?: readonly string[];
+}
 
 export interface ToolContext {
   /** 工作区根路径（绝对路径）。若未打开工作区则为 undefined */
@@ -44,6 +63,21 @@ export interface ToolContext {
    * 同时通过 tool_exec_output 事件实时推送到 UI。
    */
   emitOutput?: (output: string) => void;
+  /**
+   * 可选的嵌套子任务事件回调（Agent 工具转发 SubAgent 内部进度）。
+   * 与 emitOutput 分工：emitOutput 是「本工具的文本输出」，会累积进本卡片
+   * contentPreview；emitChildEvent 是「派生出的子任务结构化事件」，由 webview
+   * 子代理卡片渲染，不污染本卡片结果区、不进 history。
+   */
+  emitChildEvent?: (ev: TaskEvent) => void;
+  /**
+   * 可选：向主 loop 注入「下一轮上下文便签」（如后台子代理完成回报）。
+   * 与 emitOutput/emitChildEvent 的关键区别：这是**进入 LLM 上下文**的旁路
+   * （history + 下一轮请求），用于把异步结果喂回主 Agent，而非只给 UI 看。
+   */
+  injectContext?: (text: string) => void;
+  /** 子代理能力策略（主 Agent 不设；见 DelegateCapabilityPolicy） */
+  delegate?: DelegateCapabilityPolicy;
 }
 
 /**

@@ -5,8 +5,11 @@ import { ErrorRow } from './chat/ErrorRow.js';
 import { DiffEditRow } from './chat/DiffEditRow.js';
 import { CommandOutputRow } from './chat/CommandOutputRow.js';
 import { TaskFeedbackButtons } from './chat/TaskFeedbackButtons.js';
+import { SubagentCard } from './chat/SubagentCard.js';
 import { Separator } from './ui/separator.js';
 import { explainCommand } from '../utils/commandExplainer';
+import type { ApprovalRequestPayload } from '../protocol';
+import type { SubagentState } from '../state/reducer';
 
 /** 文件读写类工具：只显示文件名+状态，不显示内容 */
 const FILE_TOOLS = new Set(['read_file', 'write_file', 'append_file', 'search_replace', 'delete_file', 'create_file']);
@@ -98,10 +101,12 @@ export interface ToolCardProps {
   onOpenTerminal?: (command: string) => void;
   /** 内联审批：是否等待用户审批 */
   awaitingApproval?: boolean;
-  /** 内联审批：风险级别（safe=默认终端运行，risky=默认沙箱运行） */
-  riskLevel?: 'safe' | 'risky';
+  /** 内联审批：本工具的审批请求 payload（支持非命令类工具就地审批） */
+  approvalPayload?: ApprovalRequestPayload;
   /** 内联审批：用户点击同意/拒绝/记住 */
   onApprovalResponse?: (decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => void;
+  /** Agent 工具专用：子代理过程状态（subagent_event 累积） */
+  subagent?: SubagentState;
 }
 /**
  * 正在处理指示器：旋转正方体 + 汉字（CSS 纯实现）
@@ -172,12 +177,14 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
   const {
     name, status, argsPreview, contentPreview, errorCode, duration,
     diff, revertState, onRevert, onRevertHunk, revertedHunks,
-    onOpenTerminal, awaitingApproval, riskLevel, onApprovalResponse,
+    onOpenTerminal, awaitingApproval, approvalPayload, onApprovalResponse, subagent,
   } = props;
 
   // W-UI3 · 默认 collapsed（success 折叠、error 展开、运行中折叠）
   // W-UI8 · bash 工具运行中自动展开，让用户看到终端输出
   const isShellTool = name === 'bash' || name === 'get_terminal_output';
+  // 子代理卡片：Agent 工具且事件桥已产出过程状态
+  const isSubagentTool = name === 'Agent' && subagent !== undefined;
 
   const [open, setOpen] = useState<boolean>(status === 'error');
   const [splitOpen, setSplitOpen] = useState<boolean>(false);
@@ -193,10 +200,14 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
     prevPreviewLenRef.current = contentPreview.length;
     outputVersionRef.current++;
   }
+  // 子代理状态追踪：subagent_start 到达晚于 tool_exec_start，需单独监听过波
+  const prevSubagentStatusRef = useRef(subagent?.status);
   useEffect(() => {
     const prev = prevStatusRef.current;
     const prevApproval = prevApprovalRef.current;
-    if ((prev === 'running' || prev === 'pending') && status === 'success') {
+    // 后台子代理：工具已返回（success）但子代理仍在运行 → 不折叠，继续展示进度
+    const subagentStillRunning = isSubagentTool && subagent?.status === 'running';
+    if ((prev === 'running' || prev === 'pending') && status === 'success' && !subagentStillRunning) {
       setOpen(false);
     }
     if (status === 'error' && prev !== 'error') {
@@ -208,9 +219,15 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
     if (isShellTool && (status === 'running' || awaitingApproval) && (statusTransitioned || approvalAppeared)) {
       setOpen(true);
     }
+    // 子代理：开始运行时自动展开看过程；终态到达后由上方 success 分支自动折叠
+    const subagentTransitioned = prevSubagentStatusRef.current !== subagent?.status;
+    if (isSubagentTool && subagent?.status === 'running' && (statusTransitioned || subagentTransitioned)) {
+      setOpen(true);
+    }
     prevStatusRef.current = status;
     prevApprovalRef.current = awaitingApproval;
-  }, [status, awaitingApproval, isShellTool]);
+    prevSubagentStatusRef.current = subagent?.status;
+  }, [status, awaitingApproval, isShellTool, isSubagentTool, subagent?.status]);
 
   const checkpointId = diff?.checkpointId;
   const reverted = revertState?.ok === true;
@@ -226,7 +243,11 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
   // Step 3: 命令解释（本地正则匹配）
   const commandExplanation = useMemo(() => bashCommand ? explainCommand(bashCommand) : null, [bashCommand]);
 
-  const showApprovalActions = awaitingApproval && isShellTool && onApprovalResponse;
+  // 内联审批：泛化到任意工具（命令类走命令面板；其余走通用面板）—— 卡片契约 K4 可达性
+  const showApprovalActions = awaitingApproval === true && onApprovalResponse !== undefined;
+  const approvalRiskLevel = approvalPayload?.riskLevel;
+  const approvalCommand = approvalPayload?.command ?? extractCommand(argsPreview);
+  const isCommandApproval = approvalCommand.length > 0;
 
   // W-UI3 · 左侧状态彩条颜色
   const statusColor = status === 'success' ? 'var(--vscode-terminal-ansiGreen, #4ec9b0)'
@@ -236,6 +257,13 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
 
   // W-UI3 · 摘要文本（pending 阶段不展示，避免内容跳动）
   const summary = status === 'pending' ? ''
+    : isSubagentTool && subagent
+      ? `${subagent.agentType} · ${
+          (subagent.status === 'running'
+            ? subagent.description
+            : (subagent.summary || subagent.description)
+          ).split('\n')[0]
+        }`.slice(0, 80)
     : isFileTool && filePath ? `${filePath}`
     : isWebTool && webInfo.query ? `🔍 ${webInfo.query}`
     : isWebTool && webInfo.url ? `🌐 ${webInfo.url}`
@@ -247,7 +275,7 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
   // 改进：在审批面板中也复用 CommandOutputRow 展示命令+当前累积的 output，
   // 使用户在审批前就能看到命令以及（如果有的话）初始占位输出。
   if (showApprovalActions) {
-    const isSafeCommand = riskLevel === 'safe';
+    const isSafeCommand = approvalRiskLevel === 'safe';
     return (
       <div className="tool-card tool-card--awaiting-approval">
         <div className="tool-card__approval-panel">
@@ -262,23 +290,39 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
               <span className="tool-card__approval-warning-text">检测到潜在风险</span>
             </div>
           )}
-          {/* 命令展示区（类输入框） */}
-          <div className="tool-card__approval-command-box">
-            <pre className="tool-card__approval-command-text">
-              <code>{bashCommand}</code>
-            </pre>
-            {/* Step 3: 命令解释行（仅 bash 命令有解释） */}
-            {bashCommand && commandExplanation && commandExplanation.category !== 'unknown' && (
-              <div className="tool-card__approval-explanation">
-                <span className="tool-card__approval-explanation-text">{commandExplanation.summary}</span>
-                {commandExplanation.riskFactors.length > 0 && (
-                  <span className="tool-card__approval-explanation-risk" title={commandExplanation.riskFactors.join(' · ')}>
-                    {commandExplanation.riskFactors[0]}
-                  </span>
+          {/* 命令展示区（仅命令类工具）/ 通用审批信息（非命令类工具） */}
+          {isCommandApproval ? (
+            <div className="tool-card__approval-command-box">
+              <pre className="tool-card__approval-command-text">
+                <code>{approvalCommand}</code>
+              </pre>
+              {/* Step 3: 命令解释行（仅 bash 命令有解释） */}
+              {approvalCommand && commandExplanation && commandExplanation.category !== 'unknown' && (
+                <div className="tool-card__approval-explanation">
+                  <span className="tool-card__approval-explanation-text">{commandExplanation.summary}</span>
+                  {commandExplanation.riskFactors.length > 0 && (
+                    <span className="tool-card__approval-explanation-risk" title={commandExplanation.riskFactors.join(' · ')}>
+                      {commandExplanation.riskFactors[0]}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="tool-card__approval-command-box">
+              <div className="approval-card__row">
+                <span className="approval-card__label">工具</span>
+                <span className="approval-card__value">{name}</span>
+                {approvalPayload?.safetyLevel && (
+                  <span className="approval-card__badge">{approvalPayload.safetyLevel}</span>
                 )}
               </div>
-            )}
-          </div>
+              <div className="approval-card__row">
+                <span className="approval-card__label">原因</span>
+                <span className="approval-card__value">{approvalPayload?.reason ?? '需要人工确认'}</span>
+              </div>
+            </div>
+          )}
           {/* 审批期间只展示命令，不重复展示 CommandOutputRow（命令已在 command-box 中） */}
           {contentPreview && (
             <pre className="tool-card__approval-output-preview">
@@ -299,8 +343,23 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
               取消
             </span>
             <span className="tool-card__approval-btn-split">
-              {/* riskLevel=safe：默认主按钮是「终端运行」；risky 或 undefined：默认主按钮是「沙箱运行」 */}
-              {riskLevel === 'safe' ? (
+              {/* 通用审批：主按钮=允许执行；命令类：riskLevel=safe 默认「终端运行」/ 其余默认「沙箱运行」 */}
+              {!isCommandApproval ? (
+                <span
+                  className="tool-card__approval-btn-run"
+                  role="button"
+                  title="允许执行（仅本次）"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onApprovalResponse!('allow_once');
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5,3 19,12 5,21" />
+                  </svg>
+                  允许执行
+                </span>
+              ) : approvalRiskLevel === 'safe' ? (
                 <>
                   <span
                     className="tool-card__approval-btn-run"
@@ -366,9 +425,9 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
               )}
             </span>
           </div>
-          {splitOpen && (
+          {isCommandApproval && splitOpen && (
             <div className="tool-card__approval-dropdown">
-              {riskLevel === 'safe' ? (
+              {approvalRiskLevel === 'safe' ? (
                 <span
                   className="tool-card__approval-dropdown-item"
                   role="button"
@@ -432,10 +491,13 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
             {summary && <span className="tool-card__summary">{summary}</span>}
           </span>
           <span className="tool-card__status-badge">
-            {status === 'success' && '✓'}
+            {/* 后台子代理：工具已 success 但子代理仍在跑 → 显脉冲而非 ✓，避免误导 */}
+            {status === 'success' && !(isSubagentTool && subagent?.status === 'running') && '✓'}
             {status === 'error' && '✗'}
             {status === 'pending' && <ProcessingIndicator />}
-            {status === 'running' && <span className="tool-card__dot-pulse" />}
+            {(status === 'running' || (isSubagentTool && subagent?.status === 'running' && status === 'success')) && (
+              <span className="tool-card__dot-pulse" />
+            )}
           </span>
           {/* Step 9: 耗时显示（仅成功/失败时） */}
           {duration !== undefined && status !== 'pending' && status !== 'running' && (
@@ -477,6 +539,9 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
 
       {open && (
         <div className="tool-card__body">
+          {/* Agent 工具 → 子代理过程卡片（步骤 / 流式文本 / 摘要） */}
+          {isSubagentTool && subagent && <SubagentCard state={subagent} />}
+
           {/* 文件工具 → DiffEditRow */}
           {isFileTool && diff && (
             <DiffEditRow
@@ -486,6 +551,14 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
               totalRemoved={diff.removed}
               reverted={reverted}
             />
+          )}
+
+          {/* 回滚结果提示（K5：拒绝/回滚失败必须可见，不能只显示“已拒绝”） */}
+          {revertState?.message && (
+            <div className="tool-card__section">
+              <div className="tool-card__label">回滚结果</div>
+              <pre className="tool-card__pre">{revertState.message}</pre>
+            </div>
           )}
 
           {/* 错误工具 → ErrorRow（Step 8 增强） */}
@@ -505,11 +578,11 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
             />
           )}
 
-          {/* Shell 工具 → CommandOutputRow */}
-          {isShellTool && bashCommand && (
+          {/* Shell 工具 → CommandOutputRow（get_terminal_output 无 command，用占位标题） */}
+          {isShellTool && (bashCommand || name === 'get_terminal_output') && (
             <CommandOutputRow
               key={`${name}-${outputVersionRef.current}`}
-              command={bashCommand}
+              command={bashCommand || 'terminal output'}
               output={contentPreview || ''}
               isStreaming={status === 'running'}
               onOpenTerminal={canOpenTerminal ? () => onOpenTerminal?.(bashCommand) : undefined}
@@ -517,7 +590,7 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
           )}
 
           {/* 通用 args 展示 */}
-          {argsPreview && !isShellTool && !isFileTool && !isWebTool && (
+          {argsPreview && !isShellTool && !isFileTool && !isWebTool && !isSubagentTool && (
             <div className="tool-card__section">
               <div className="flex items-center justify-between">
                 <div className="tool-card__label">args</div>
@@ -528,7 +601,7 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
           )}
 
           {/* 通用 result 展示 */}
-          {contentPreview && status !== 'error' && !isShellTool && !isFileTool && !isWebTool && (
+          {contentPreview && status !== 'error' && !isShellTool && !isFileTool && !isWebTool && !isSubagentTool && (
             <div className="tool-card__section">
               <div className="flex items-center justify-between">
                 <div className="tool-card__label">result</div>

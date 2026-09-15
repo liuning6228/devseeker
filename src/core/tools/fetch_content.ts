@@ -27,6 +27,7 @@
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';
 import { ErrorCodes } from '../errors/index.js';
 import { validateUrl } from '../web/url-guard.js';
+import { isDelegateHostAllowed } from '../subagent/delegate-guards.js';
 import type {
   FetchContentArgs,
   FetchContentMode,
@@ -142,6 +143,16 @@ export class FetchContentTool implements ITool<FetchContentArgs, ToolResult> {
       return {
         ok: false,
         content: `Error: URL 校验失败 - ${guard.reason}`,
+        errorCode: ErrorCodes.WEB_URL_BLOCKED_BY_WHITELIST,
+      };
+    }
+
+    // 子代理角色范围：域名白名单（如 Guide 仅允许官方文档站），工具层硬执行
+    const hostWhitelist = ctx.delegate?.urlHostWhitelist;
+    if (hostWhitelist && hostWhitelist.length > 0 && !isDelegateHostAllowed(args.url, hostWhitelist)) {
+      return {
+        ok: false,
+        content: `Error: 子代理（${ctx.delegate!.role}）仅允许访问白名单域名：${hostWhitelist.join(', ')}`,
         errorCode: ErrorCodes.WEB_URL_BLOCKED_BY_WHITELIST,
       };
     }

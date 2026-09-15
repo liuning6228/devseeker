@@ -26,9 +26,10 @@ import {
 } from '../subagent/index.js';
 import type { ToolsetName, PresetName } from '../subagent/types.js';
 import { resolveToolsets, applyBlockedTools } from '../subagent/toolset-resolver.js';
-import { normalizeIsolation, type IsolationConfig } from '../subagent/delegation-config.js';
 import { getDefinitionForPreset } from '../subagent/definitions.js';
-import { runConcurrent, type RunnableTask } from '../subagent/thread-pool.js';
+import { createBuiltinSubagentRegistry } from '../subagent/definitions.js';
+import { createSubagentEventBridge } from '../subagent/event-bridge.js';
+import type { TaskEvent } from '../../shared/protocol.js';
 
 export interface AgentToolArgs {
   subagent_type: string;
@@ -37,22 +38,16 @@ export interface AgentToolArgs {
   timeout?: number;
   images?: string[];
 
-  // Phase 5 新路径可选字段
+  /**
+   * 可选角色/组合字段（内部与兼容保留）。
+   * 注：面向模型的 schema 不再暴露 isolation / parallel / role / provider / apiKey ——
+   * 那些旋钮要么无可消费点、要么与“只读子代理”目标冲突（见死参数清理）。
+   */
   toolsets?: ToolsetName[];
   preset?: PresetName;
-  mode?: 'fork' | 'fresh' | 'inherit';
-  role?: 'leaf' | 'orchestrator';
-  isolation?: {
-    maxDepth?: number;
-    autoApprove?: boolean;
-    timeoutSeconds?: number;
-    maxChildren?: number;
-  };
-  parallel?: boolean;
+  mode?: 'fork' | 'fresh';
   background?: boolean;
   model?: string;
-  provider?: string;
-  apiKey?: string;
 }
 
 export interface AgentToolDeps {
@@ -67,7 +62,7 @@ const parameters = {
       type: 'string',
       minLength: 1,
       description:
-        'Which subagent to spawn. Built-in: Browser (pure web), Research (codebase + web), Guide (how to configure DevSeeker), Verify (run tests / type-check / build), Debug (systematic bug diagnosis). Also accepts any custom agent name defined under `.devseeker/agents/<name>/AGENT.md`. When `toolsets` or `preset` is provided (new path), this field maps to the corresponding preset.',
+        'Which subagent to spawn. Built-in (case-insensitive): Browser (pure web), Research (codebase + web), Guide (how to configure DevSeeker), Verify (run tests / type-check / build), Vision (image understanding), Debug (systematic bug diagnosis). Also accepts any custom agent name defined under `.devseeker/agents/<name>/AGENT.md`. Subagents are read-only investigators/verifiers — they never modify the workspace; do all edits in the main agent.',
     },
     description: {
       type: 'string',
@@ -79,13 +74,13 @@ const parameters = {
     prompt: {
       type: 'string',
       description:
-        'Detailed task for the subagent. Can reference prior context (e.g. "investigate the error discussed above").',
+        'Detailed, SELF-CONTAINED task for the subagent. The subagent has a FRESH context and CANNOT see this conversation — do NOT write "investigate the error above"; instead paste every fact, path, and constraint it needs. State explicitly what final summary you expect back.',
       minLength: 1,
     },
     timeout: {
       type: 'number',
       description:
-        'Timeout in ms (default 120000, max 600000). Subagent will be aborted if exceeded.',
+        'Timeout in ms (max 600000). Defaults to the role budget: Verify/Debug 300000, Research 180000, Browser 120000, Guide 90000, Vision 60000; fallback 120000.',
       minimum: 0,
       maximum: 600_000,
     },
@@ -95,42 +90,10 @@ const parameters = {
       items: { type: 'string' },
     },
     // Phase 5 新路径
-    toolsets: {
-      type: 'array',
-      description: 'Exact toolset composition. Overrides `preset` when both are provided.',
-      items: {
-        type: 'string',
-        enum: ['search', 'file', 'terminal', 'web', 'plan', 'verify', 'memory', 'review', 'all'],
-      },
-    },
-    preset: {
-      type: 'string',
-      enum: ['explore', 'planner', 'implementer', 'reviewer', 'verifier', 'general'],
-      description: 'Preset shortcut for common agent roles.',
-    },
     mode: {
       type: 'string',
-      enum: ['fork', 'fresh', 'inherit'],
-      description: 'Context inheritance mode. Default: fresh.',
-    },
-    role: {
-      type: 'string',
-      enum: ['leaf', 'orchestrator'],
-      description: 'Agent role. Default: leaf.',
-    },
-    isolation: {
-      type: 'object',
-      description: 'Security isolation config (L2).',
-      properties: {
-        maxDepth: { type: 'number', description: 'Default 2, max 3.' },
-        autoApprove: { type: 'boolean', description: 'Auto-approve dangerous commands? Default false.' },
-        timeoutSeconds: { type: 'number', description: 'Default 600.' },
-        maxChildren: { type: 'number', description: 'Max parallel children. Default 3.' },
-      },
-    },
-    parallel: {
-      type: 'boolean',
-      description: 'Execute in parallel with other subagents.',
+      enum: ['fork', 'fresh'],
+      description: 'Context inheritance mode. Default: fresh (fully isolated context).',
     },
     background: {
       type: 'boolean',
@@ -140,14 +103,6 @@ const parameters = {
       type: 'string',
       description: 'Override model name for this subagent.',
     },
-    provider: {
-      type: 'string',
-      description: 'Override provider for this subagent.',
-    },
-    apiKey: {
-      type: 'string',
-      description: 'Override API key for this subagent.',
-    },
   },
   required: ['subagent_type', 'description', 'prompt'],
 } as const;
@@ -155,7 +110,12 @@ const parameters = {
 export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
   readonly name = 'Agent';
   readonly description =
-    'Spawn a specialized subagent to handle a focused sub-task autonomously. Built-in agents: Browser / Research / Guide / Verify / Vision. Custom agents can be defined under `.devseeker/agents/<name>/AGENT.md`. Supports new path via `toolsets`/`preset` fields. Returns only a summary, not full messages. Use when the sub-task is self-contained and benefits from isolation. Do NOT use for tasks that need direct code modification.';
+    'Spawn a specialized subagent to handle a focused sub-task autonomously. '
+    + 'Built-in agents (case-insensitive): Browser (pure web) / Research (codebase + web) / Guide (how to configure DevSeeker) / Verify (run tests / build / type-check) / Vision (image understanding) / Debug (root-cause a bug). '
+    + 'Custom agents live under `.devseeker/agents/<name>/AGENT.md`. '
+    + 'RESULT CONTRACT: only the subagent\'s final summary returns to you — its internal steps are NOT part of this conversation, so relay the key findings to the user yourself. '
+    + 'DISPATCH POLICY: give each subagent a self-contained prompt; issue independent Agent calls in the SAME turn (they run in parallel) instead of sequentially; never re-do work you delegated. Dispatch Debug only when the user explicitly asks for debugging / root-cause analysis. '
+    + 'Subagents are READ-ONLY investigators/verifiers and never modify the workspace — do NOT use for tasks that need direct code modification (edits stay in the main agent, which owns approval / checkpoint / verification).';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'network';
   readonly executionTimeoutMs = 600_000;
@@ -177,7 +137,13 @@ export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
     }
 
     // ── 双路径判断 ──
-    const isNewPath = Array.isArray(args.toolsets) || typeof args.preset === 'string';
+    // 新路径承载 background / mode / model 等执行控制字段（schema 已不再暴露 toolsets/preset，
+    // 但内部/旧调用仍可传）。仅凭 toolsets/preset 判定会让 background 等字段永久不可达。
+    const isNewPath = Array.isArray(args.toolsets)
+      || typeof args.preset === 'string'
+      || args.background === true
+      || typeof args.mode === 'string'
+      || typeof args.model === 'string';
 
     let registry: SubagentRegistry | undefined;
     try {
@@ -226,11 +192,29 @@ export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
       return { ok: false, content: `Error: 无法初始化子代理依赖 - ${String(e)}`, errorCode: ErrorCodes.SUBAGENT_FAILED };
     }
 
+    // UI 事件桥：子代理过程 → 卡片（ctx.emitChildEvent 缺省时整体 no-op）
+    // def.maxTurns 作为卡片进度/ETA 的步数预算（registry 缺省时不展示）
+    const defBudget = registryForRunner?.resolve(invocation.subagent_type);
+    const bridge = createSubagentEventBridge({
+      taskId: ctx.taskId,
+      parentToolCallId: ctx.toolCallId,
+      agentType: invocation.subagent_type,
+      description: invocation.description,
+      ...(defBudget?.maxTurns ? { maxTurns: defBudget.maxTurns } : {}),
+      ...(ctx.emitChildEvent ? { emit: ctx.emitChildEvent } : {}),
+    });
+
     try {
-      const result = await runSubagent(runnerDeps, { invocation, signal: ctx.signal });
+      const result = await runSubagent(runnerDeps, {
+        invocation,
+        signal: ctx.signal,
+        onEvent: bridge.onEvent,
+      });
+      bridge.end(true, result.summary, result.stats?.toolCalls ?? 0);
       return formatSubagentResult(invocation.subagent_type, invocation.description, result);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      bridge.end(false, msg, 0);
       const code = e instanceof Error && 'code' in e && typeof (e as { code?: unknown }).code === 'string'
         ? (e as { code: string }).code
         : ErrorCodes.SUBAGENT_FAILED;
@@ -247,26 +231,42 @@ export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
     ctx: ToolContext,
     registry?: SubagentRegistry,
   ): Promise<ToolResult> {
-    // 1. 确定工具白名单
+    // 1. 确定工具白名单 + 可选的 preset 角色 prompt/maxTurns
     let allowedTools: Set<string>;
+    let presetSystemPrompt = '';
+    let presetMaxTurns = 25;
     if (Array.isArray(args.toolsets) && args.toolsets.length > 0) {
       allowedTools = resolveToolsets(args.toolsets);
     } else if (args.preset) {
       const def = getDefinitionForPreset(args.preset);
       if (def) {
         allowedTools = new Set(def.allowedTools);
+        // 保留 preset 自带的角色 prompt 与 maxTurns（旧 BUG：只取 allowedTools，prompt 被丢）
+        presetSystemPrompt = def.systemPrompt;
+        presetMaxTurns = def.maxTurns;
       } else {
-        // fallback：general preset 使用全量白名单（除 blocked 外）
+        // general / verifier：getDefinitionForPreset 返回 undefined，用全量通配（除 blocked 外），
+        // systemPrompt 由 runner 回退到 buildAgentPrompt。
         allowedTools = new Set<string>(['*']);
       }
     } else {
-      // 默认：只读搜索
-      allowedTools = resolveToolsets(['search']);
+      // 无组合参数（由 background/mode/model 触发的新路径）→ 按 subagent_type 解析内置/自定义 def，
+      // 否则会静默退化成 search 工具集（旧行为会把 Browser 变成检索代理）。
+      // 未注入 registry 时回退到内置 registry（与旧路径 runner 的行为一致）。
+      const def = (registry ?? createBuiltinSubagentRegistry()).resolve(args.subagent_type);
+      if (def) {
+        allowedTools = new Set(def.allowedTools);
+        presetSystemPrompt = def.systemPrompt;
+        presetMaxTurns = def.maxTurns;
+      } else {
+        // 默认：只读搜索
+        allowedTools = resolveToolsets(['search']);
+      }
     }
 
-    // 应用 DELEGATE_BLOCKED_TOOLS
+    // 应用 DELEGATE_BLOCKED_TOOLS（通配符展开 + blocked 过滤由 runner.ts 的 toolFilter 统一处理）
     const effectiveTools = allowedTools.has('*')
-      ? allowedTools // 通配符由 runner.ts 的 toolFilter 处理
+      ? allowedTools
       : applyBlockedTools(allowedTools);
 
     // 2. 构建子代理定义（动态，基于 toolsets/preset）
@@ -274,25 +274,19 @@ export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
     const dynamicDef = {
       type: agentType,
       allowedTools: effectiveTools,
-      systemPrompt: '',
-      maxTurns: 25,
+      systemPrompt: presetSystemPrompt,
+      maxTurns: presetMaxTurns,
       description: args.description,
       isBuiltin: true,
     };
 
-    // 3. 安全隔离配置
-    const isolation: IsolationConfig | undefined = args.isolation
-      ? normalizeIsolation(args.isolation)
-      : undefined;
-
-    // 4. 构建 SubagentRunnerDeps
+    // 3. 构建 SubagentRunnerDeps（隔离/深度策略由 runner 侧默认值统一承担，
+    //    不再从模型参数注入——旧 isolation 旋钮三个字段全是死配置）
     let baseDeps: SubagentRunnerDeps;
     try {
       baseDeps = this.deps.getRunnerDeps();
       if (registry) {
-        baseDeps = { ...baseDeps, registry, isolation, spawnDepth: 0 };
-      } else {
-        baseDeps = { ...baseDeps, isolation, spawnDepth: 0 };
+        baseDeps = { ...baseDeps, registry };
       }
       if (args.model) {
         baseDeps = { ...baseDeps, modelOverride: args.model };
@@ -319,40 +313,70 @@ export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
       ...(typeof args.timeout === 'number' ? { timeout: args.timeout } : {}),
     };
 
-    // mode 只支持 fork/fresh，inherit V1 不做
+    // context 模式：fork 继承父消息前缀；其余一律 fresh（'inherit' 已移除，避免静默降级）
     const mode: 'fork' | 'fresh' | undefined =
       args.mode === 'fork' ? 'fork' : undefined;
     const isBackground = args.background === true;
-    const isParallel = args.parallel === true;
+    // 并行扇出：由主 loop 在同一轮并行执行多个 Agent 调用实现（Qoder 同型，不设 parallel 旋钮）
 
-    // 5. 并行模式：并发执行多个子代理任务
-    if (isParallel) {
-      // 当前简化：parallel 模式只支持 subagent_type 数组（AgentTool 只允许单一调用）
-      // 并行由 LLM 在同一轮发起多个 Agent 工具调用来实现（TaskLoop 层面处理）
-      // 此处忽略 parallel 标记，单次调用仍为同步
-    }
-
-    // 6. 构建 RunSubagentOptions
+    // 6. 构建 RunSubagentOptions（挂上 UI 事件桥：子代理过程 → 卡片）
+    const bridge = createSubagentEventBridge({
+      taskId: ctx.taskId,
+      parentToolCallId: ctx.toolCallId,
+      agentType,
+      description: args.description,
+      maxTurns: presetMaxTurns,
+      ...(ctx.emitChildEvent ? { emit: ctx.emitChildEvent } : {}),
+    });
+    // 事件回调：桥接 UI 卡片；后台子代理完成时把摘要注入主 loop 上下文（结果契约闭环）
+    const onEvent = (ev: TaskEvent): void => {
+      bridge.onEvent(ev);
+      if (isBackground && ev.type === 'subagent_completed') {
+        ctx.injectContext?.(formatBackgroundResultNote(ev));
+      }
+    };
     const runOpts: RunSubagentOptions = {
       invocation,
       signal: ctx.signal,
       mode,
       background: isBackground,
+      onEvent,
     };
 
     const runnerDeps: SubagentRunnerDeps = { ...baseDeps, registry: dynamicRegistry };
 
     try {
       const result = await runSubagent(runnerDeps, runOpts);
+      // 后台模式：卡片终态由 subagent_completed 异步触发（bridge 内部处理），此处不重复上报
+      if (!isBackground) {
+        bridge.end(true, result.summary, result.stats?.toolCalls ?? 0);
+      }
       return formatSubagentResult(agentType, args.description, result);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      bridge.end(false, msg, 0);
       const code = e instanceof Error && 'code' in e && typeof (e as { code?: unknown }).code === 'string'
         ? (e as { code: string }).code
         : ErrorCodes.SUBAGENT_FAILED;
       return { ok: false, content: `Error: 子代理 ${agentType} 执行失败 - ${msg}`, errorCode: code };
     }
   }
+}
+
+/**
+ * 后台子代理完成回报 → 注入主 loop 下一轮的上下文便签。
+ * 这是「结果契约」的闭环：后台结果不能只进 UI 卡片，必须回到主 Agent 上下文。
+ */
+function formatBackgroundResultNote(ev: Extract<TaskEvent, { type: 'subagent_completed' }>): string {
+  const MAX = 4000;
+  const summary = ev.summary.length > MAX ? `${ev.summary.slice(0, MAX)}\n...[已截断]` : ev.summary;
+  return [
+    `<background_subagent_result agent_id="${escapeAttr(ev.agentId)}" type="${escapeAttr(ev.agentType ?? 'unknown')}" failed="${ev.failed === true}" tool_calls="${ev.toolCalls}">`,
+    summary,
+    '</background_subagent_result>',
+    '（这是你先前派发的后台子代理完成后的回报，不是用户的新指令。',
+    '请把它当作背景信息继续当前任务，不要重复派发同一调研。）',
+  ].join('\n');
 }
 
 function formatSubagentResult(agentType: string, description: string, result: import('../subagent/types.js').SubagentResult): ToolResult {
