@@ -41,6 +41,9 @@ export interface ExtensionState {
 
   // 会话列表
   sessionList: Array<{ id: string; title: string; updatedAt: number; messageCount: number }>;
+
+  // 昵称
+  nickname: string;
 }
 
 type ExtensionAction =
@@ -59,7 +62,8 @@ type ExtensionAction =
   | { type: 'SET_TODOS'; todos: TodoItem[] }
   | { type: 'SET_READY'; ready: boolean }
   | { type: 'SET_LOADING'; loading: boolean }
-  | { type: 'SET_SESSION_LIST'; sessions: ExtensionState['sessionList'] };
+  | { type: 'SET_SESSION_LIST'; sessions: ExtensionState['sessionList'] }
+  | { type: 'SET_NICKNAME'; nickname: string };
 
 function extensionReducer(state: ExtensionState, action: ExtensionAction): ExtensionState {
   switch (action.type) {
@@ -95,6 +99,8 @@ function extensionReducer(state: ExtensionState, action: ExtensionAction): Exten
       return { ...state, loading: action.loading };
     case 'SET_SESSION_LIST':
       return { ...state, sessionList: action.sessions };
+    case 'SET_NICKNAME':
+      return { ...state, nickname: action.nickname };
     default:
       return state;
   }
@@ -116,6 +122,7 @@ const initialState: ExtensionState = {
   ready: false,
   loading: false,
   sessionList: [],
+  nickname: 'DevSeeker',
 };
 
 interface ExtensionStateContextValue {

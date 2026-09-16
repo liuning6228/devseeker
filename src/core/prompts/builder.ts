@@ -70,6 +70,8 @@ export interface PromptBuildContext {
    * 用于选择 model variant，为空时使用 generic variant。
    */
   modelId?: string;
+  /** 用户自定义昵称（替代默认 "DevSeeker" 作为助手名称） */
+  nickname?: string;
 }
 
 export interface LayeredPrompt {
@@ -103,7 +105,7 @@ export class PromptBuilder {
    */
   static build(ctx: PromptBuildContext): LayeredPrompt {
     const { ctx: budgetedCtx, report } = applyTokenBudget(ctx, ctx.budget);
-    const L0 = buildL0Identity(budgetedCtx.modelId);
+    const L0 = buildL0Identity(budgetedCtx.modelId, budgetedCtx.nickname);
     const L1 = buildL1ToolsMode({ mode: budgetedCtx.mode, skills: budgetedCtx.skills });
     const L2 = buildL2RulesMemory({
       selectedRules: budgetedCtx.selectedRules,

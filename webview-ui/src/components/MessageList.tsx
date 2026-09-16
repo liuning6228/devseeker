@@ -20,6 +20,8 @@ export interface MessageListProps {
   onApprovalResponse?: (toolCallId: string, decision: 'allow_once' | 'remember' | 'deny' | 'redirect_terminal') => void;
   /** 当前流式消息的 streamId（用于 StreamController DOM 锚点绑定） */
   currentStreamMsgId?: string;
+  /** 用户自定义昵称 */
+  nickname?: string;
 }
 
 /**
@@ -39,7 +41,7 @@ export interface MessageListProps {
  * - 流式消息无内容时显示骨架屏
  * - 修正数据模型引用 m.isStreaming → m.parts.some(...)
  */
-export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovals, onApprovalResponse, currentStreamMsgId }: MessageListProps): JSX.Element {
+export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovals, onApprovalResponse, currentStreamMsgId, nickname }: MessageListProps): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
   const messagesLenRef = useRef(messages.length);
@@ -114,7 +116,7 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
   if (messages.length === 0) {
     return (
       <div className="message-list message-empty" role="log" aria-live="polite">
-        输入消息与 DevSeeker 开始对话。支持：
+        输入消息与 {nickname || 'DevSeeker'} 开始对话。支持：
         <br />
         · <code>@</code> 引用文件/符号添加上下文 · 自然语言直接描述需求
         <br />
@@ -155,6 +157,7 @@ export function MessageList({ messages, onRevert, onOpenFile, onOpenTerminal, on
               pendingApprovals={pendingApprovals}
               onApprovalResponse={onApprovalResponse}
               currentStreamMsgId={currentStreamMsgId}
+              nickname={nickname}
               // Step 2: 流式消息无内容时显示骨架屏
               skeleton={isMsgStreaming(m) && m.parts.every((p) => p.kind !== 'text' || !p.text)}
             />

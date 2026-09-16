@@ -25,6 +25,7 @@ import * as vscode from 'vscode';
 import { parseUnifiedDiff, type Hunk, type ParsedDiff } from '../core/diff/hunk-parser.js';
 import { revertHunk } from '../core/diff/hunk-reverter.js';
 import { getLogger } from '../infra/logger.js';
+import { getNickname } from '../infra/nickname.js';
 
 const log = getLogger('inline-diff-decorator');
 
@@ -450,10 +451,10 @@ export class InlineDiffController implements vscode.Disposable {
     // 自动跳转到第一个 hunk
     decorator.navigateNext();
 
-    // 显示状态栏提示
+    // 显示状态栏提示（使用助手昵称）
     const status = decorator.getStatus();
     vscode.window.setStatusBarMessage(
-      `DevSeeker Diff: ${relPath} — Hunk ${status.activeIdx + 1}/${status.total}  (${status.pending} pending)  Ctrl+Enter Accept · Ctrl+Backspace Reject`,
+      `${getNickname()} Diff: ${relPath} — Hunk ${status.activeIdx + 1}/${status.total}  (${status.pending} pending)  Ctrl+Enter Accept · Ctrl+Backspace Reject`,
       5000,
     );
 

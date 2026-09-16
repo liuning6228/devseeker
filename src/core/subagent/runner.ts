@@ -46,6 +46,7 @@ import { createBuiltinSubagentRegistry } from './definitions.js';
 import { buildAgentPrompt } from './prompt.js';
 import { runBackgroundAgent } from './background-agent.js';
 import { getLogger } from '../../infra/logger.js';
+import { applyNicknameToSubagentPrompt } from '../../infra/nickname.js';
 import { FORK_BOILERPLATE_TAG, buildForkSystemPrompt, isInsideFork } from './fork-agent.js';
 import { canSpawn, normalizeIsolation, type IsolationConfig } from './delegation-config.js';
 import { resolveToolsets, applyBlockedTools, isDelegateBlocked } from './toolset-resolver.js';
@@ -92,6 +93,11 @@ export interface SubagentRunnerDeps {
    * 从 0 开始，每 spawn 一次 +1。
    */
   spawnDepth?: number;
+  /**
+   * 用户自定义助手昵称：用于把子代理 prompt 中的 "of DevSeeker" 身份引用
+   * 替换为 "of {nickname}"（人格一致性）。未传时读全局昵称单例。
+   */
+  nickname?: string;
 }
 
 export interface RunSubagentOptions {
@@ -282,6 +288,8 @@ export async function runSubagent(
         ...(isolation ? { maxDepth: isolation.maxDepth } : {}),
       });
     }
+    // 昵称人格化：主助手有自定义昵称时，子代理身份句从 "of DevSeeker" 跟随
+    effectiveSystemPrompt = applyNicknameToSubagentPrompt(effectiveSystemPrompt, deps.nickname);
     if (isFork) {
       effectiveSystemPrompt = buildForkSystemPrompt(effectiveSystemPrompt, effectiveDepth, isolation?.maxDepth ?? 3);
     }

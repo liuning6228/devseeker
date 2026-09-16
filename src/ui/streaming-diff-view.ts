@@ -29,6 +29,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { extractPartialContent } from '../core/tools/streaming-file-writer.js';
 import { getLogger } from '../infra/logger.js';
+import { getNickname } from '../infra/nickname.js';
 
 const log = getLogger('streaming-diff-view');
 
@@ -37,8 +38,10 @@ const log = getLogger('streaming-diff-view');
 /** Diff 编辑器左侧原始内容使用的 URI scheme */
 export const DIFF_VIEW_URI_SCHEME = 'devseeker-diff';
 
-/** Diff 编辑器标签页标题后缀 */
-const DIFF_VIEW_LABEL_CHANGES = "Original ↔ DevSeeker's Changes";
+/** Diff 编辑器标签页标题后缀（使用助手昵称，运行期取最新值） */
+function diffViewLabelChanges(): string {
+  return `Original ↔ ${getNickname()}'s Changes`;
+}
 
 /** 临时文件目录名 */
 const TMP_DIR_NAME = '.devseeker';
@@ -267,7 +270,7 @@ export class StreamingDiffViewProvider implements vscode.Disposable {
           'vscode.diff',
           originalUri,
           this.tempFileUri,
-          `${fileName}: ${fileExists ? DIFF_VIEW_LABEL_CHANGES : 'New File'} (Streaming)`,
+          `${fileName}: ${fileExists ? diffViewLabelChanges() : 'New File'} (Streaming)`,
           { preserveFocus: true },
         )
         .then(
@@ -452,8 +455,8 @@ export class StreamingDiffViewProvider implements vscode.Disposable {
         ) {
           return true;
         }
-        // Fallback: 按标签名匹配
-        if (tab.label.includes(DIFF_VIEW_LABEL_CHANGES)) {
+        // Fallback: 按标签名匹配（昵称可变，用稳定特征串 "Original ↔ ... (Streaming)"）
+        if (tab.label.includes('Original ↔') && tab.label.includes('(Streaming)')) {
           return true;
         }
         return false;

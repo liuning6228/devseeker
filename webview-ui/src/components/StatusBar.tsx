@@ -16,6 +16,8 @@ export interface StatusBarProps {
   onNavigate?: (view: View) => void;
   /** 当前视图 */
   currentView?: View;
+  /** 用户自定义昵称 */
+  nickname?: string;
 }
 
 /**
@@ -34,6 +36,7 @@ export function StatusBar({
   sessionCount,
   onNavigate,
   currentView,
+  nickname,
 }: StatusBarProps): JSX.Element {
   const ok = provider?.ok === true;
   const providerLabel = provider
@@ -48,7 +51,7 @@ export function StatusBar({
       >
         ●
       </span>
-      <span className="statusbar__brand">DevSeeker</span>
+      <span className="statusbar__brand">{nickname || 'DevSeeker'}</span>
       {badges && <span className="statusbar__badges">{badges}</span>}
 
       {/* 导航按钮：首页 / 历史 */}

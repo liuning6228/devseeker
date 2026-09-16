@@ -762,4 +762,6 @@ export type WebviewOutboundMessage =
   /** 审批策略推送（Extension → Webview，设置页「审批」Tab 数据源） */
   | { type: 'approval_policy_config'; payload: ApprovalPolicyConfigPayload }
   /** 索引探活结果推送（Extension → Webview，回应 probe_embed） */
-  | { type: 'embed_probe_result'; payload: EmbedProbeResultPayload };
+  | { type: 'embed_probe_result'; payload: EmbedProbeResultPayload }
+  /** 昵称推送（Extension → Webview，首次设置后推送用户自定义昵称） */
+  | { type: 'nickname'; nickname: string };

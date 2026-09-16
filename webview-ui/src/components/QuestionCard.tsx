@@ -19,6 +19,8 @@ export interface QuestionCardProps {
     answers: Array<{ question: string; selected: string[]; other?: string }>,
   ) => void;
   onCancel: (requestId: string) => void;
+  /** 用户自定义昵称 */
+  nickname?: string;
 }
 
 interface LocalAnswer {
@@ -26,7 +28,7 @@ interface LocalAnswer {
   other: string;
 }
 
-export function QuestionCard({ payload, onSubmit, onCancel }: QuestionCardProps): JSX.Element {
+export function QuestionCard({ payload, onSubmit, onCancel, nickname }: QuestionCardProps): JSX.Element {
   const [answers, setAnswers] = useState<LocalAnswer[]>(() =>
     payload.questions.map(() => ({ selected: new Set<string>(), other: '' })),
   );
@@ -116,8 +118,8 @@ export function QuestionCard({ payload, onSubmit, onCancel }: QuestionCardProps)
       onClick={handleOverlayClick}
       onKeyDown={handleKeyDown}
     >
-      <div className="ask-modal" role="dialog" aria-modal="true" aria-label="DevSeeker 需要你的输入">
-        <div className="ask-modal__title">DevSeeker 需要你的输入</div>
+      <div className="ask-modal" role="dialog" aria-modal="true" aria-label={(nickname || 'DevSeeker') + ' 需要你的输入'}>
+        <div className="ask-modal__title">{nickname || 'DevSeeker'} 需要你的输入</div>
         {/* Step 16: 进度条 */}
         <div className="ask-modal__progress">
           <div className="ask-modal__progress-bar">

@@ -8,13 +8,13 @@
  * EditorChangeBar —— 编辑器底部状态栏：文件变更导航 + 同意/拒绝
  *
  * 功能：
- * - 显示 "DevSeeker: N files changed" 状态栏项
+ * - 显示 "{昵称}: N files changed" 状态栏项
  * - 上一个/下一个 文件导航按钮
  * - 同意(Accept All) / 拒绝(Reject All) 按钮
  * - 点击导航时自动打开对应文件编辑器并滚动到第一个待处理 hunk
  *
  * 按钮布局（从左到右）：
- *   0. 标签  "DevSeeker: N files changed"
+ *   0. 标签  "{昵称}: N files changed"
  *   1. 上一个（多文件时显示）
  *   2. 下一个（多文件时显示）
  *   3. 同意
@@ -25,6 +25,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { InlineDiffController } from './inline-diff-decorator.js';
 import { getLogger } from '../infra/logger.js';
+import { getNickname } from '../infra/nickname.js';
 
 const log = getLogger('editor-change-bar');
 
@@ -42,11 +43,11 @@ export class EditorChangeBar implements vscode.Disposable {
   private visible = false;
 
   constructor(private readonly inlineDiffController: InlineDiffController) {
-    // 0. 主标签 "DevSeeker: N files changed"
+    // 0. 主标签 "{昵称}: N files changed"（昵称在激活时由单例初始化）
     const labelItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);
-    labelItem.name = 'DevSeeker Changes';
-    labelItem.text = '$(files) DevSeeker: 0 files changed';
-    labelItem.tooltip = 'DevSeeker 文件变更概览';
+    labelItem.name = `${getNickname()} Changes`;
+    labelItem.text = `$(files) ${getNickname()}: 0 files changed`;
+    labelItem.tooltip = `${getNickname()} 文件变更概览`;
     this.items.push(labelItem);
 
     // 1. 上一个文件
@@ -126,8 +127,9 @@ export class EditorChangeBar implements vscode.Disposable {
       return;
     }
 
-    // 更新主标签
-    this.items[0]!.text = `$(files) DevSeeker: ${count} file${count > 1 ? 's' : ''} changed`;
+    // 更新主标签（昵称可能已在运行期被修改，每次刷新取最新值）
+    this.items[0]!.name = `${getNickname()} Changes`;
+    this.items[0]!.text = `$(files) ${getNickname()}: ${count} file${count > 1 ? 's' : ''} changed`;
     if (this.currentFileIdx >= 0 && this.currentFileIdx < count) {
       const cur = this.changedFiles[this.currentFileIdx]!;
       this.items[0]!.tooltip = `当前: ${cur.relPath} (+${cur.added} -${cur.removed})`;
@@ -180,14 +182,14 @@ export class EditorChangeBar implements vscode.Disposable {
   private async acceptAll(): Promise<void> {
     await this.inlineDiffController.acceptAllFiles();
     this.clear();
-    vscode.window.showInformationMessage('DevSeeker: 所有文件变更已接受');
+    vscode.window.showInformationMessage(`${getNickname()}: 所有文件变更已接受`);
   }
 
   /** 拒绝所有变更：回滚所有文件到原始内容，移除装饰 */
   private async rejectAll(): Promise<void> {
     await this.inlineDiffController.rejectAllFiles();
     this.clear();
-    vscode.window.showInformationMessage('DevSeeker: 所有文件变更已拒绝（已恢复原始内容）');
+    vscode.window.showInformationMessage(`${getNickname()}: 所有文件变更已拒绝（已恢复原始内容）`);
   }
 
   /** 清除所有状态 */

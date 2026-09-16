@@ -15,14 +15,17 @@ import type { ApprovalRequestPayload } from '../protocol';
 export interface ApprovalCardProps {
   payload: ApprovalRequestPayload;
   onRespond: (requestId: string, decision: 'allow_once' | 'remember' | 'deny') => void;
+  /** 用户自定义昵称 */
+  nickname?: string;
 }
 
-export function ApprovalCard({ payload, onRespond }: ApprovalCardProps): JSX.Element {
+export function ApprovalCard({ payload, onRespond, nickname }: ApprovalCardProps): JSX.Element {
   const isBash = payload.toolName === 'bash';
+  const name = nickname || 'DevSeeker';
   return (
     <div className="approval-card" role="dialog" aria-label="工具审批请求">
       <div className="approval-card__title">
-        {isBash ? '💻 DevSeeker 请求执行命令' : 'DevSeeker 请求执行工具'}
+        {isBash ? `💻 ${name} 请求执行命令` : `${name} 请求执行工具`}
       </div>
       <div className="approval-card__info">
         <div className="approval-card__row">

@@ -31,7 +31,7 @@
  *    16. selected-codes / git-context / attachments —— 会话级附件
  */
 
-export { AGENT_IDENTITY_MODULE } from './agent-identity.js';
+export { AGENT_IDENTITY_MODULE, buildAgentIdentityModule } from './agent-identity.js';
 export { THINKING_FRAMEWORK_MODULE } from './thinking-framework.js';
 export { OUTPUT_STYLE_MODULE } from './output-style.js';
 export { TOOL_CONTRACTS_MODULE } from './tool-contracts.js';

@@ -32,17 +32,25 @@ export interface MessageItemProps {
   currentStreamMsgId?: string;
   /** Step 2: 流式消息无内容时显示骨架屏 */
   skeleton?: boolean;
+  /** 用户自定义昵称（替代默认 "DevSeeker"） */
+  nickname?: string;
 }
 
-const ROLE_LABEL: Record<UiMessage['role'], string> = {
+const DEFAULT_ROLE_LABEL: Record<UiMessage['role'], string> = {
   user: 'You',
   assistant: 'DevSeeker',
   tool: 'Tool',
   system: 'System',
 };
 
-function MessageItemImpl({ message, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovals, onApprovalResponse, currentStreamMsgId, skeleton }: MessageItemProps): JSX.Element {
+function MessageItemImpl({ message, onRevert, onOpenFile, onOpenTerminal, onRevertHunk, revertedHunks, pendingApprovals, onApprovalResponse, currentStreamMsgId, skeleton, nickname }: MessageItemProps): JSX.Element {
   const hasAnyVisible = useMemo(() => message.parts.some(isVisible), [message.parts]);
+
+  // 动态角色标签（assistant 使用昵称）
+  const roleLabel = useMemo(() => ({
+    ...DEFAULT_ROLE_LABEL,
+    assistant: nickname || DEFAULT_ROLE_LABEL.assistant,
+  }), [nickname]);
 
   // 并行子代理分组视图：同一条消息内 ≥2 个子代理卡片时聚合展示（仅本地 UI 状态）
   const subagentPartIndices = useMemo(() => {
@@ -67,7 +75,7 @@ function MessageItemImpl({ message, onRevert, onOpenFile, onOpenTerminal, onReve
       initial="initial"
       animate="animate"
     >
-      <div className="message__role">{ROLE_LABEL[message.role]}</div>
+      <div className="message__role">{roleLabel[message.role]}</div>
       {message.reasoning && (
         <details className="message__reasoning" open={false}>
           <summary className="message__reasoning-summary">

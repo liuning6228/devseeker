@@ -21,6 +21,13 @@ import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { initLogger, getLogger, closeLogger, type LogLevel } from './infra/logger.js';
 import { migrateDeepSeekModelNames } from './providers/model-config.js';
+import {
+  initNickname,
+  updateNickname,
+  getNickname,
+  DEFAULT_NICKNAME,
+  NICKNAME_STATE_KEY,
+} from './infra/nickname.js';
 import { perfProbe } from './infra/perf-probe.js';
 import { AgentError, toAgentError } from './core/errors/index.js';
 import { DualMindChatPanel } from './webview/panel.js';
@@ -104,6 +111,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log.warn({ err: String(e) }, 'DeepSeek model name migration failed (non-fatal)');
   }
 
+  // 昵称功能：首次使用时提示用户给 DevSeeker 起一个定制昵称
+  // 存储在 globalState 中，跨 workspace 共享；内存快照由 nickname 单例统一维护
+  const firstRunNickname = context.globalState.get<string>(NICKNAME_STATE_KEY);
+  initNickname(context.globalState);
+  if (!firstRunNickname) {
+    // 非阻塞：异步弹出输入框，不阻塞扩展激活
+    void (async () => {
+      try {
+        const nickname = await vscode.window.showInputBox({
+          prompt: '给你的 AI 助手起一个昵称吧！后续交互中将以此名称呼。留空则使用默认名称 "DevSeeker"。',
+          placeHolder: '输入昵称（留空使用默认 DevSeeker）',
+          title: 'DevSeeker · 自定义昵称',
+          ignoreFocusOut: false,
+        });
+        const finalNickname = await updateNickname(context.globalState, nickname);
+        log.info({ nickname: finalNickname }, 'DevSeeker nickname set');
+      } catch (e) {
+        // 输入框异常：回退默认值，避免下次启动反复弹窗
+        await updateNickname(context.globalState, DEFAULT_NICKNAME);
+      }
+    })();
+  }
+
   // W10.4 · 激活期后台 GC：清理老 checkpoint，防止 .devseeker/checkpoints 无限膨胀
   // v1.9.0: 使用 SQLite 存储（自动从 JSON 迁移后 GC 直接 SQL 完成）
   // 非阻塞：GC 失败不影响激活；devSeeker.checkpoints.gcDays 可配置（默认 7 天，0 = 关闭）
@@ -139,6 +169,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('devSeeker.openPanel', () => {
       log.info('command: openPanel');
       DualMindChatPanel.createOrShow(context);
+    }),
+  );
+
+  // 注册命令：修改昵称
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devSeeker.setNickname', async () => {
+      log.info('command: setNickname');
+      const currentNickname = getNickname();
+      const newNickname = await vscode.window.showInputBox({
+        prompt: '修改 AI 助手的昵称，留空则重置为默认 "DevSeeker"',
+        placeHolder: '输入新昵称',
+        title: 'DevSeeker · 修改昵称',
+        value: currentNickname === DEFAULT_NICKNAME ? '' : currentNickname,
+        ignoreFocusOut: false,
+      });
+      const finalNickname = await updateNickname(context.globalState, newNickname);
+      vscode.window.showInformationMessage(`DevSeeker 昵称已设置为：${finalNickname}`);
+      // 通知已打开的面板更新
+      DualMindChatPanel.current?.pushNicknamePublic();
     }),
   );
 

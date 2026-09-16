@@ -39,6 +39,7 @@ import {
   REFACTORING_SOP_MODULE,
   I18N_COMMENTS_MODULE,
   MEMORY_POLICY_MODULE,
+  buildAgentIdentityModule,
 } from '../modules/index.js';
 import { getVariantL0Suffix } from '../variants/index.js';
 
@@ -79,8 +80,12 @@ export const DEFAULT_SYSTEM_PROMPT = [...BASE_L0_MODULES].join('\n\n');
  *
  * modelId 为空或 generic variant 时 l0Suffix 为空串，此时输出与前缀缓存兼容。
  */
-export function buildL0Identity(modelId?: string): string {
+export function buildL0Identity(modelId?: string, nickname?: string): string {
   const parts = [...BASE_L0_MODULES];
+  // 昵称替换身份模块（用户自定义昵称时替换默认的 "DevSeeker"）
+  if (nickname && nickname !== 'DevSeeker') {
+    parts[0] = buildAgentIdentityModule(nickname);
+  }
   const suffix = modelId ? getVariantL0Suffix(modelId) : '';
   if (suffix) parts.push(suffix);
   parts.push(WEB_RESEARCH_PROMPT_MODULE);

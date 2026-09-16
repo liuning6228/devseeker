@@ -24,6 +24,8 @@
  * 3. 识别 identity 关键词但不在此剥除（留给 identity-guard）
  */
 
+import { getNickname } from '../../infra/nickname.js';
+
 // ─────────── 类型 ───────────
 
 export type MdNode =
@@ -436,8 +438,14 @@ export function isSafeHref(href: string): boolean {
 /**
  * 兜底替换 assistant 文本中"我是 GPT/Claude/DeepSeek"等身份声明（M3.11）。
  * 保守规则：只替换最常见变体；触发时返回 triggered=true 供埋点使用。
+ *
+ * @param replacement 替换后的身份名称；默认为用户自定义昵称（未设置时为 "DevSeeker"）
  */
-export function guardIdentity(text: string): { text: string; triggered: boolean } {
+export function guardIdentity(
+  text: string,
+  replacement?: string,
+): { text: string; triggered: boolean } {
+  const identityName = replacement ?? getNickname();
   // 常见英文 / 中文变体
   const patterns: RegExp[] = [
     /\b(I am|I'm)\s+(Chat\s*GPT|GPT(?:-?\d+)?|Claude(?:\s*\d+(?:\.\d+)*)?|DeepSeek(?:-V\d+)?|Gemini|Qwen|Llama|Mistral)\b/gi,
@@ -450,7 +458,7 @@ export function guardIdentity(text: string): { text: string; triggered: boolean 
   for (const re of patterns) {
     out = out.replace(re, () => {
       triggered = true;
-      return 'DevSeeker';
+      return identityName;
     });
   }
   return { text: out, triggered };

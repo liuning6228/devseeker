@@ -41,6 +41,8 @@ interface WelcomeViewProps {
   onSessionSelect?: (id: string) => void;
   onBackToChat?: () => void;
   className?: string;
+  /** 用户自定义昵称 */
+  nickname?: string;
 }
 
 /**
@@ -51,13 +53,13 @@ interface WelcomeViewProps {
  * - 快捷任务卡片（点击自动填入 Composer）
  * - 最近会话列表
  */
-export function WelcomeView({ onTaskSelect, recentSessions, onSessionSelect, onBackToChat, className }: WelcomeViewProps) {
+export function WelcomeView({ onTaskSelect, recentSessions, onSessionSelect, onBackToChat, className, nickname }: WelcomeViewProps) {
   return (
     <div className={cn('flex flex-col gap-6 p-6', className)}>
       {/* 品牌区域 */}
       <div className="text-center py-6 relative">
-        <img src={logoSvg} alt="DevSeeker" className="w-24 h-24 mx-auto mb-4" />
-        <h1 className="text-2xl font-bold text-vscode-fg">DevSeeker</h1>
+        <img src={logoSvg} alt={nickname || 'DevSeeker'} className="w-24 h-24 mx-auto mb-4" />
+        <h1 className="text-2xl font-bold text-vscode-fg">{nickname || 'DevSeeker'}</h1>
         <p className="text-sm text-vscode-fg/60 mt-2">
           技术 leader 型 AI 编码助手
         </p>

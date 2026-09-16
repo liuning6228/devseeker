@@ -205,6 +205,7 @@ import {
 import { SqliteCheckpointStore } from '../core/storage/sqlite-checkpoint-store.js';
 import { getLogger } from '../infra/logger.js';
 import { perfProbe } from '../infra/perf-probe.js';
+import { getNickname as readNickname } from '../infra/nickname.js';
 import { AgentError, toAgentError, ErrorCodes, classifyErrorCode, FAILOVER_STRATEGY, type FailoverReason } from '../core/errors/index.js';
 import { InlineEditHistory } from '../core/inline-edit/history.js';
 
@@ -783,6 +784,40 @@ export class DualMindChatPanel {
       }
     } catch {
       // Webview 已销毁，静默忽略（用户关闭了面板等场景）
+    }
+  }
+
+  // ─────────── 昵称 ───────────
+
+  /** 获取用户自定义昵称（内存快照，默认 "DevSeeker"） */
+  private getNickname(): string {
+    return readNickname();
+  }
+
+  /** 推送昵称到 webview */
+  private pushNickname(): void {
+    this.post({ type: 'nickname', nickname: this.getNickname() });
+  }
+
+  /** 公开方法：供命令面板调用后推送最新昵称到 webview */
+  pushNicknamePublic(): void {
+    this.pushNickname();
+    // 运行中的任务：重建 system prompt，使模型立即用新昵称自称（失败不阻断）
+    const loop = this.taskLoop;
+    if (loop) {
+      void (async () => {
+        try {
+          const rebuilt = await this.buildSystemPrompt({ ...(this.lastPromptContext ?? {}) });
+          const extra = this.lastPromptContext?.extraConstraint;
+          loop.replaceSystemPrompt(extra ? rebuilt + '\n\n' + extra : rebuilt);
+          loop.appendSystemNote(
+            `[Nickname Updated] 当前助手昵称已更新为「${this.getNickname()}」，后续回复请以此名称称呼自己。`,
+          );
+          log.info({ nickname: this.getNickname() }, 'active TaskLoop system prompt resynced after nickname change');
+        } catch (e) {
+          log.warn({ err: String(e) }, 'nickname resync to active loop failed (non-fatal)');
+        }
+      })();
     }
   }
 
@@ -1630,6 +1665,7 @@ export class DualMindChatPanel {
         this.pushSessionList();
         this.pushIndexStatus();
         this.pushModeStatus();
+        this.pushNickname(); // 推送用户自定义昵称
         // W7e4 · 恢复上次持久化的 todo 列表
         this.pushTodoList(this.getTodos());
         // K4 可达性：重放等待中的审批/提问（webview 重载后 pending 状态已丢，卡片消失）
@@ -3151,12 +3187,12 @@ export class DualMindChatPanel {
         // ── User-visible notification for terminal errors ──
         if (terminalReason === 'billing') {
           void vscode.window.showWarningMessage(
-            `DevSeeker: 当前 API（${provider.id}）余额不足（Insufficient Balance），任务已终止。` +
+            `${this.getNickname()}: 当前 API（${provider.id}）余额不足（Insufficient Balance），任务已终止。` +
             `请充值或修改 devSeeker.models.llm.level1.apiKey 后重试。`,
           );
         } else if (terminalReason === 'context_overflow') {
           void vscode.window.showWarningMessage(
-            `DevSeeker: 消息历史过长，已被截断拦截以防止上下文溢出。` +
+            `${this.getNickname()}: 消息历史过长，已被截断拦截以防止上下文溢出。` +
             `请点击清除对话或新建会话后重试。`,
           );
         }
@@ -3914,6 +3950,7 @@ export class DualMindChatPanel {
       memories: snapshotMemories,
       taskContext,
       modelId: options.modelId,
+      nickname: this.getNickname(),
       attachments: {
         // B-P3-1 · EnvironmentProbe → L3 注入 `<environment>` 块
         environment: buildEnvironmentBlock({
@@ -4425,7 +4462,7 @@ export class DualMindChatPanel {
     const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const rel = wsRoot ? vscode.workspace.asRelativePath(absPath) : absPath;
     const picked = await vscode.window.showInformationMessage(
-      `DevSeeker 已产出 Plan 文档：${rel}`,
+      `${this.getNickname()} 已产出 Plan 文档：${rel}`,
       { modal: true, detail: '请先打开文件审阅；批准后会自动切回 Agent 模式并把 Plan 路径交给下一轮执行。' },
       '批准并切回 Agent',
       '继续在 Plan 模式打磨',
@@ -4772,6 +4809,8 @@ export class DualMindChatPanel {
       ...(workspaceRoot ? { workspaceRoot } : {}),
       ...(contextWindow ? { contextWindow } : {}),
       ...(visionProvider ? { visionProvider } : {}),
+      // 子代理 prompt 人格化："of DevSeeker" → "of {nickname}"
+      nickname: this.getNickname(),
     };
   }
 
@@ -4823,7 +4862,7 @@ export class DualMindChatPanel {
   /** 继续暂停的 Agent 任务（用保存的历史创建新 loop 继续对话） */
   async resumeTask(): Promise<void> {
     if (!this.pausedContext) {
-      vscode.window.showWarningMessage('DevSeeker: 没有可继续的任务');
+      vscode.window.showWarningMessage(`${this.getNickname()}: 没有可继续的任务`);
       return;
     }
 
@@ -4834,7 +4873,7 @@ export class DualMindChatPanel {
     const registry = getProviderRegistry();
     const provider = registry.get(ctx.providerId);
     if (!provider) {
-      vscode.window.showErrorMessage('DevSeeker: 暂停时的 Provider 不可用，请手动发送新指令');
+      vscode.window.showErrorMessage(`${this.getNickname()}: 暂停时的 Provider 不可用，请手动发送新指令`);
       return;
     }
 

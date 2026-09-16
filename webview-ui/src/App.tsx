@@ -102,7 +102,7 @@ export function App(): JSX.Element {
 }
 
 function AppWithNav(): JSX.Element {
-  const { state, navigateTo } = useExtensionState();
+  const { state, dispatch, navigateTo } = useExtensionState();
   // showNavbar 不再使用（导航已合并到 StatusBar）
   const [localView, setLocalView] = useState<View>('chat');
   const currentView = state.currentView !== 'chat' && state.currentView !== 'welcome' ? state.currentView : localView;
@@ -156,6 +156,10 @@ function AppWithNav(): JSX.Element {
       if (msg?.type === 'dismiss_pending_dialogs') {
         setAskQuestion(null);
         setApprovalRequests([]);
+      }
+      // 昵称推送
+      if (msg?.type === 'nickname') {
+        dispatch({ type: 'SET_NICKNAME', nickname: msg.nickname as string });
       }
     }
     window.addEventListener('message', onMessage);
@@ -236,6 +240,7 @@ function AppWithNav(): JSX.Element {
                 title: s.title,
                 updatedAt: s.updatedAt,
               }))}
+              nickname={state.nickname}
             />
           )}
           {/*
@@ -283,13 +288,14 @@ function AppWithNav(): JSX.Element {
           payload={askQuestion}
           onSubmit={handleAnswerAsk}
           onCancel={handleCancelAsk}
+          nickname={state.nickname}
         />
       )}
       {/* approval_request 审批覆盖层：非聊天视图展示全部待审批（聊天视图内联 + 孤儿兜底） */}
       {approvalRequests.length > 0 && currentView !== 'chat' && (
         <div className="ask-modal-overlay">
           {approvalRequests.map((p) => (
-            <ApprovalCard key={p.requestId} payload={p} onRespond={handleApprovalRespond} />
+            <ApprovalCard key={p.requestId} payload={p} onRespond={handleApprovalRespond} nickname={state.nickname} />
           ))}
         </div>
       )}
@@ -1007,6 +1013,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
         sessionCount={state.sessionList.length}
         onNavigate={onNavigate}
         currentView={currentView}
+        nickname={state.nickname}
       />
       {/* Step 6: 模式切换通知 banner（非阻断式，8s 自动消失） */}
       {modeSwitchBanner && (
@@ -1096,7 +1103,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             onRejectFile={handleRejectFile}
             onRejectAll={handleRejectAll}
           />
-          <MessageList messages={state.messages} onRevert={handleRevertStep} onOpenFile={handleOpenFile} onOpenTerminal={handleOpenTerminal} onRevertHunk={handleRevertHunk} revertedHunks={state.revertedHunks} pendingApprovals={state.pendingApprovals} onApprovalResponse={handleApprovalResponseWithToolCallId} currentStreamMsgId={state.currentStreamMsgId} />
+          <MessageList messages={state.messages} onRevert={handleRevertStep} onOpenFile={handleOpenFile} onOpenTerminal={handleOpenTerminal} onRevertHunk={handleRevertHunk} revertedHunks={state.revertedHunks} pendingApprovals={state.pendingApprovals} onApprovalResponse={handleApprovalResponseWithToolCallId} currentStreamMsgId={state.currentStreamMsgId} nickname={state.nickname} />
         </div>
       </div>
       {/* 审批已内联到 ToolCard header 中，不再使用独立 ApprovalCard */}
@@ -1110,6 +1117,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
               onRespond={(_requestId, decision) =>
                 handleApprovalResponse(p.requestId, p.toolCallId, decision)
               }
+              nickname={state.nickname}
             />
           ))}
         </div>
