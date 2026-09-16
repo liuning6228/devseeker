@@ -15,6 +15,7 @@
  *   test-targeting         · B 变更影响分析（约定映射 + 图索引反向依赖）
  *   gate                   · C 梯度验证门（纯决策 + 注入文本）
  *   output-parser          · E 测试输出解析（无界 stdout → <1KB 摘要）
+ *   file-relevance         · 变更文件分类（纯文档放行，§4.3 补充）
  */
 
 export type {
@@ -54,3 +55,5 @@ export {
 } from './gate.js';
 
 export { parseTestOutput, parseVerifyReport, renderTestSummary, stripAnsi } from './output-parser.js';
+
+export { isDocumentationFile, isDocOnlyChange } from './file-relevance.js';

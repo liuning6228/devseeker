@@ -61,6 +61,7 @@ import {
   decideGate,
   decideTier,
   detectTestPlan,
+  isDocOnlyChange,
   isVerificationCommand,
   parseTestOutput,
   parseVerifyReport,
@@ -1562,6 +1563,17 @@ export class TaskLoop {
     await this.absorbDelegateEdits();
     if (signal.aborted) return 'aborted';
     if (this.editedFiles.size === 0) return 'allow';
+
+    // 纯文档变更（README / 设计文档 / CHANGELOG 等）不存在可执行的验证动作：
+    // 直接放行，避免"改 .md 也要跑类型检查 + 可能派发 Verify 子代理"的无谓开销。
+    // 混合变更（任一非文档文件）或空集不会命中此分支，维持原有门行为。
+    if (isDocOnlyChange(this.editedFiles)) {
+      log.info(
+        { files: this.editedFiles.size, gate: cfg.gate },
+        '[Verification] doc-only changes; gate skipped',
+      );
+      return 'allow';
+    }
 
     const plan = await this.ensureTestPlan();
     if (signal.aborted) return 'aborted';
