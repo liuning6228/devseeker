@@ -253,7 +253,7 @@ function AppWithNav(): JSX.Element {
             <AppInner onNavigate={handleNavigate} currentView={currentView} />
           </div>
           {currentView === 'settings' && (
-            <SettingsView config={settingsModelConfig} searchConfig={settingsSearchConfig} embedConfig={settingsEmbedConfig} approvalConfig={settingsApprovalConfig} onBack={() => handleNavigate('chat')} />
+            <SettingsView config={settingsModelConfig} searchConfig={settingsSearchConfig} embedConfig={settingsEmbedConfig} approvalConfig={settingsApprovalConfig} nickname={state.nickname} onBack={() => handleNavigate('chat')} />
           )}
           {currentView === 'history' && (
             <HistoryView
@@ -308,6 +308,9 @@ const NOOP_PLACEHOLDER = null as unknown as React.FC<{onBack?: () => void}>;
 
 function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => void; currentView: View }): JSX.Element {
   const [state, dispatch] = useReducer(reducer, initialState);
+  // 昵称来自 ExtensionState 上下文（由 AppWithNav 的 nickname 消息分发维护）；
+  // 聊天 reducer（AppState）不含昵称，两者职责分离
+  const { state: extState } = useExtensionState();
   const readyPostedRef = useRef(false);
   // W-UI4 · 会话历史抽屉可见性
   const [drawerVisible, setDrawerVisible] = useState(true);
@@ -1013,7 +1016,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
         sessionCount={state.sessionList.length}
         onNavigate={onNavigate}
         currentView={currentView}
-        nickname={state.nickname}
+        nickname={extState.nickname}
       />
       {/* Step 6: 模式切换通知 banner（非阻断式，8s 自动消失） */}
       {modeSwitchBanner && (
@@ -1103,7 +1106,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             onRejectFile={handleRejectFile}
             onRejectAll={handleRejectAll}
           />
-          <MessageList messages={state.messages} onRevert={handleRevertStep} onOpenFile={handleOpenFile} onOpenTerminal={handleOpenTerminal} onRevertHunk={handleRevertHunk} revertedHunks={state.revertedHunks} pendingApprovals={state.pendingApprovals} onApprovalResponse={handleApprovalResponseWithToolCallId} currentStreamMsgId={state.currentStreamMsgId} nickname={state.nickname} />
+          <MessageList messages={state.messages} onRevert={handleRevertStep} onOpenFile={handleOpenFile} onOpenTerminal={handleOpenTerminal} onRevertHunk={handleRevertHunk} revertedHunks={state.revertedHunks} pendingApprovals={state.pendingApprovals} onApprovalResponse={handleApprovalResponseWithToolCallId} currentStreamMsgId={state.currentStreamMsgId} nickname={extState.nickname} />
         </div>
       </div>
       {/* 审批已内联到 ToolCard header 中，不再使用独立 ApprovalCard */}
@@ -1117,7 +1120,7 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
               onRespond={(_requestId, decision) =>
                 handleApprovalResponse(p.requestId, p.toolCallId, decision)
               }
-              nickname={state.nickname}
+              nickname={extState.nickname}
             />
           ))}
         </div>

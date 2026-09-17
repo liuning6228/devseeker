@@ -348,7 +348,9 @@ export type WebviewInboundMessage =
         /** Bash 写命令（命令安全级别 risky）自动执行 */
         bash_write?: boolean;
       };
-    };
+    }
+  /** 昵称：设置页「通用」提交昵称变更（持久化到 globalState，空串回退默认名） */
+  | { type: 'set_nickname'; nickname: string };
 
 // ─────────── Todo（W7e4 ·   todo_write 对齐） ───────────
 

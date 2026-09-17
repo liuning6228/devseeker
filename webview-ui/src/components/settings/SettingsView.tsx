@@ -19,6 +19,8 @@ type SettingsViewProps = {
   embedConfig?: EmbedConfigPayload | null;
   /** 从 extension host 推送的审批策略配置 */
   approvalConfig?: ApprovalPolicyConfigPayload | null;
+  /** 当前助手昵称（从 extension host 推送） */
+  nickname?: string;
   onBack?: () => void;
   className?: string;
 };
@@ -47,6 +49,10 @@ const VLLM_LEVEL_META = [
 
 // ─── 本地编辑保护窗口：该窗口内宿主回推的同名字段不覆盖本地输入 ───
 const ECHO_GUARD_MS = 2000;
+
+// ─── 助手昵称（与宿主 src/infra/nickname.ts 的常量保持一致） ───
+const DEFAULT_NICKNAME = 'DevSeeker';
+const MAX_NICKNAME_LENGTH = 24;
 
 /** 单级配置的本地编辑态。apiKey 只存用户新输入的明文，apiKeySet 表示宿主已保存 */
 type LevelState = {
@@ -77,7 +83,7 @@ type EmbedState = {
 
 const INITIAL_EMBED: EmbedState = { provider: 'local-bert', apiKey: '', baseUrl: '', model: '', dimension: '', batchSize: '', timeoutMs: '' };
 
-export function SettingsView({ config, searchConfig, embedConfig, approvalConfig, onBack, className }: SettingsViewProps) {
+export function SettingsView({ config, searchConfig, embedConfig, approvalConfig, nickname, onBack, className }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState('llm');
   // Step 21: 配置搜索
   const [searchQuery, setSearchQuery] = useState('');
@@ -201,6 +207,75 @@ export function SettingsView({ config, searchConfig, embedConfig, approvalConfig
     },
     [],
   );
+
+  // ─── 助手昵称：本地草稿 + 提交（blur/Enter）+ Esc 撤销 + 宿主回推确认 ───
+  // 交互约定：不在每次按键时提交（避免运行中任务反复重建 prompt），仅在失焦/回车时提交；
+  // 提交后在宿主回推同值时显示「已保存」（确认落盘而非乐观提示，不撒谎）。
+  const [nicknameDraft, setNicknameDraft] = useState(nickname || DEFAULT_NICKNAME);
+  const [nicknameSaved, setNicknameSaved] = useState(false);
+  /** 本地活动时间戳（输入/提交都会刷新）：窗口内宿主回推不覆盖草稿 */
+  const nicknameEditedAtRef = useRef(0);
+  /** 最近一次提交的期望值；宿主回推等于它 → 确认落盘 */
+  const nicknamePendingRef = useRef<string | null>(null);
+  /** Esc 撤销标记：阻止随后的 blur 触发提交 */
+  const nicknameCancelRef = useRef(false);
+  const nicknameSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!nickname) return;
+    const pending = nicknamePendingRef.current;
+    if (pending !== null && pending === nickname) {
+      // 宿主已确认落盘 → 给出明确的「已保存」反馈
+      nicknamePendingRef.current = null;
+      setNicknameSaved(true);
+      if (nicknameSavedTimerRef.current) clearTimeout(nicknameSavedTimerRef.current);
+      nicknameSavedTimerRef.current = setTimeout(() => setNicknameSaved(false), 2000);
+    } else if (pending !== null && Date.now() - nicknameEditedAtRef.current > ECHO_GUARD_MS) {
+      // 窗口外宿主推了个不同的值（如命令面板修改）→ 本地提交已失效
+      nicknamePendingRef.current = null;
+    }
+    if (Date.now() - nicknameEditedAtRef.current >= ECHO_GUARD_MS) {
+      setNicknameDraft(nickname);
+    }
+  }, [nickname]);
+
+  useEffect(() => () => {
+    if (nicknameSavedTimerRef.current) clearTimeout(nicknameSavedTimerRef.current);
+  }, []);
+
+  /** 提交昵称：trim + 按码点截断；空值回退默认名（镜像宿主 normalizeNickname 语义，emoji 不会被截成半个） */
+  const commitNickname = useCallback(() => {
+    if (!nickname) return;
+    if (nicknameCancelRef.current) {
+      nicknameCancelRef.current = false;
+      return;
+    }
+    const trimmed = nicknameDraft.trim();
+    const codePoints = Array.from(trimmed);
+    const next = (codePoints.length > MAX_NICKNAME_LENGTH
+      ? codePoints.slice(0, MAX_NICKNAME_LENGTH).join('')
+      : trimmed) || DEFAULT_NICKNAME;
+    if (next === nickname) {
+      // 无变化（含「清空后等于默认」）→ 仅归位显示，不发送
+      setNicknameDraft(nickname);
+      return;
+    }
+    nicknameEditedAtRef.current = Date.now();
+    nicknamePendingRef.current = next;
+    setNicknameDraft(next);
+    postToHost({ type: 'set_nickname', nickname: next });
+  }, [nickname, nicknameDraft]);
+
+  const handleResetNickname = useCallback(() => {
+    if (!nickname || nickname === DEFAULT_NICKNAME) return;
+    nicknameEditedAtRef.current = Date.now();
+    nicknamePendingRef.current = DEFAULT_NICKNAME;
+    setNicknameDraft(DEFAULT_NICKNAME);
+    postToHost({ type: 'set_nickname', nickname: DEFAULT_NICKNAME });
+  }, [nickname]);
+
+  /** 当前草稿是否非默认名（决定「恢复默认」按钮是否展示） */
+  const nicknameIsCustom = (nicknameDraft.trim() || DEFAULT_NICKNAME) !== DEFAULT_NICKNAME;
 
   // ─── 索引配置：本地态 + 宿主回推同步（ECHO_GUARD 防覆盖）+ 按字段防抖持久化 ───
   const [embedState, setEmbedState] = useState<EmbedState>(INITIAL_EMBED);
@@ -766,6 +841,48 @@ export function SettingsView({ config, searchConfig, embedConfig, approvalConfig
             <Separator />
 
             <Section title="通用">
+              <SettingRow label="助手昵称" description="对话标签 / 状态栏 / 助手自我介绍使用的名称（最长 24 字符）">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className="w-44 px-2 py-1 text-sm rounded border bg-vscode-input-bg text-vscode-input-fg border-vscode-input-border focus:outline-none focus:ring-2 focus:ring-vscode-focus"
+                    value={nicknameDraft}
+                    maxLength={MAX_NICKNAME_LENGTH}
+                    placeholder={`${DEFAULT_NICKNAME}（默认）`}
+                    aria-label="助手昵称"
+                    onChange={(e) => {
+                      nicknameEditedAtRef.current = Date.now();
+                      setNicknameDraft(e.target.value);
+                    }}
+                    onBlur={commitNickname}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.currentTarget.blur();
+                      } else if (e.key === 'Escape') {
+                        // Esc：撤销未提交的编辑（标记阻止随后的 blur 提交）
+                        nicknameCancelRef.current = true;
+                        setNicknameDraft(nickname || DEFAULT_NICKNAME);
+                        e.currentTarget.blur();
+                      }
+                    }}
+                  />
+                  {nicknameIsCustom && (
+                    <button
+                      type="button"
+                      // 阻止输入框失焦触发 blur 提交：避免「先提交草稿、再重置」的冗余双写（最终态仍正确，但多余）
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={handleResetNickname}
+                      className="text-xs text-vscode-fg/60 hover:text-vscode-fg underline cursor-pointer"
+                    >
+                      恢复默认
+                    </button>
+                  )}
+                  {nicknameSaved && <span className="text-xs text-green-600">✓ 已保存</span>}
+                </div>
+              </SettingRow>
+              <p className="text-xs text-vscode-fg/40 py-1">
+                修改后立即生效（包括正在运行的任务）；留空保存将回退默认名 {DEFAULT_NICKNAME}。
+              </p>
               <SettingRow label="最大循环轮次" description="单任务最大循环轮次（25-500）">
                 <input
                   type="number"

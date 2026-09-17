@@ -20,20 +20,31 @@
 
 export const DEFAULT_NICKNAME = 'DevSeeker';
 
+/** 昵称最大长度（昵称会出现在消息标签 / 状态栏 / 提示文案中，过长会破坏布局） */
+export const MAX_NICKNAME_LENGTH = 24;
+
 /** globalState 存储键 */
 export const NICKNAME_STATE_KEY = 'devSeeker.nickname';
 
-/** 兼容 vscode.Memento 的最小接口（便于单测） */
+/** 兼容 vscode.Memento 的最小接口（便于单测）；
+ * 注：返回类型用 PromiseLike 而非 Thenable —— 本模块会被 webview 编译链引入（markdown parser → guardIdentity），
+ * webview tsconfig 无 Thenable 全局类型，需保持 ES2020 兼容。 */
 export interface NicknameMementoLike {
   get<T>(key: string, defaultValue: T): T;
-  update(key: string, value: string): Thenable<void> | Promise<void>;
+  update(key: string, value: string): PromiseLike<void> | Promise<void>;
 }
 
 let cachedNickname: string = DEFAULT_NICKNAME;
 
-/** 规范化：trim + 空值回退默认名称 */
+/** 按码点截断（避免把代理对 / emoji 截成半个字符，产生乱码） */
+function truncateByCodePoints(s: string, max: number): string {
+  const codePoints = Array.from(s);
+  return codePoints.length > max ? codePoints.slice(0, max).join('') : s;
+}
+
+/** 规范化：trim + 超长按码点截断 + 空值回退默认名称 */
 export function normalizeNickname(value: string | undefined | null): string {
-  const v = (value ?? '').trim();
+  const v = truncateByCodePoints((value ?? '').trim(), MAX_NICKNAME_LENGTH);
   return v.length > 0 ? v : DEFAULT_NICKNAME;
 }
 
@@ -75,7 +86,8 @@ export function getNickname(): string {
 export function applyNicknameToSubagentPrompt(prompt: string, nickname?: string): string {
   const name = normalizeNickname(nickname ?? cachedNickname);
   if (name === DEFAULT_NICKNAME) return prompt;
-  return prompt.replaceAll('of DevSeeker', `of ${name}`);
+  // 用带 /g 的正则而非 replaceAll（后者需 ES2021 lib；本模块需兼容 webview 的 ES2020 编译链）
+  return prompt.replace(/of DevSeeker/g, `of ${name}`);
 }
 
 /** 单测辅助：重置内存快照 */

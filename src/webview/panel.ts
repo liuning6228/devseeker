@@ -208,7 +208,7 @@ import {
 import { SqliteCheckpointStore } from '../core/storage/sqlite-checkpoint-store.js';
 import { getLogger } from '../infra/logger.js';
 import { perfProbe } from '../infra/perf-probe.js';
-import { getNickname as readNickname } from '../infra/nickname.js';
+import { getNickname as readNickname, updateNickname } from '../infra/nickname.js';
 import { AgentError, toAgentError, ErrorCodes, classifyErrorCode, FAILOVER_STRATEGY, type FailoverReason } from '../core/errors/index.js';
 import { InlineEditHistory } from '../core/inline-edit/history.js';
 
@@ -866,6 +866,16 @@ export class DualMindChatPanel {
         }
       })();
     }
+  }
+
+  /**
+   * 设置页「通用」提交昵称变更：规范化后持久化到 globalState，
+   * 并复用 pushNicknamePublic 完成 webview 推送 + 运行中任务 prompt 重建。
+   */
+  private async handleSetNickname(nickname: string): Promise<void> {
+    const finalNickname = await updateNickname(this.context.globalState, nickname);
+    log.info({ nickname: finalNickname }, 'nickname updated from settings page');
+    this.pushNicknamePublic();
   }
 
   // ─────────── Provider 选择 + 状态推送 ───────────
@@ -1786,6 +1796,10 @@ export class DualMindChatPanel {
 
       case 'probe_embed':
         void this.handleProbeEmbed();
+        break;
+
+      case 'set_nickname':
+        void this.handleSetNickname(msg.nickname);
         break;
 
       case 'new_session':

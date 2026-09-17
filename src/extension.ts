@@ -26,6 +26,7 @@ import {
   updateNickname,
   getNickname,
   DEFAULT_NICKNAME,
+  MAX_NICKNAME_LENGTH,
   NICKNAME_STATE_KEY,
 } from './infra/nickname.js';
 import { perfProbe } from './infra/perf-probe.js';
@@ -120,10 +121,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void (async () => {
       try {
         const nickname = await vscode.window.showInputBox({
-          prompt: '给你的 AI 助手起一个昵称吧！后续交互中将以此名称呼。留空则使用默认名称 "DevSeeker"。',
+          prompt: `给你的 AI 助手起一个昵称吧！后续交互中将以此名称呼（也可稍后在设置页「通用」中修改）。留空则使用默认名称 "DevSeeker"。`,
           placeHolder: '输入昵称（留空使用默认 DevSeeker）',
           title: 'DevSeeker · 自定义昵称',
           ignoreFocusOut: false,
+          validateInput: (v) =>
+            v.trim().length > MAX_NICKNAME_LENGTH ? `昵称最长 ${MAX_NICKNAME_LENGTH} 个字符` : undefined,
         });
         const finalNickname = await updateNickname(context.globalState, nickname);
         log.info({ nickname: finalNickname }, 'DevSeeker nickname set');
@@ -183,6 +186,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         title: 'DevSeeker · 修改昵称',
         value: currentNickname === DEFAULT_NICKNAME ? '' : currentNickname,
         ignoreFocusOut: false,
+        validateInput: (v) =>
+          v.trim().length > MAX_NICKNAME_LENGTH ? `昵称最长 ${MAX_NICKNAME_LENGTH} 个字符` : undefined,
       });
       const finalNickname = await updateNickname(context.globalState, newNickname);
       vscode.window.showInformationMessage(`DevSeeker 昵称已设置为：${finalNickname}`);
