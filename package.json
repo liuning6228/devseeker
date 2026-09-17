@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.7.9",
+  "version": "0.8.0",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -922,6 +922,43 @@
           "minimum": 1,
           "description": "fetch_content QPS 限流（令牌桶每秒补充令牌数）（W8.10）"
         },
+        "devSeeker.pdf.visionOcr.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "图片 PDF（扫描件，无文本层）自动使用视觉模型（VLLM 轨）识别内容。关闭后此类 PDF 将直接报错。"
+        },
+        "devSeeker.pdf.visionOcr.scale": {
+          "type": "number",
+          "default": 1.5,
+          "minimum": 0.5,
+          "maximum": 4,
+          "description": "PDF 页渲染缩放（1.5 约 110 DPI，A4 约 915x1184）。过大将增加识别耗时与成本。"
+        },
+        "devSeeker.pdf.visionOcr.quality": {
+          "type": "number",
+          "default": 80,
+          "minimum": 30,
+          "maximum": 100,
+          "description": "PDF 页渲染 JPEG 编码质量（30-100）。"
+        },
+        "devSeeker.pdf.visionOcr.maxPages": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "视觉识别最多处理的页数；0 = 全部页面（成本随页数线性增长）。"
+        },
+        "devSeeker.pdf.translate.fontPath": {
+          "type": "string",
+          "default": "",
+          "description": "PDF 翻译使用的中文字体（.ttf/.otf）；留空 = 使用内置 Noto Sans SC（fonts/NotoSansSC-Regular.ttf）。"
+        },
+        "devSeeker.pdf.translate.segmentsPerRequest": {
+          "type": "number",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 30,
+          "description": "PDF 翻译每批发送给 LLM 的段落数（越大越快但单次输出 token 越多）。"
+        },
         "devSeeker.telemetry.enabled": {
           "type": "boolean",
           "default": false,
@@ -942,7 +979,8 @@
     "test:watch": "vitest",
     "type-check": "tsc --noEmit && npm --prefix webview-ui run type-check",
     "download-model": "node scripts/download-model.mjs",
-    "package": "npm run download-model && npm run build && node scripts/vsce-package.mjs"
+    "download-font": "node scripts/download-font.mjs",
+    "package": "npm run download-model && npm run download-font && npm run build && node scripts/vsce-package.mjs"
   },
   "workspaces": [
     "webview-ui"
@@ -962,9 +1000,10 @@
     "vitest": "^1.5.0"
   },
   "dependencies": {
+    "@cantoo/fontkit": "^2.0.12",
+    "@cantoo/pdf-lib": "^2.11.1",
     "@huggingface/transformers": "^4.2.0",
     "@img/colour": "^1.1.0",
-    "@llamaindex/liteparse": "^2.0.7",
     "better-sqlite3": "^12.9.0",
     "flatbuffers": "^25.9.23",
     "guid-typescript": "^1.0.9",

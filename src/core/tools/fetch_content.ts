@@ -19,7 +19,8 @@
  *   - embedder 不可用 → tf-idf 关键词 fallback
  *   - 无 query / 不超长 → 沿用原有截断逻辑
  * - W8.10 PDF / 缓存 / 限流：
- *   - PDF 分支：内容类型或 magic bytes 是 PDF → extractPdfText，提取失败则返回 WEB_FETCH_PDF_UNSUPPORTED
+ *   - PDF 分支：内容类型或 magic bytes 是 PDF → extractPdfTextLayer（pdfjs 统一提取），
+ *     提取失败或文本过短则返回 WEB_FETCH_PDF_UNSUPPORTED
  *   - LRU 缓存：key=`${mode}|${url}`，命中直接返回，TTL 默认 1h
  *   - QPS 限流：令牌桶 5 rps，阐述前 await
  */
@@ -38,7 +39,8 @@ import { extractRelevant } from '../web/relevance.js';
 import type { Embedder } from '../index/embedder.js';
 import { LruCache } from '../web/cache.js';
 import { RateLimiter } from '../web/rate-limiter.js';
-import { extractPdfText, isPdfContent } from '../web/pdf.js';
+import { isPdfContent } from '../web/pdf.js';
+import { extractPdfTextLayer } from '../pdf/extract.js';
 
 export interface FetchContentToolDeps {
   /** 默认 globalThis.fetch；便于单测注入 mock */
@@ -241,7 +243,7 @@ export class FetchContentTool implements ITool<FetchContentArgs, ToolResult> {
 
     const contentType = resp.headers.get('content-type') ?? 'text/plain';
 
-    // W8.10 PDF 分支：内容类型包含 pdf → 读 bytes 并尝试提取文字
+    // W8.10 PDF 分支：内容类型包含 pdf → 读 bytes 并尝试提取文字（pdfjs 统一提取）
     if (/pdf/i.test(contentType)) {
       let ab: ArrayBuffer;
       try {
@@ -261,11 +263,11 @@ export class FetchContentTool implements ITool<FetchContentArgs, ToolResult> {
           errorCode: ErrorCodes.TOOL_EXEC_FAILED,
         };
       }
-      const pdfRes = extractPdfText(bytes);
-      if (!pdfRes.ok) {
+      const layer = await extractPdfTextLayer(bytes);
+      if (!layer || !layer.usable) {
         return {
           ok: false,
-          content: `Error: PDF 文本提取失败或过短（${pdfRes.byteSize} 字节）。建议下载后用专用工具处理。`,
+          content: `Error: PDF 文本提取失败或过短（${bytes.byteLength} 字节）。建议下载后用专用工具处理。`,
           errorCode: ErrorCodes.WEB_FETCH_PDF_UNSUPPORTED,
         };
       }
@@ -274,7 +276,7 @@ export class FetchContentTool implements ITool<FetchContentArgs, ToolResult> {
         url: args.url,
         finalUrl: finalUrlPdf,
         title: args.url,
-        content: pdfRes.text,
+        content: layer.text,
         contentType,
         truncated: false,
         tookMs: 0, // buildResult 重计
@@ -297,14 +299,14 @@ export class FetchContentTool implements ITool<FetchContentArgs, ToolResult> {
     // 补充：非 pdf content-type 但 body 首段以 %PDF- 开头 → 仍走 PDF 分支
     if (isPdfContent(Buffer.from(body.slice(0, 8), 'binary'))) {
       const bytes = Buffer.from(body, 'binary');
-      const pdfRes = extractPdfText(bytes);
-      if (pdfRes.ok) {
+      const layer = await extractPdfTextLayer(bytes);
+      if (layer?.usable) {
         const finalUrlPdf = resp.url || args.url;
         const baseResult: FetchContentResult = {
           url: args.url,
           finalUrl: finalUrlPdf,
           title: args.url,
-          content: pdfRes.text,
+          content: layer.text,
           contentType: 'application/pdf',
           truncated: false,
           tookMs: 0,

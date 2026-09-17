@@ -37,6 +37,8 @@ import type { AskQuestionItem, TodoItem, TodoListPayload, ModelConfigPayload, Mo
 import { getProviderRegistry } from '../providers/registry.js';
 import type { RawLevelSettings } from '../providers/registry.js';
 import type { IProvider } from '../providers/base.js';
+import { createVisionOcrRunner } from '../core/pdf/vision-ocr.js';
+import { createPdfTranslator } from '../core/pdf/pdf-translate.js';
 import type { Message, ProviderId } from '../providers/types.js';
 import {
   type ProviderType,
@@ -73,6 +75,7 @@ import { ToolRegistry, ToolRunner } from '../core/tools/registry.js';
 import { classifyCommand } from '../core/tools/safety-classifier.js';
 import {
   ReadFileTool,
+  TranslatePdfTool,
   ListDirTool,
   WriteFileTool,
   AppendFileTool,
@@ -435,7 +438,51 @@ export class DualMindChatPanel {
     this.context = context;
     this.toolRegistry = new ToolRegistry();
     this.terminalManager = new VscodeTerminalManager();
-    this.toolRegistry.register(new ReadFileTool());
+    // 图片 PDF（扫描件）视觉识别：注入运行时解析的 Runner（provider 与配置每次调用时解析，设置变更即时生效）
+    this.toolRegistry.register(
+      new ReadFileTool({
+        getVisionOcr: () =>
+          createVisionOcrRunner({
+            getProvider: () => getProviderRegistry().getDefaultProvider('vllm'),
+            getConfig: () => {
+              const cfg = vscode.workspace.getConfiguration('devSeeker');
+              return {
+                enabled: cfg.get<boolean>('pdf.visionOcr.enabled', true),
+                scale: cfg.get<number>('pdf.visionOcr.scale', 1.5),
+                quality: cfg.get<number>('pdf.visionOcr.quality', 80),
+                maxPages: cfg.get<number>('pdf.visionOcr.maxPages', 0),
+              };
+            },
+          }),
+      }),
+    );
+    // PDF 版面保留翻译（英文→中文）：provider/字体/配置每次调用时解析
+    this.toolRegistry.register(
+      new TranslatePdfTool({
+        getTranslator: () =>
+          createPdfTranslator({
+            getProvider: () =>
+              getProviderRegistry().getDefaultProvider('llm') ??
+              getProviderRegistry().getDefaultProvider('vllm'),
+            resolveFontPath: () => {
+              const cfg = vscode.workspace.getConfiguration('devSeeker');
+              const custom = (cfg.get<string>('pdf.translate.fontPath', '') || '').trim();
+              if (custom) return custom;
+              return vscode.Uri.joinPath(
+                this.context.extensionUri,
+                'fonts',
+                'NotoSansSC-Regular.ttf',
+              ).fsPath;
+            },
+            getConfig: () => {
+              const cfg = vscode.workspace.getConfiguration('devSeeker');
+              return {
+                segmentsPerRequest: cfg.get<number>('pdf.translate.segmentsPerRequest', 12),
+              };
+            },
+          }),
+      }),
+    );
     this.toolRegistry.register(new ListDirTool());
     this.toolRegistry.register(new WriteFileTool());
     this.toolRegistry.register(new AppendFileTool());

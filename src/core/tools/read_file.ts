@@ -17,7 +17,11 @@
  * 安全：
  * - 路径必须落在 workspaceRoot 内（realpath resolve 后 startsWith）
  * - 不跟随符号链接到工作区外
- * - 不读大于 5MB 的文件（防止 OOM）
+ * - 不读大于 5MB 的文件（防止 OOM）；PDF 在视觉 OCR 可用时放宽至 50MB
+ *
+ * 文档提取：
+ * - PDF 文本层 → ../pdf/extract.ts（无文本层时视觉识别兜底，见 ../pdf/vision-ocr.ts）
+ * - Office 格式 → LiteParse（本文件内 helper）
  *
  * 输出：
  * - 带行号前缀（M9.2.1）
@@ -29,19 +33,19 @@ import { resolve as resolvePath, relative, isAbsolute, extname } from 'node:path
 import type { ITool, ToolContext, ToolResult, ToolSafetyLevel } from './types.js';
 import { formatWithLineNumbers } from './result-formatter.js';
 import { isDelegatePathAllowed } from '../subagent/delegate-guards.js';
+import { extractPdfTextLayer, type PdfTextLayerResult } from '../pdf/extract.js';
+import { extractWithLiteParse } from '../pdf/liteparse.js';
+import type { VisionOcrRunner } from '../pdf/vision-ocr.js';
 import { ErrorCodes } from '../errors/index.js';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+/** 视觉 OCR 可用时的 PDF 上限（扫描件常超 5MB；逐页渲染内存可控） */
+const MAX_PDF_WITH_OCR_SIZE = 50 * 1024 * 1024; // 50 MB
 const LARGE_FILE_HINT_THRESHOLD = 2000; // lines
 
 /** 可通过文档提取管道读取的二进制文件扩展名 */
 const BINARY_DOC_EXTENSIONS = new Set([
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-  '.odt', '.ods', '.odp',
-]);
-/** 其中仅 LiteParse 支持的格式（非 PDF） */
-const LITEPARSE_ONLY_EXTENSIONS = new Set([
-  '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
   '.odt', '.ods', '.odp',
 ]);
 
@@ -74,13 +78,29 @@ const parameters = {
   additionalProperties: false,
 } as const;
 
+/** read_file 可选依赖（生产由 panel.ts 注入；单测可不传） */
+export interface ReadFileDeps {
+  /**
+   * 视觉 OCR Runner 获取器（图片 PDF / 扫描件兜底识别）。
+   * 未注入或返回 undefined = 不做视觉识别，走既有降级错误提示。
+   */
+  getVisionOcr?: () => VisionOcrRunner | undefined;
+}
+
 export class ReadFileTool implements ITool<ReadFileArgs, ToolResult> {
   readonly name = 'read_file';
   readonly description =
     '读取工作区内文件内容，输出带行号前缀（" 12→content"）。可选 start_line / end_line 做范围读取。' +
-    '支持 PDF / Excel / Word / PPT 等二进制文档自动提取文本。';
+    '支持 PDF / Excel / Word / PPT 等二进制文档自动提取文本；图片 PDF（扫描件）可通过视觉模型识别。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'read_only';
+  /**
+   * 图片 PDF 视觉识别为分钟级长耗时（逐页渲染 + 逐页转录）；
+   * 默认 30s 工具超时会中断整条链路，与 Agent 工具同量级放宽到 600s。
+   */
+  readonly executionTimeoutMs = 600_000;
+
+  constructor(private readonly deps: ReadFileDeps = {}) {}
 
   async execute(args: ReadFileArgs, ctx: ToolContext): Promise<ToolResult> {
     // 1. 参数校验
@@ -145,6 +165,8 @@ export class ReadFileTool implements ITool<ReadFileArgs, ToolResult> {
 
     // 3. 读取文件
     let content: string;
+    /** 内容来源附加说明（如视觉模型转录），拼进最终 header */
+    let sourceNote = '';
     const ext = extname(realPath).toLowerCase();
 
     // 3a. 二进制文档格式 → 走文档提取管道
@@ -156,34 +178,59 @@ export class ReadFileTool implements ITool<ReadFileArgs, ToolResult> {
       if (!stat.isFile()) {
         return fail(ErrorCodes.TOOL_ARGS_INVALID, `路径不是文件：${file_path}`);
       }
-      if (stat.size > MAX_FILE_SIZE) {
+
+      // PDF 且有视觉 OCR 可用时放宽大小上限（扫描件常超 5MB）
+      const visionOcr = ext === '.pdf' ? this.deps.getVisionOcr?.() : undefined;
+      const sizeLimit = visionOcr ? MAX_PDF_WITH_OCR_SIZE : MAX_FILE_SIZE;
+      if (stat.size > sizeLimit) {
         return fail(
           ErrorCodes.TOOL_EXEC_FAILED,
-          `文件过大（${(stat.size / 1024 / 1024).toFixed(1)}MB > 5MB 上限）：${file_path}`,
+          `文件过大（${(stat.size / 1024 / 1024).toFixed(1)}MB > ${Math.round(sizeLimit / 1024 / 1024)}MB 上限）：${file_path}`,
         );
       }
-      const extracted = await extractDocumentText(realPath, ext);
-      if (!extracted) {
-        const formatName = ext === '.pdf' ? 'PDF' : ext.replace('.', '').toUpperCase();
-        if (ext === '.pdf') {
+
+      if (ext === '.pdf') {
+        // ── PDF：文本层提取 → 无文本层时视觉识别兜底 ──
+        const bytes = await fs.readFile(realPath);
+        const layer = await extractPdfTextLayer(bytes);
+
+        if (layer?.usable) {
+          content = layer.text;
+        } else if (layer) {
+          // 能解析但无可用文本层（图片 PDF / 扫描件）
+          const outcome = await this.extractPdfViaVision(bytes, file_path, layer, visionOcr, ctx);
+          if (outcome.kind === 'error') {
+            return fail(outcome.code, outcome.message);
+          }
+          content = outcome.text;
+          sourceNote = outcome.note;
+        } else {
+          // 无法解析：损坏 / 加密 / 非法格式
           return fail(
             ErrorCodes.TOOL_EXEC_FAILED,
-            `PDF 文本提取失败（可能是扫描件或加密文件）：${file_path}。建议用 bash 安装 poppler-utils 后执行 pdftotext。`,
+            `PDF 解析失败（疑似加密或文件损坏）：${file_path}。` +
+            (visionOcr ? '视觉识别同样依赖 PDF 解析，无法对加密文件生效。' : ''),
           );
         }
-        return fail(
-          ErrorCodes.TOOL_EXEC_FAILED,
-          `${formatName} 文件读取失败：${file_path}。` +
-          '当前环境未安装 @llamaindex/liteparse（可选依赖）。' +
-          '可通过 bash 工具安装：npm install @llamaindex/liteparse，' +
-          '或用 Python pandas/openpyxl 读取 Excel。',
-        );
+      } else {
+        // ── Office 格式：LiteParse 通道 ──
+        const extracted = await extractWithLiteParse(realPath);
+        if (!extracted) {
+          const formatName = ext.replace('.', '').toUpperCase();
+          return fail(
+            ErrorCodes.TOOL_EXEC_FAILED,
+            `${formatName} 文件读取失败：${file_path}。` +
+            'LiteParse 文档提取不可用或失败（可选依赖加载异常 / 文档损坏 / 格式不受支持）；' +
+            '可改用 bash 工具处理（如 Python pandas/openpyxl 读取 Excel、python-docx 读取 Word）。',
+          );
+        }
+        content = extracted;
       }
+
       // 提取成功 → 走下方行号格式化
       if (ctx.fileStateCache) {
         ctx.fileStateCache.record(realPath, stat.mtimeMs);
       }
-      content = extracted;
     } else {
       // 3b. 普通文本文件
       try {
@@ -238,8 +285,8 @@ export class ReadFileTool implements ITool<ReadFileArgs, ToolResult> {
     // 5. 组装最终内容
     const header =
       start_line == null && end_line == null
-        ? `Contents of ${file_path}, from line 1-${totalLines} (total ${totalLines} lines)\n\`\`\`\n`
-        : `Contents of ${file_path}, from line ${s}-${e} (total ${totalLines} lines)\n\`\`\`\n`;
+        ? `Contents of ${file_path}, from line 1-${totalLines} (total ${totalLines} lines)${sourceNote}\n\`\`\`\n`
+        : `Contents of ${file_path}, from line ${s}-${e} (total ${totalLines} lines)${sourceNote}\n\`\`\`\n`;
     const footer = '```\n';
 
     let body = header + numbered + footer;
@@ -250,6 +297,68 @@ export class ReadFileTool implements ITool<ReadFileArgs, ToolResult> {
     }
 
     return ok(body, { filePath: file_path, totalLines, shown: e - s + 1 });
+  }
+
+  /**
+   * 图片 PDF 视觉识别兜底（整体兜底策略：全部页面渲染 → VLLM 逐页转录）。
+   *
+   * 降级规则：
+   * - 未注入 Runner 或未启用：残余文本可用则返回残余文本，否则报「未配置视觉模型」
+   * - Runner 返回 null（全部页失败）：同上回退
+   * - Runner 抛错：取消优先；其余情况回退残余文本或报「视觉识别失败」
+   */
+  private async extractPdfViaVision(
+    bytes: Uint8Array,
+    filePath: string,
+    layer: PdfTextLayerResult,
+    visionOcr: VisionOcrRunner | undefined,
+    ctx: ToolContext,
+  ): Promise<{ kind: 'text'; text: string; note: string } | { kind: 'error'; code: string; message: string }> {
+    const residual = layer.text.trim();
+
+    if (!visionOcr) {
+      if (residual) return { kind: 'text', text: layer.text, note: '' };
+      return {
+        kind: 'error',
+        code: ErrorCodes.TOOL_EXEC_FAILED,
+        message:
+          `PDF 无可用文本层（图片 PDF / 扫描件）：${filePath}。` +
+          '未配置视觉模型（VLLM），无法识别图片内容；' +
+          '可在 DevSeeker 设置中配置视觉模型，或用 bash 安装 poppler-utils 后执行 pdftoppm + OCR。',
+      };
+    }
+
+    ctx.emitOutput?.(`[read_file] PDF 无文本层，尝试视觉模型识别（共 ${layer.pageCount} 页）…`);
+    try {
+      const ocr = await visionOcr.run(bytes, {
+        signal: ctx.signal,
+        onProgress: (m) => ctx.emitOutput?.(m),
+      });
+      if (ocr) {
+        const total = ocr.pages + ocr.failedPages.length;
+        const note = `, scanned PDF, transcribed by vision model (${ocr.pages}/${total} page(s) recognized)`;
+        return { kind: 'text', text: ocr.text, note };
+      }
+      // Runner 返回 null：未启用 / 全部页面失败
+      if (residual) return { kind: 'text', text: layer.text, note: '' };
+      return {
+        kind: 'error',
+        code: ErrorCodes.TOOL_EXEC_FAILED,
+        message:
+          `PDF 无文本层且视觉识别失败（所有页面均失败）：${filePath}。` +
+          '请检查视觉模型（VLLM）配置、API Key 与网络连通性。',
+      };
+    } catch (e) {
+      if (ctx.signal.aborted) {
+        return { kind: 'error', code: ErrorCodes.TASK_LOOP_ABORTED, message: '任务已取消' };
+      }
+      if (residual) return { kind: 'text', text: layer.text, note: '' };
+      return {
+        kind: 'error',
+        code: ErrorCodes.TOOL_EXEC_FAILED,
+        message: `视觉识别失败：${(e as Error).message}：${filePath}`,
+      };
+    }
   }
 }
 
@@ -269,113 +378,4 @@ function ok(content: string, display?: Record<string, unknown>): ToolResult {
 
 function fail(code: string, message: string): ToolResult {
   return { ok: false, content: `Error: ${message}`, errorCode: code };
-}
-
-// ─────────── 二进制文档提取 ───────────
-
-/**
- * 从二进制文档（PDF / Excel / Word / PPT）中提取纯文本。
- *
- * 策略：
- * - PDF → pdfjs-dist（已内置，支持中文 PDF）
- * - Office 格式 → @llamaindex/liteparse（optionalDependency，需用户安装）
- *
- * @param absPath 文件绝对路径
- * @param ext 小写扩展名（含点号）
- * @returns 提取的文本，失败返回 null
- */
-async function extractDocumentText(absPath: string, ext: string): Promise<string | null> {
-  // PDF → pdfjs-dist
-  if (ext === '.pdf') {
-    return await extractPdfText(absPath);
-  }
-
-  // Office 格式 → LiteParse
-  if (LITEPARSE_ONLY_EXTENSIONS.has(ext)) {
-    return await extractWithLiteParse(absPath);
-  }
-
-  return null;
-}
-
-/**
- * 使用 pdfjs-dist 提取 PDF 文本。
- * 复用 asset-indexer/pdf.ts 的提取逻辑，但只返回文本字符串。
- */
-async function extractPdfText(absPath: string): Promise<string | null> {
-  try {
-    // Node.js 环境必须用 legacy 构建，否则 DOMMatrix is not defined
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-      pdfjs.GlobalWorkerOptions.workerSrc = '';
-    }
-
-    const data = new Uint8Array(await fs.readFile(absPath));
-    const doc = await pdfjs.getDocument({ data }).promise;
-    const maxPages = Math.min(doc.numPages, 100);
-    const pages: string[] = [];
-
-    for (let i = 1; i <= maxPages; i++) {
-      const page = await doc.getPage(i);
-      const textContent = await page.getTextContent();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const items = textContent.items as any[];
-      // 按垂直位置排序还原阅读顺序
-      const sorted = items.slice().sort((a: any, b: any) => {
-        const aY = Math.round(a.transform?.[5] ?? 0);
-        const bY = Math.round(b.transform?.[5] ?? 0);
-        if (Math.abs(aY - bY) < 10) return 0;
-        return bY - aY;
-      });
-      const text = sorted
-        .map((item: any) => item.str ?? '')
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (text) pages.push(text);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (doc as any).destroy();
-
-    const fullText = pages.join('\n\n');
-    return fullText.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 使用 @llamaindex/liteparse 提取 Office 文档文本。
- * LiteParse 是 optionalDependency，不可用时返回 null。
- */
-async function extractWithLiteParse(absPath: string): Promise<string | null> {
-  try {
-    // 动态导入，不可用时抛异常被捕获
-    const mod = await tryLoadLiteParse();
-    if (!mod) return null;
-
-    const parser = new mod.LiteParse({
-      ocrEnabled: false,
-      quiet: true,
-      outputFormat: 'text',
-      maxPages: 100,
-    });
-    const result = await parser.parse(absPath);
-    const text = result?.text?.trim();
-    return text && text.length > 0 ? text : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 尝试加载 @llamaindex/liteparse。不可用时返回 null。
- */
-async function tryLoadLiteParse(): Promise<any | null> {
-  try {
-    return await import('@llamaindex/liteparse');
-  } catch {
-    return null;
-  }
 }

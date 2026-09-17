@@ -29,6 +29,7 @@ import { FetchContentTool } from '../../src/core/tools/fetch_content.js';
 import { ReadUrlTool } from '../../src/core/tools/read_url.js';
 import type { ToolContext } from '../../src/core/tools/types.js';
 import { ErrorCodes } from '../../src/core/errors/index.js';
+import { buildValidPdf } from './pdf-fixtures.js';
 import type {
   FetchImpl,
   ISearchProvider,
@@ -311,15 +312,13 @@ describe('FetchContentTool', () => {
 
   // ──────────── W8.10: PDF branch ────────────
 
-  it('extracts text from application/pdf response', async () => {
-    const body =
-      'BT /F1 12 Tf 72 720 Td (Quarterly financial report for fiscal year 2026 showing revenue growth across all segments.) Tj ET';
-    const pdfBytes = Buffer.from(
-      `%PDF-1.4\n1 0 obj << >> endobj\n2 0 obj << /Length ${body.length} >>\nstream\n${body}\nendstream\nendobj\n`,
-      'latin1',
-    );
+  it('extracts text from application/pdf response', { timeout: 30_000 }, async () => {
+    // pdfjs 可解析的合法 PDF（含 xref）；文本提取已统一为 extractPdfTextLayer
+    const pdfBytes = buildValidPdf([
+      'Quarterly financial report for fiscal year 2026 showing revenue growth across all segments.',
+    ]);
     const fetchImpl = (async () =>
-      new Response(pdfBytes, {
+      new Response(new Uint8Array(pdfBytes), {
         status: 200,
         headers: { 'content-type': 'application/pdf' },
       })) as FetchImpl;
@@ -337,11 +336,11 @@ describe('FetchContentTool', () => {
     expect(r.content).toContain('Quarterly financial report');
   });
 
-  it('returns WEB_FETCH_PDF_UNSUPPORTED for PDF with too little extractable text', async () => {
-    // PDF bytes with no Tj/TJ operators → extract yields empty
-    const pdfBytes = Buffer.from('%PDF-1.4\nbinary garbage with no text operators', 'latin1');
+  it('returns WEB_FETCH_PDF_UNSUPPORTED for PDF with too little extractable text', { timeout: 30_000 }, async () => {
+    // 合法 PDF 但无文本层（空白页）→ usable=false
+    const pdfBytes = buildValidPdf(['']);
     const fetchImpl = (async () =>
-      new Response(pdfBytes, {
+      new Response(new Uint8Array(pdfBytes), {
         status: 200,
         headers: { 'content-type': 'application/pdf' },
       })) as FetchImpl;

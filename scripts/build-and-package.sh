@@ -47,6 +47,27 @@ else
   fail "编译失败，请修复后重试"
 fi
 
+# ─────────── 1b. bundle 回归断言（pdfjs / liteparse 必须保持 external） ───────────
+# 历史故障：pdfjs-dist 被内联进 CJS bundle 后 import.meta 丢失，
+# DOMMatrix polyfill 失败 → 模块初始化直接抛 ReferenceError，
+# 发行版中 read_file 读 PDF 100% 失败（错误信息还误导为扫描件/加密）。
+STEP=$((STEP+1))
+echo ""
+echo "━━━ Step $STEP: bundle 回归断言 ━━━"
+if ! grep -q 'pdfjs-dist/legacy/build/pdf.mjs' out/extension.js; then
+  fail "bundle 断言失败：未找到 pdfjs 动态 import —— pdfjs-dist 可能被重新内联，PDF 读取将在发行版失效"
+fi
+if grep -q 'new DOMMatrix' out/extension.js; then
+  fail "bundle 断言失败：检测到内联的 pdfjs 代码（new DOMMatrix）—— 会触发 DOMMatrix is not defined"
+fi
+if grep -q 'liteparse/dist/native' out/extension.js; then
+  fail "bundle 断言失败：检测到内联的 liteparse native.js —— Office 文档读取将在发行版失效"
+fi
+if ! grep -q '@cantoo/pdf-lib' out/extension.js; then
+  fail "bundle 断言失败：未找到 @cantoo/pdf-lib 动态 import —— PDF 翻译功能将在发行版失效"
+fi
+pass "pdfjs-dist / @llamaindex/liteparse / @cantoo 均保持 external（未内联）"
+
 # ─────────── 2. 打包 VSIX ───────────
 STEP=$((STEP+1))
 echo ""

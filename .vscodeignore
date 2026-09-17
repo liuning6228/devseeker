@@ -28,6 +28,9 @@ node_modules/pino-pretty/**
 # ─── 离线 BERT 模型（必须包含） ───
 !models/**
 
+# ─── PDF 翻译中文字体（必须包含） ───
+!fonts/**
+
 # ─── DevSeeker 技能（保留 SKILL.md） ───
 .my-agent/**
 !.my-agent/skills/**

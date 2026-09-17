@@ -23,6 +23,8 @@ test-transformers.js
 
 # Offline BERT model (downloaded by npm run package)
 models/
+# PDF 翻译中文字体（scripts/download-font.mjs 拉取，随 VSIX 分发）
+fonts/
 
 # Old logo preview page
 logo.html

@@ -34,5 +34,4 @@ export { LruCache } from './cache.js';
 export type { LruCacheOptions, LruEntry } from './cache.js';
 export { RateLimiter } from './rate-limiter.js';
 export type { RateLimiterOptions } from './rate-limiter.js';
-export { isPdfContent, extractPdfText } from './pdf.js';
-export type { PdfExtractResult } from './pdf.js';
+export { isPdfContent } from './pdf.js';

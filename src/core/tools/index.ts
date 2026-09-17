@@ -11,6 +11,12 @@ export * from './types.js';
 export { formatWithLineNumbers, detectLineNumberPrefix } from './result-formatter.js';
 export { ToolRegistry, ToolRunner, type RunToolOptions } from './registry.js';
 export { ReadFileTool, type ReadFileArgs } from './read_file.js';
+export {
+  TranslatePdfTool,
+  type TranslatePdfArgs,
+  type TranslatePdfDeps,
+  parsePageRange,
+} from './translate_pdf.js';
 export { ListDirTool, type ListDirArgs } from './list_dir.js';
 export { WriteFileTool, type WriteFileArgs, type WriteFileMode } from './write_file.js';
 export { AppendFileTool, type AppendFileArgs } from './append_file.js';

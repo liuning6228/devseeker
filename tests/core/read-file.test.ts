@@ -17,11 +17,12 @@
  * - 行号前缀格式（6 字符右对齐 + →）
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { ReadFileTool } from '../../src/core/tools/read_file.js';
 import { formatWithLineNumbers, detectLineNumberPrefix } from '../../src/core/tools/result-formatter.js';
 import { ErrorCodes } from '../../src/core/errors/index.js';
 import { initLogger } from '../../src/infra/logger.js';
+import { buildValidPdf } from './pdf-fixtures.js';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -221,5 +222,81 @@ describe('ReadFileTool - 子代理路径白名单（角色范围工具层硬执�
     const r = await tool.execute({ file_path: 'hello.txt' }, ctx());
     expect(r.ok).toBe(true);
     expect(r.content).toContain('line1');
+  });
+});
+
+describe('ReadFileTool - 图片 PDF 视觉识别兜底', () => {
+  let pdfRoot: string;
+
+  beforeAll(async () => {
+    pdfRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dualmind-readfile-pdf-'));
+    // 空白页 PDF（模拟无文本层的扫描件）
+    await fs.writeFile(path.join(pdfRoot, 'scanned.pdf'), buildValidPdf(['']));
+    // 有文本层的 PDF（正常路径，不应触发视觉识别）
+    await fs.writeFile(
+      path.join(pdfRoot, 'text.pdf'),
+      buildValidPdf(['A text layer document long enough to pass the usable threshold of fifty chars.']),
+    );
+  });
+
+  afterAll(async () => {
+    await fs.rm(pdfRoot, { recursive: true, force: true });
+  });
+
+  function pdfCtx(signal = new AbortController().signal) {
+    return { workspaceRoot: pdfRoot, signal, taskId: 't1', toolCallId: 'c1' };
+  }
+
+  it('无文本层 + Runner 可用 → 返回识别文本并标注来源', { timeout: 30_000 }, async () => {
+    const run = vi.fn(async () => ({
+      text: '--- Page 1 ---\nidentified scanned content',
+      pages: 1,
+      failedPages: [] as number[],
+      skippedRenderPages: [] as number[],
+    }));
+    const tool = new ReadFileTool({ getVisionOcr: () => ({ run }) });
+
+    const r = await tool.execute({ file_path: 'scanned.pdf' }, pdfCtx());
+
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('identified scanned content');
+    expect(r.content).toContain('scanned PDF, transcribed by vision model');
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('无文本层 + Runner 返回 null → 视觉识别失败错误', { timeout: 30_000 }, async () => {
+    const tool = new ReadFileTool({ getVisionOcr: () => ({ run: async () => null }) });
+
+    const r = await tool.execute({ file_path: 'scanned.pdf' }, pdfCtx());
+
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.TOOL_EXEC_FAILED);
+    expect(r.content).toContain('视觉识别失败');
+  });
+
+  it('无文本层 + 未注入 Runner → 提示未配置视觉模型', { timeout: 30_000 }, async () => {
+    const tool = new ReadFileTool();
+
+    const r = await tool.execute({ file_path: 'scanned.pdf' }, pdfCtx());
+
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.TOOL_EXEC_FAILED);
+    expect(r.content).toContain('未配置视觉模型');
+  });
+
+  it('有文本层 → 正常走文本提取，不触发视觉识别', { timeout: 30_000 }, async () => {
+    const run = vi.fn(async () => ({
+      text: 'should not be used',
+      pages: 1,
+      failedPages: [] as number[],
+      skippedRenderPages: [] as number[],
+    }));
+    const tool = new ReadFileTool({ getVisionOcr: () => ({ run }) });
+
+    const r = await tool.execute({ file_path: 'text.pdf' }, pdfCtx());
+
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain('A text layer document');
+    expect(run).not.toHaveBeenCalled();
   });
 });

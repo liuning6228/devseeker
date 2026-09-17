@@ -19,7 +19,29 @@ const common = {
   // pino-pretty 只在开发模式使用，生产模式不捆绑
   // @huggingface/transformers：含动态 import + WASM + ONNX .node 二进制，无法 bundle
   // onnxruntime-node/web：含原生 .node 二进制和 WASM
-  external: ['vscode', 'pino-pretty', '@huggingface/transformers', 'onnxruntime-web', 'onnxruntime-node', 'sharp', '@img/*'],
+  //
+  // pdfjs-dist / @napi-rs/canvas / @llamaindex/liteparse 必须 external：
+  // 这三个包被内联进 CJS bundle 后，其内部 `import.meta.url` 被 esbuild 置空，
+  // 导致 createRequire(undefined)/fileURLToPath(undefined) 抛错 → pdfjs 的
+  // DOMMatrix polyfill 失败（模块级 `new DOMMatrix()` 直接抛 ReferenceError）、
+  // liteparse 的 native 绑定加载失败。external 后保留原生 import()，
+  // 运行时由 Node 从 node_modules 加载真实文件（VSIX 已随包携带）。
+  external: [
+    'vscode',
+    'pino-pretty',
+    '@huggingface/transformers',
+    'onnxruntime-web',
+    'onnxruntime-node',
+    'sharp',
+    '@img/*',
+    'pdfjs-dist',
+    'pdfjs-dist/*',
+    '@napi-rs/canvas',
+    '@llamaindex/liteparse',
+    // PDF 翻译：纯 JS，但随 pdfjs 先例保持 external（bundle 更精简，VSIX 随包携带）
+    '@cantoo/pdf-lib',
+    '@cantoo/fontkit',
+  ],
 };
 
 const extensionConfig = {

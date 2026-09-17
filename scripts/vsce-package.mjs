@@ -155,7 +155,8 @@ function main() {
     mkdirSync(workDir, { recursive: true });
     
     // 复制项目文件
-    const items = ['out', 'models', 'media', '.github', 'package.json', '.vscodeignore',
+    // 注意：fonts/ 是 PDF 翻译内置中文字体（下载产物），必须随包携带
+    const items = ['out', 'models', 'fonts', 'media', '.github', 'package.json', '.vscodeignore',
                    'CHANGELOG.md', 'README.md', 'LICENSE.txt', 'logo.png', 'logo.svg'];
     for (const item of items) {
       const src = join(ROOT, item);
@@ -169,9 +170,15 @@ function main() {
     if (existsSync(wvuDist)) cpSync(wvuDist, join(workDir, 'webview-ui', 'dist'), { recursive: true });
     
     // 收集所有依赖并复制
+    // 注意：根 optionalDependencies 也必须遍历（@llamaindex/liteparse 在 npm 去重后
+    // 仅保留在 optionalDependencies，漏掉会导致发行版 Office 文档读取失效）
     console.log('[1/3] Collecting dependencies...');
     const allDeps = new Set();
-    for (const dep of Object.keys(pkg.dependencies || {})) {
+    const rootDeps = [
+      ...Object.keys(pkg.dependencies || {}),
+      ...Object.keys(pkg.optionalDependencies || {}),
+    ];
+    for (const dep of rootDeps) {
       allDeps.add(dep);
       getAllDependencies(dep).forEach(d => allDeps.add(d));
     }
