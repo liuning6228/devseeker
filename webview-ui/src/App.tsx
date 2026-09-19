@@ -47,15 +47,41 @@ import './styles/model-config.css';
 import { announceToScreenReader } from './utils/accessibility';
 import { postToHost } from './vscode-api';
 
-/** 非首次启动标志（localStorage） */
-const FIRST_RUN_KEY = 'devSeeker.first_run_done';
-
+/**
+ * 顶层 App：先向 extension host 询问首启状态（判定源：globalState），
+ * 再决定渲染首启向导（OnboardingView）还是主界面（AppWithNav）。
+ * 不再使用 localStorage 判定——清缓存/换环境不会重弹向导，与昵称、向导完成标记同源。
+ */
 export function App(): JSX.Element {
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    return !localStorage.getItem(FIRST_RUN_KEY);
-  });
+  // 'loading' = 等待 host 首启判定（postMessage 往返，极短）
+  const [onboardingState, setOnboardingState] = useState<'loading' | 'show' | 'hide'>('loading');
+  const firstRunRequestedRef = useRef(false);
 
-  const handleOnboardingComplete = (apiKey: string, model: string, provider: string) => {
+  // 挂载后请求一次首启状态（ref 防 StrictMode 双挂载重发）
+  useEffect(() => {
+    if (firstRunRequestedRef.current) return;
+    firstRunRequestedRef.current = true;
+    postToHost({ type: 'get_first_run_status' });
+  }, []);
+
+  // 监听 host 的首启状态推送
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      const msg = ev.data;
+      if (msg?.type === 'first_run_status') {
+        setOnboardingState(msg.isFirstRun ? 'show' : 'hide');
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  const handleOnboardingComplete = (
+    apiKey: string,
+    model: string,
+    provider: string,
+    nickname: string,
+  ) => {
     // 先写 provider（触发 extension host 自动联动 model + baseUrl）
     postToHost({
       type: 'update_model_config',
@@ -84,11 +110,17 @@ export function App(): JSX.Element {
         value: model,
       });
     }
-    localStorage.setItem(FIRST_RUN_KEY, '1');
-    setShowOnboarding(false);
+    // 完成首启：昵称 + 完成标记持久化到 extension 侧 globalState（空昵称回退默认名）
+    postToHost({ type: 'complete_onboarding', nickname });
+    setOnboardingState('hide');
   };
 
-  if (showOnboarding) {
+  // 等待 host 判定：渲染空容器（仅为避免闪现错误界面，通常一瞬即逝）
+  if (onboardingState === 'loading') {
+    return <div className="flex flex-col h-screen" />;
+  }
+
+  if (onboardingState === 'show') {
     return (
       <div className="flex flex-col h-screen">
         <OnboardingView onComplete={handleOnboardingComplete} />

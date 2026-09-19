@@ -27,7 +27,6 @@ import {
   getNickname,
   DEFAULT_NICKNAME,
   MAX_NICKNAME_LENGTH,
-  NICKNAME_STATE_KEY,
 } from './infra/nickname.js';
 import { perfProbe } from './infra/perf-probe.js';
 import { AgentError, toAgentError } from './core/errors/index.js';
@@ -112,30 +111,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log.warn({ err: String(e) }, 'DeepSeek model name migration failed (non-fatal)');
   }
 
-  // 昵称功能：首次使用时提示用户给 DevSeeker 起一个定制昵称
-  // 存储在 globalState 中，跨 workspace 共享；内存快照由 nickname 单例统一维护
-  const firstRunNickname = context.globalState.get<string>(NICKNAME_STATE_KEY);
+  // 昵称功能：载入 globalState 中的昵称快照（跨 workspace 共享）。
+  // 首次使用不再弹原生输入框——昵称收集已并入 Webview 首启向导（OnboardingView），
+  // 由 panel 侧的 get_first_run_status / complete_onboarding 协议统一处理
+  // （判定与持久化均走 globalState，见 DualMindChatPanel#isFirstRun）。
   initNickname(context.globalState);
-  if (!firstRunNickname) {
-    // 非阻塞：异步弹出输入框，不阻塞扩展激活
-    void (async () => {
-      try {
-        const nickname = await vscode.window.showInputBox({
-          prompt: `给你的 AI 助手起一个昵称吧！后续交互中将以此名称呼（也可稍后在设置页「通用」中修改）。留空则使用默认名称 "DevSeeker"。`,
-          placeHolder: '输入昵称（留空使用默认 DevSeeker）',
-          title: 'DevSeeker · 自定义昵称',
-          ignoreFocusOut: false,
-          validateInput: (v) =>
-            v.trim().length > MAX_NICKNAME_LENGTH ? `昵称最长 ${MAX_NICKNAME_LENGTH} 个字符` : undefined,
-        });
-        const finalNickname = await updateNickname(context.globalState, nickname);
-        log.info({ nickname: finalNickname }, 'DevSeeker nickname set');
-      } catch (e) {
-        // 输入框异常：回退默认值，避免下次启动反复弹窗
-        await updateNickname(context.globalState, DEFAULT_NICKNAME);
-      }
-    })();
-  }
 
   // W10.4 · 激活期后台 GC：清理老 checkpoint，防止 .devseeker/checkpoints 无限膨胀
   // v1.9.0: 使用 SQLite 存储（自动从 JSON 迁移后 GC 直接 SQL 完成）

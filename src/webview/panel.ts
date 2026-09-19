@@ -210,6 +210,7 @@ import { SqliteCheckpointStore } from '../core/storage/sqlite-checkpoint-store.j
 import { getLogger } from '../infra/logger.js';
 import { perfProbe } from '../infra/perf-probe.js';
 import { getNickname as readNickname, updateNickname } from '../infra/nickname.js';
+import { isFirstRun as checkFirstRun, ONBOARDING_COMPLETED_KEY } from '../infra/onboarding.js';
 import { AgentError, toAgentError, ErrorCodes, classifyErrorCode, FAILOVER_STRATEGY, type FailoverReason } from '../core/errors/index.js';
 import { InlineEditHistory } from '../core/inline-edit/history.js';
 
@@ -910,6 +911,32 @@ export class DualMindChatPanel {
   private async handleSetNickname(nickname: string): Promise<void> {
     const finalNickname = await updateNickname(this.context.globalState, nickname);
     log.info({ nickname: finalNickname }, 'nickname updated from settings page');
+    this.pushNicknamePublic();
+  }
+
+  // ─────────── 首启向导（Onboarding） ───────────
+
+  /**
+   * 首启判定：从未完成向导且从未设置过昵称（详见 infra/onboarding.ts）。
+   * 判定源统一在 extension 侧 globalState，不再依赖 webview localStorage。
+   */
+  private isFirstRun(): boolean {
+    return checkFirstRun(this.context.globalState);
+  }
+
+  /** 推送首启状态（回应 webview 的 get_first_run_status，供 App 顶层决定是否显示向导） */
+  private pushFirstRunStatus(): void {
+    this.post({ type: 'first_run_status', isFirstRun: this.isFirstRun() });
+  }
+
+  /**
+   * 首启向导完成/跳过：昵称规范化持久化（空串回退默认名）+ 写入完成标记，
+   * 并复用 pushNicknamePublic 广播昵称（完成向导后主界面挂载即可拿到）。
+   */
+  private async handleCompleteOnboarding(nickname: string): Promise<void> {
+    const finalNickname = await updateNickname(this.context.globalState, nickname);
+    await this.context.globalState.update(ONBOARDING_COMPLETED_KEY, true);
+    log.info({ nickname: finalNickname }, 'onboarding completed from webview');
     this.pushNicknamePublic();
   }
 
@@ -1839,6 +1866,14 @@ export class DualMindChatPanel {
 
       case 'set_nickname':
         void this.handleSetNickname(msg.nickname);
+        break;
+
+      case 'get_first_run_status':
+        this.pushFirstRunStatus();
+        break;
+
+      case 'complete_onboarding':
+        void this.handleCompleteOnboarding(msg.nickname);
         break;
 
       case 'new_session':

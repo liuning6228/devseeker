@@ -350,7 +350,11 @@ export type WebviewInboundMessage =
       };
     }
   /** 昵称：设置页「通用」提交昵称变更（持久化到 globalState，空串回退默认名） */
-  | { type: 'set_nickname'; nickname: string };
+  | { type: 'set_nickname'; nickname: string }
+  /** 首启向导：请求当前首启状态（判定源统一在 extension 侧 globalState，非 localStorage） */
+  | { type: 'get_first_run_status' }
+  /** 首启向导完成/跳过：持久化完成标记 + 昵称（空串回退默认名），不再弹向导 */
+  | { type: 'complete_onboarding'; nickname: string };
 
 // ─────────── Todo（W7e4 ·   todo_write 对齐） ───────────
 
@@ -766,4 +770,6 @@ export type WebviewOutboundMessage =
   /** 索引探活结果推送（Extension → Webview，回应 probe_embed） */
   | { type: 'embed_probe_result'; payload: EmbedProbeResultPayload }
   /** 昵称推送（Extension → Webview，首次设置后推送用户自定义昵称） */
-  | { type: 'nickname'; nickname: string };
+  | { type: 'nickname'; nickname: string }
+  /** 首启状态推送（Extension → Webview，回应 get_first_run_status） */
+  | { type: 'first_run_status'; isFirstRun: boolean };

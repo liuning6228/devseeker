@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Check, Key, Cpu } from 'lucide-react';
+import { Check, Key, Cpu, User } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { Button } from '../ui/button.js';
 import { DebouncedTextField } from '../common/DebouncedTextField.js';
 
 interface OnboardingViewProps {
-  onComplete: (apiKey: string, model: string, provider: string) => void;
+  onComplete: (apiKey: string, model: string, provider: string, nickname: string) => void;
   className?: string;
 }
 
@@ -59,6 +59,8 @@ export function OnboardingView({ onComplete, className }: OnboardingViewProps) {
   const [selectedProvider, setSelectedProvider] = useState('deepseek');
   const [apiKey, setApiKey] = useState('');
   const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash');
+  // 助手昵称（可选）：留空由 extension 侧回退默认名 "DevSeeker"
+  const [nickname, setNickname] = useState('');
 
   const currentProvider = PROVIDERS.find((p) => p.id === selectedProvider)!;
   const currentModels = currentProvider.models;
@@ -80,8 +82,8 @@ export function OnboardingView({ onComplete, className }: OnboardingViewProps) {
             <Cpu className="h-6 w-6 text-vscode-btn-bg" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-vscode-fg">选择模型</h2>
-            <p className="text-sm text-vscode-fg/60">选择 Provider 并填入 API Key，即可开始使用</p>
+            <h2 className="text-lg font-semibold text-vscode-fg">初始设置</h2>
+            <p className="text-sm text-vscode-fg/60">选择 Provider 并填入 API Key，为助手起一个昵称，即可开始使用</p>
           </div>
         </div>
 
@@ -147,18 +149,33 @@ export function OnboardingView({ onComplete, className }: OnboardingViewProps) {
             type="password"
           />
         </div>
+
+        {/* 助手昵称（可选） */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <User className="h-4 w-4 text-vscode-fg/50" />
+            <span className="text-xs text-vscode-fg/50 font-medium uppercase tracking-wider">
+              助手昵称（可选）
+            </span>
+          </div>
+          <DebouncedTextField
+            value={nickname}
+            onChange={setNickname}
+            placeholder="留空则使用默认名称 DevSeeker（可稍后在设置页「通用」中修改）"
+          />
+        </div>
       </div>
 
       {/* 按钮 */}
       <div className="flex justify-between items-center w-full mt-8">
         <button
           type="button"
-          onClick={() => onComplete('', '', selectedProvider)}
+          onClick={() => onComplete('', '', selectedProvider, nickname)}
           className="text-sm text-vscode-fg/50 hover:text-vscode-fg/80 transition-colors cursor-pointer"
         >
           跳过，先逛逛
         </button>
-        <Button onClick={() => onComplete(apiKey, selectedModel, selectedProvider)} disabled={!canComplete}>
+        <Button onClick={() => onComplete(apiKey, selectedModel, selectedProvider, nickname)} disabled={!canComplete}>
           开始使用
         </Button>
       </div>
