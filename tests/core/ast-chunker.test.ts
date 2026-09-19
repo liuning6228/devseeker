@@ -201,6 +201,15 @@ fn sub(a: i32, b: i32) -> i32 {
     expect(chunks.length).toBeGreaterThanOrEqual(2);
   });
 
+  // 修复回归：web-tree-sitter 加载链路（init 前缓存类引用 + locateFile 真实 wasm 路径）
+  // 修复后 AST 分支应当稳定工作；节点级 chunk 会携带 `// file:` 上下文前缀（仅 AST 分支添加）
+  it('AST 可用时输出带 // file: 上下文前缀的节点级 chunk', async () => {
+    const code = `function alpha() { return 1; }\n\nfunction beta() { return 2; }\n`;
+    const chunks = await astChunkText('nodes.ts', code);
+    expect(chunks.some((c) => c.text.startsWith('// file:'))).toBe(true);
+    expect(chunks.some((c) => c.text.includes('function alpha'))).toBe(true);
+  });
+
   // 空文件
   it('空文件返回空数组', async () => {
     const chunks = await astChunkText('empty.ts', '');

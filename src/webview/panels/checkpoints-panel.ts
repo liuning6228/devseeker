@@ -502,6 +502,28 @@ function formatSize(n: number | undefined): string {
 
 // ─────────── 命令 ───────────
 
+// ─────────── 面板实例跟踪（供 devSeeker.checkpoints.refresh 命令调用） ───────────
+
+let activePanel: vscode.WebviewPanel | undefined;
+let activeRerender: (() => Promise<void>) | undefined;
+
+/**
+ * 刷新已打开的 Checkpoint 时间线面板（重载数据并重渲染）。
+ *
+ * 背景：主面板在 checkpoint 变更后调用命令 devSeeker.checkpoints.refresh，
+ * 但该命令从未注册 → 每次操作产生一条 unhandledRejection（error.log 34 条）。
+ * 现由 extension.ts 注册该命令并转发到本函数；面板未打开时静默返回 false。
+ */
+export async function refreshCheckpointsPanel(): Promise<boolean> {
+  if (!activePanel || !activeRerender) return false;
+  try {
+    await activeRerender();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 打开 Checkpoint 时间线面板。
  * 若无数据源（DualMindChatPanel 未激活），提示并退出。
@@ -534,6 +556,10 @@ export async function openCheckpointsPanel(
     );
   };
   await rerender();
+
+  // 登记实例：供 refreshCheckpointsPanel 刷新（多面板时以最新一个为准）
+  activePanel = panel;
+  activeRerender = rerender;
 
   const sub = panel.webview.onDidReceiveMessage(async (msg) => {
     const m = msg as { type?: string; id?: string; a?: string; b?: string } | undefined;
@@ -590,6 +616,10 @@ export async function openCheckpointsPanel(
   });
   panel.onDidDispose(() => {
     sub.dispose();
+    if (activePanel === panel) {
+      activePanel = undefined;
+      activeRerender = undefined;
+    }
   });
   return panel;
 }

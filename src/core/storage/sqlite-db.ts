@@ -458,7 +458,8 @@ async function defaultFactory(filePath: string): Promise<SqliteDatabaseLike> {
     log.info({ path: filePath }, 'SQLite database opened (better-sqlite3)');
     return new BSqlite3Db(db, filePath);
   } catch (err) {
-    log.warn({ err: String(err) }, 'better-sqlite3 not available, falling back to sql.js');
+    // 预期降级路径（VSIX 未携带原生绑定）：用 debug 级避免每次激活刷 1KB 的 bindings 查找列表
+    log.debug({ err: String(err) }, 'better-sqlite3 not available, falling back to sql.js');
   }
 
   // 2) better-sqlite3 不可用 → fallback 到 sql.js（WASM）

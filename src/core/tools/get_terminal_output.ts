@@ -58,6 +58,13 @@ export class GetTerminalOutputTool
     '读取后台终端（bash is_background=true 返回的 terminal_id）的最新输出与状态。可选 wait_seconds 等待结束（最长 600s），kill=true 读完终止。适用于编译/打包/上传/下载等长时间任务。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'read_only';
+  /**
+   * 执行超时：本工具支持 wait_seconds 最长 600s 的轮询等待，必须显式声明
+   * 超过默认 30s 的预算，否则 ToolRunner 会在 30s 强杀（TOOL.EXEC.TIMEOUT，
+   * 实测 durationMs=30001），导致长任务轮询完全不可用。
+   * 600s wait + 15s 余量。
+   */
+  readonly executionTimeoutMs = 615_000;
 
   private readonly pool: ITerminalPool;
 

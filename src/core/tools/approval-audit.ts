@@ -42,6 +42,8 @@ export interface ApprovalAuditEntry {
   argsPreview: string;
   /** 工具执行耗时（ms） */
   durationMs: number;
+  /** 失败时的结构化错误码（成功时不写；用于区分“用户拒绝”与“执行失败/非0退出”） */
+  errorCode?: string;
 }
 
 /**

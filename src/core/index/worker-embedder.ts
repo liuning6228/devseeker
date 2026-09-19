@@ -20,6 +20,9 @@ import { fork, type ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
 import type { Embedder, EmbedOptions, EmbedResult } from './embedder.js';
 import { AgentError, ErrorCodes } from '../errors/index.js';
+import { getLogger } from '../../infra/logger.js';
+
+const log = getLogger('index.worker-embedder');
 
 export interface WorkerEmbedderConfig {
   /** 模型根目录绝对路径（同 LocalBertEmbedderConfig.modelDir） */
@@ -36,6 +39,10 @@ const DEFAULT_HF_ID = 'Xenova/multilingual-e5-small';
 const DEFAULT_DIM = 384;
 const INIT_TIMEOUT_MS = 30_000;  // 首次加载模型可能较慢
 const EMBED_TIMEOUT_MS = 60_000;
+/** 意外退出后的最大自动重启次数（防崩溃循环） */
+const MAX_RESTARTS = 2;
+/** 重启前等待（给 npm install / 系统恢复留出时间） */
+const RESTART_DELAY_MS = 2_000;
 
 let _idCounter = 0;
 function nextId(): string {
@@ -54,6 +61,8 @@ export class WorkerEmbedder implements Embedder {
     timer: ReturnType<typeof setTimeout>;
   }>();
   private disposed = false;
+  /** 已消耗的自动重启次数（上限 MAX_RESTARTS） */
+  private restartCount = 0;
 
   private constructor(
     config: Required<Pick<WorkerEmbedderConfig, 'modelDir' | 'extensionPath' | 'hfId' | 'dimension'>>,
@@ -85,6 +94,19 @@ export class WorkerEmbedder implements Embedder {
       });
     }
 
+    const fullConfig = { modelDir, extensionPath, hfId, dimension };
+    const { worker, dimension: readyDim, modelId } = await WorkerEmbedder.spawnWorker(fullConfig);
+    return new WorkerEmbedder(fullConfig, worker, readyDim, modelId);
+  }
+
+  /**
+   * fork 子进程并等待 ready（create 与崩溃重启共用）。
+   * 返回 ready 后的 worker 与上报的 dimension/modelId。
+   */
+  private static spawnWorker(
+    fullConfig: Required<Pick<WorkerEmbedderConfig, 'modelDir' | 'extensionPath' | 'hfId' | 'dimension'>>,
+  ): Promise<{ worker: ChildProcess; dimension: number; modelId: string }> {
+    const { modelDir, extensionPath, hfId, dimension } = fullConfig;
     const workerPath = path.join(extensionPath, 'out', 'embedding-worker.js');
     const worker = fork(workerPath, [], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -104,10 +126,8 @@ export class WorkerEmbedder implements Embedder {
       });
     }
 
-    const fullConfig = { modelDir, extensionPath, hfId, dimension };
-
     // 等待 ready 或 error
-    return new Promise<WorkerEmbedder>((resolve, reject) => {
+    return new Promise<{ worker: ChildProcess; dimension: number; modelId: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
         worker.kill();
         reject(new AgentError({
@@ -116,24 +136,23 @@ export class WorkerEmbedder implements Embedder {
         }));
       }, INIT_TIMEOUT_MS);
 
+      const cleanup = () => {
+        clearTimeout(timer);
+        worker.removeListener('message', onMessage);
+        worker.removeListener('error', onError);
+        worker.removeListener('exit', onExit);
+      };
+
       const onMessage = (msg: { type: string; dimension?: number; modelId?: string; message?: string }) => {
         if (msg.type === 'ready') {
-          clearTimeout(timer);
-          worker.removeListener('message', onMessage);
-          worker.removeListener('error', onError);
-          worker.removeListener('exit', onExit);
-          const embedder = new WorkerEmbedder(
-            fullConfig,
+          cleanup();
+          resolve({
             worker,
-            msg.dimension ?? dimension,
-            msg.modelId ?? hfId,
-          );
-          resolve(embedder);
+            dimension: msg.dimension ?? dimension,
+            modelId: msg.modelId ?? hfId,
+          });
         } else if (msg.type === 'error') {
-          clearTimeout(timer);
-          worker.removeListener('message', onMessage);
-          worker.removeListener('error', onError);
-          worker.removeListener('exit', onExit);
+          cleanup();
           reject(new AgentError({
             code: ErrorCodes.INDEX_EMBEDDER_UNAVAILABLE,
             message: msg.message ?? 'embedding worker init 失败',
@@ -142,9 +161,7 @@ export class WorkerEmbedder implements Embedder {
       };
 
       const onError = (err: Error) => {
-        clearTimeout(timer);
-        worker.removeListener('message', onMessage);
-        worker.removeListener('exit', onExit);
+        cleanup();
         reject(new AgentError({
           code: ErrorCodes.INDEX_EMBEDDER_UNAVAILABLE,
           message: `embedding worker 启动错误: ${err.message}`,
@@ -152,9 +169,7 @@ export class WorkerEmbedder implements Embedder {
       };
 
       const onExit = (code: number | null, signal: string | null) => {
-        clearTimeout(timer);
-        worker.removeListener('message', onMessage);
-        worker.removeListener('error', onError);
+        cleanup();
         const detail = stderrChunks ? `\nstderr: ${stderrChunks.slice(0, 500)}` : '';
         reject(new AgentError({
           code: ErrorCodes.INDEX_EMBEDDER_UNAVAILABLE,
@@ -176,7 +191,10 @@ export class WorkerEmbedder implements Embedder {
     if (this.disposed || !this.worker) {
       throw new AgentError({
         code: ErrorCodes.INDEX_EMBEDDER_UNAVAILABLE,
-        message: 'WorkerEmbedder 已销毁',
+        // 区分两种不可用：已销毁（终态） vs worker 退出/重启中（临时态）
+        message: this.disposed
+          ? 'WorkerEmbedder 已销毁'
+          : 'WorkerEmbedder 暂不可用（worker 未就绪或重启中）',
       });
     }
 
@@ -263,19 +281,55 @@ export class WorkerEmbedder implements Embedder {
     });
 
     this.worker.on('exit', (code) => {
+      // 已销毁（正常关闭）或旧 worker 已被替换（重启后残留实例）→ 忽略
+      if (this.disposed || this.worker === null) return;
       // 子进程意外退出，拒绝所有挂起请求
-      if (!this.disposed) {
-        const err = new AgentError({
-          code: ErrorCodes.INDEX_EMBEDDER_UNAVAILABLE,
-          message: `embedding worker 意外退出 (code=${code})`,
-        });
-        for (const [, pending] of this.pendingRequests) {
-          clearTimeout(pending.timer);
-          pending.reject(err);
-        }
-        this.pendingRequests.clear();
-        this.worker = null;
+      const err = new AgentError({
+        code: ErrorCodes.INDEX_EMBEDDER_UNAVAILABLE,
+        message: `embedding worker 意外退出 (code=${code})`,
+      });
+      for (const [, pending] of this.pendingRequests) {
+        clearTimeout(pending.timer);
+        pending.reject(err);
       }
+      this.pendingRequests.clear();
+      this.worker = null;
+      // 自动重启（此前无日志无重启：退出后所有 embed 持续以"已销毁"失败，
+      // watcher 逐文件刷 warn，线上曾持续 17 分钟 7944 条）
+      void this.tryRestart(code);
     });
+  }
+
+  /**
+   * worker 意外退出后的自动重启（上限 MAX_RESTARTS 次，防崩溃循环）。
+   * 重启失败也按上限继续重试；达上限后停用并明确告知。
+   */
+  private async tryRestart(exitCode: number | null): Promise<void> {
+    if (this.disposed) return;
+    if (this.restartCount >= MAX_RESTARTS) {
+      log.warn(
+        { exitCode, restarts: this.restartCount },
+        'embedding worker 连续退出且重启达上限；本会话内索引增量更新暂停（已建索引检索不受影响）',
+      );
+      return;
+    }
+    this.restartCount++;
+    log.warn({ exitCode, restart: this.restartCount }, 'embedding worker 意外退出，尝试自动重启');
+    await new Promise((r) => setTimeout(r, RESTART_DELAY_MS));
+    if (this.disposed) return;
+    try {
+      const { worker } = await WorkerEmbedder.spawnWorker(this.config);
+      if (this.disposed) {
+        try { worker.kill(); } catch { /* ignore */ }
+        return;
+      }
+      this.worker = worker;
+      this.setupWorkerListeners();
+      log.info({ restart: this.restartCount }, 'embedding worker 重启成功');
+    } catch (e) {
+      log.warn({ err: (e as Error).message, restart: this.restartCount }, 'embedding worker 重启失败');
+      // 按上限继续重试（restartCount 已自增，不会无限循环）
+      void this.tryRestart(null);
+    }
   }
 }

@@ -535,7 +535,7 @@ export class GraphIndex {
   getHotSymbols(maxNames: number = 300): HotSymbolRow[] {
     const limit = Math.max(1, Math.min(1000, Math.floor(maxNames) || 1));
     // 测试路径过滤（GLOB 大小写敏感，与仓库小写约定一致）：
-    // tests/* · test/* · *​/tests/* · *​/test/* · __tests__/* · */__tests__/* · *.test.* · *.spec.*
+    // tests/* · test/* · **/tests/* · **/test/* · __tests__/* · **/__tests__/* · *.test.* · *.spec.*
     // 注：GLOB 中 _ 不是通配符（与 LIKE 的区别），无需转义。
     const notTest = (col: string): string =>
       [

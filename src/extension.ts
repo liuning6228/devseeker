@@ -36,7 +36,7 @@ import { openContextPanel } from './webview/panels/context-panel.js';
 import { openCostPanel } from './webview/panels/cost-panel.js';
 import { openRulesPanel } from './webview/panels/rules-panel.js';
 import { openLogsPanel } from './webview/panels/logs-panel.js';
-import { openCheckpointsPanel } from './webview/panels/checkpoints-panel.js';
+import { openCheckpointsPanel, refreshCheckpointsPanel } from './webview/panels/checkpoints-panel.js';
 import { openHooksPanel } from './webview/panels/hooks-panel.js';
 import { openGitPanel } from './webview/panels/git-panel.js';
 import { openPreviewPanelInteractive } from './webview/panels/preview-panel.js';
@@ -264,6 +264,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         log.warn({ code: err.code, msg: err.message }, 'showCheckpointTimeline failed');
         vscode.window.showWarningMessage(`Checkpoint 时间线打开失败：${err.toUserMessage()}`);
       }
+    }),
+  );
+
+  // 注册命令：刷新 Checkpoint 时间线面板（主面板在 checkpoint 变更后自动调用；
+  // 面板未打开时静默 no-op。此前该命令未注册 → 每次 checkpoint 操作产生一条
+  // unhandledRejection（error.log 34 条 'command not found'））
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devSeeker.checkpoints.refresh', async () => {
+      await refreshCheckpointsPanel();
     }),
   );
 

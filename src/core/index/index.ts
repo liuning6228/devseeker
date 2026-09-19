@@ -11,7 +11,9 @@
 export {
   scanWorkspace,
   DEFAULT_INCLUDE_EXT,
+  DEFAULT_IGNORE_DIRS,
   DEFAULT_MAX_FILE_SIZE,
+  hasIgnoredDirSegment,
   type ScannerOptions,
   type ScannedFile,
   type ScanResult,

@@ -100,7 +100,28 @@ const TYPE_LABEL: Record<string, string> = {
 
 /** Parser 初始化标记 */
 let parserInitialized = false;
+/**
+ * 初始化熔断标记：init 失败后本会话不再重试。
+ * 背景：web-tree-sitter 的 init Promise 仅在 onRuntimeInitialized 时 resolve，
+ * wasm 加载失败（ENOENT abort）时**永不 settle**——不熔断会导致每个文件都
+ * 挂起 await 并反复重试刷日志。
+ */
+let parserInitFailed = false;
+/**
+ * 首次 require 时缓存的类引用（init 前捕获）。
+ * 背景：web-tree-sitter（Emscripten UMD）在 init 执行器内会同步执行
+ * `module["exports"] = Module`，此后任何二次 require 都拿到 Emscripten Module
+ * 对象（不可构造）→ "ParserCtor is not a constructor"。
+ * 缓存的引用不受该替换影响，且不依赖 require.cache 恢复（后者在 esbuild bundle 内无效）。
+ */
+let cachedParserCtor: WebTreeSitterParserCtor | undefined;
+let cachedLanguageCtor: WebTreeSitterLanguageCtor | undefined;
 const parserCache = new Map<string, Parser>();
+/** 语法加载失败的语种（本会话内不再重试，防每文件刷 warn） */
+const failedGrammars = new Set<string>();
+
+/** await init 的超时护栏（init 失败时 promise 永不 settle，必须自行兜底） */
+const INIT_TIMEOUT_MS = 10_000;
 
 /** Parser 接口（供 graph-extractor 复用） */
 export interface TreeSitterParser {
@@ -113,60 +134,137 @@ interface Parser {
   delete(): void;
 }
 
-/** 加载 tree-sitter WASM 基础设施 */
-export async function ensureWasmModule(): Promise<void> {
-  if (parserInitialized) return;
+/** web-tree-sitter 的 Parser 类（0.24/0.25 导出形态兼容） */
+interface WebTreeSitterParserCtor {
+  new (): Parser & { setLanguage(lang: unknown): void };
+  init?: (options?: { locateFile?: (file: string) => string }) => Promise<unknown>;
+  Language?: WebTreeSitterLanguageCtor;
+}
+
+interface WebTreeSitterLanguageCtor {
+  load(input: Uint8Array | Buffer): Promise<unknown>;
+}
+
+/** 加载 web-tree-sitter 模块并提取 Parser 类（兼容三形态导出）
+ * 注意：Language 静态类在 init 执行器内才挂载（Parser.Language = Language），
+ * 绝不能在此处（init 前）校验，否则 vitest 等环境下 Language 为 undefined 会误判失败。 */
+function requireWebTreeSitter(): { ParserCtor: WebTreeSitterParserCtor; mod: Record<string, unknown> } | undefined {
   try {
-    // 兼容 web-tree-sitter 0.23-0.24（模块直接导出 Parser 类）与 0.25+
-    // （模块导出 { Parser, Language, ... } 命名空间）：init 是类的静态方法。
-    // 另需兼容 vitest 等 ESM interop 把 CJS 类导出包装为 { default: Ctor } 的形态。
-    const mod = require('web-tree-sitter');
-    const ParserCtor = mod.Parser ?? mod.default ?? mod;
-    if (typeof ParserCtor.init === 'function') {
-      await ParserCtor.init();
-      // 0.24 的 Emscripten UMD 尾部在 init() 完成时执行 `module.exports = Module`，
-      // 会把 require.cache 的导出覆盖为内部 Module 对象，同一进程后续 require 拿不到 Parser 类。
-      // 恢复 init 前的原始导出，保证二次 require 形态稳定（0.25+ 无此行为，恢复同样无害）。
-      try {
-        const resolved = require.resolve('web-tree-sitter');
-        const cached = require.cache[resolved];
-        if (cached) cached.exports = mod;
-      } catch {
-        /* ignore: 恢复失败时按原样回退 */
-      }
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('web-tree-sitter') as Record<string, unknown>;
+    const ParserCtor = (mod.Parser ?? mod.default ?? mod) as WebTreeSitterParserCtor;
+    if (typeof ParserCtor !== 'function') {
+      return undefined;
     }
+    return { ParserCtor, mod };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 定位 web-tree-sitter 包目录，供 init 的 locateFile 指向真实的 tree-sitter.wasm。
+ * 不传 locateFile 时 Emscripten 按 `__dirname + '/tree-sitter.wasm'` 解析，
+ * 而 esbuild bundle 内的 __dirname 是 out/ 目录（wasm 未随包拷入）→ ENOENT abort。
+ */
+function resolveWebTreeSitterDir(): string | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const nodePath = require('node:path');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return nodePath.dirname(require.resolve('web-tree-sitter'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** 本地超时包装（init 失败时永不 settle，必须自加护栏） */
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+/**
+ * 加载 tree-sitter WASM 基础设施。
+ *
+ * 修复要点（对照线上故障）：
+ * 1. init 前缓存 Parser/Language 类引用（immediately after require），
+ *    后续不再二次 require（避免 exports 被 Emscripten Module 替换）；
+ * 2. locateFile 指向 node_modules/web-tree-sitter 内的真实 wasm（bundle 内默认路径=out/ → ENOENT）；
+ * 3. init 加超时护栏（失败时 Promise 永不 settle）；
+ * 4. 失败熔断：本会话不再重试，不再逐文件刷日志。
+ *
+ * @returns 是否成功初始化（false 时调用方回退行式切分）
+ */
+export async function ensureWasmModule(): Promise<boolean> {
+  if (parserInitialized) return true;
+  if (parserInitFailed) return false;
+  try {
+    const refs = requireWebTreeSitter();
+    if (!refs || typeof refs.ParserCtor.init !== 'function') {
+      throw new Error('web-tree-sitter 导出形态异常（Parser.init 缺失）');
+    }
+    // 关键：init 前先缓存引用（init 执行器内会同步替换 module.exports，
+    // 且 Parser.Language 静态类也在 init 执行器内才挂载）
+    cachedParserCtor = refs.ParserCtor;
+    const wasmDir = resolveWebTreeSitterDir();
+    const initOptions = wasmDir
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      ? { locateFile: (file: string) => require('node:path').join(wasmDir, file) }
+      : undefined;
+    await withTimeout(
+      Promise.resolve(refs.ParserCtor.init(initOptions)),
+      INIT_TIMEOUT_MS,
+      `web-tree-sitter init 超时（${INIT_TIMEOUT_MS}ms）`,
+    );
+    // init 完成后再取 Language 类（此前为 undefined；先查模块命名空间再退到 Parser 静态属性）
+    const LanguageCtor = (refs.mod.Language ?? refs.ParserCtor.Language) as WebTreeSitterLanguageCtor | undefined;
+    if (typeof LanguageCtor?.load !== 'function') {
+      throw new Error('web-tree-sitter 导出形态异常（Language.load 缺失）');
+    }
+    cachedLanguageCtor = LanguageCtor;
     parserInitialized = true;
+    log.debug('web-tree-sitter initialized');
+    return true;
   } catch (e) {
-    log.warn({ err: (e as Error).message }, 'web-tree-sitter init failed, falling back to line-based chunker');
-    parserInitialized = false;
+    parserInitFailed = true;
+    cachedParserCtor = undefined;
+    cachedLanguageCtor = undefined;
+    log.warn({ err: (e as Error).message }, 'web-tree-sitter 初始化失败，AST 切分本会话停用（回退行式切分）');
+    return false;
   }
 }
 
 /** 获取指定语言的 parser（懒加载 WASM 语法文件） */
 export async function getParser(langId: string): Promise<Parser | null> {
-  if (!parserInitialized) return null;
+  if (!parserInitialized || !cachedParserCtor || !cachedLanguageCtor) return null;
   const cached = parserCache.get(langId);
   if (cached) return cached;
   const wasmFile = LANG_TO_WASM[langId];
   if (!wasmFile) return null;
+  // 本会话内已失败过的语种：静默跳过（防止每文件刷 warn）
+  if (failedGrammars.has(langId)) return null;
   try {
-    const mod = require('web-tree-sitter');
-    // 0.25+ 命名空间导出 { Parser, Language }；旧版直接导出带静态 Language 的 Parser 类
-    // （vitest interop 下表现为 { default: Ctor }，ParserCtor 需兼容三种形态）
-    const ParserCtor = mod.Parser ?? mod.default ?? mod;
-    const LanguageCtor = mod.Language ?? ParserCtor.Language;
-    const parser = new ParserCtor();
+    const parser = new cachedParserCtor();
     // 从 tree-sitter-wasms 包中加载 WASM 语法文件
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const wasmPath = require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('node:fs');
     // Language.load 的 input 同时兼容 Uint8Array（含 Buffer 子类）与文件路径：
     // 直接传 readFileSync 的 Buffer 在 0.24 与 0.26 两种 ABI 下都可用
-    const lang = await LanguageCtor.load(fs.readFileSync(wasmPath));
-    parser.setLanguage(lang);
+    const lang = await cachedLanguageCtor.load(fs.readFileSync(wasmPath));
+    (parser as Parser & { setLanguage(lang: unknown): void }).setLanguage(lang);
     parserCache.set(langId, parser);
     return parser;
   } catch (e) {
-    log.warn({ lang: langId, err: (e as Error).message }, 'failed to load tree-sitter WASM grammar');
+    failedGrammars.add(langId);
+    log.warn({ lang: langId, err: (e as Error).message }, 'failed to load tree-sitter WASM grammar（本会话停用该语种）');
     return null;
   }
 }
@@ -430,15 +528,9 @@ async function chunkVueSfcWithTreeSitter(
   if (!parserInitialized) return null;
 
   try {
-    const mod = require('web-tree-sitter');
-    const ParserCtor = mod.Parser ?? mod.default ?? mod;
-    const LanguageCtor = mod.Language ?? ParserCtor.Language;
-    const parser = new ParserCtor();
-    const wasmFile = LANG_TO_WASM.vue!;
-    const wasmPath = require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
-    const fs = require('node:fs');
-    const lang = await LanguageCtor.load(fs.readFileSync(wasmPath));
-    parser.setLanguage(lang);
+    // 复用统一缓存的 parser（不再二次 require —— 导出已被 Emscripten Module 替换）
+    const parser = await getParser('vue');
+    if (!parser) return null;
 
     const tree = parser.parse(content);
     const root = tree.rootNode;
@@ -510,8 +602,9 @@ async function chunkVueSfcWithTreeSitter(
       });
     }
 
-    parser.delete();
-
+    // 注意：不能在此调用 parser.delete() —— parser 由 parserCache 共享缓存（同主流程），
+    // 销毁后同语种下次调用会拿到已失效实例，parse 时 WASM 内存越界。
+    // 另外失败时不缓存：下一次调用会重新尝试（但 getParser 内部有失败去重）
     if (chunks.length === 0) return null;
     return chunks;
   } catch {

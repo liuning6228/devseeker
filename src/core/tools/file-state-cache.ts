@@ -10,12 +10,16 @@
  * 职责：
  * - read_file 成功执行时，记录该文件的 mtimeMs + 时间戳
  * - search_replace/write_file 执行前查询缓存，比对当前 mtimeMs
+ * - 写类工具成功后由 ToolRunner 统一调用 refreshFileStateCacheAfterWrite 刷新（修正自写误报）
  * - 默认 TTL = 30 秒（超过此时间 cache 条目自动过期，不触发冲突检测）
  *
  * 线程安全：单线程 VSCode Extension Host，无需锁。
  * 生命周期：随 TaskLoop 创建，TaskLoop 结束释放（非全局单例）。
  * 调用方通过 ToolContext 传入 Cache 实例；无 cache 时跳过冲突检测。
  */
+
+import { promises as fs } from 'node:fs';
+import { isAbsolute, resolve as resolvePath } from 'node:path';
 
 export interface FileStateCacheEntry {
   /** 文件绝对路径（作为 key） */
@@ -68,5 +72,46 @@ export class FileStateCache {
   /** 测试用 */
   size(): number {
     return this.store.size;
+  }
+}
+
+/**
+ * 写类工具成功后刷新缓存（由 ToolRunner 统一调用，覆盖 search_replace/write_file/
+ * append_file/delete_file 四条写路径）。
+ *
+ * 背景（线上 PATCH.CONFLICT 误报根因）：本类原文档要求“写入成功后调用 invalidate”，
+ * 但全仓无任何调用点 → read_file 记录 M0 后，同一文件第二次编辑时磁盘 mtime
+ * 已是 M1（agent 自己的上一次写入）→ 误报“文件已被外部修改”，模型被迫 read_file
+ * 再重试，连续编辑时反复出现。
+ *
+ * 语义（优于单纯 invalidate）：
+ * - 正常写入：记录写入后的新 mtime → 消除自写误报，同时保留此后对该文件的外部修改检测
+ * - 删除/刷新失败：invalidate（宁可不检测，不可误报）
+ */
+export async function refreshFileStateCacheAfterWrite(
+  cache: FileStateCache,
+  filePath: string,
+  opts?: { workspaceRoot?: string; removed?: boolean },
+): Promise<void> {
+  const abs = isAbsolute(filePath)
+    ? filePath
+    : resolvePath(opts?.workspaceRoot ?? process.cwd(), filePath);
+  // realpath 对齐：read_file / search_replace 均以 safeRealpath 后的路径为 key
+  let real = abs;
+  try {
+    real = await fs.realpath(abs);
+  } catch {
+    /* 删除场景 realpath 失败 → 用 abs 兜底 invalidate */
+  }
+  if (opts?.removed) {
+    cache.invalidate(real);
+    return;
+  }
+  try {
+    const st = await fs.stat(real);
+    cache.record(real, st.mtimeMs);
+  } catch {
+    // 文件不在（如被并发删除）→ 移除缓存，避免后续误判
+    cache.invalidate(real);
   }
 }

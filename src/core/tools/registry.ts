@@ -16,7 +16,8 @@
  */
 
 import type { ITool, ToolContext, ToolResult, DelegateCapabilityPolicy } from './types.js';
-import type { FileStateCache } from './file-state-cache.js';
+import { refreshFileStateCacheAfterWrite, type FileStateCache } from './file-state-cache.js';
+import { EDIT_TOOL_NAMES } from './edit-tools.js';
 import { toToolSchema } from './types.js';
 import type { ToolSchema } from '../../providers/types.js';
 import type { TaskEvent } from '../../shared/protocol.js';
@@ -390,6 +391,21 @@ export class ToolRunner {
       };
     }
 
+    if (!result.ok) {
+      // 业务性失败（ok:false 结果，不抛异常）：如 write_file 覆盖保护/路径校验、
+      // search_replace 未匹配、bash 非 0 退出。此前只进 LLM 上下文与 UI 卡片，
+      // 运行时日志完全静默 → “看得到失败、日志查不到”的可观测性缺口。
+      log.warn(
+        {
+          tool: tool.name,
+          code: result.errorCode,
+          durationMs: Date.now() - startedAt,
+          argsPreview: truncate(safeStringify(opts.args), 200),
+        },
+        'tool execution failed (result)',
+      );
+    }
+
     // Hook: post_tool_call（不阻断，异常仅记日志）
     if (this.hookManager) {
       const postPayload: PostToolCallPayload = {
@@ -428,11 +444,27 @@ export class ToolRunner {
         reason: approvalResult.reason,
         argsPreview: truncate(safeStringify(opts.args), 200),
         durationMs: Date.now() - startedAt,
+        // 失败原因可回溯（如 bash 非 0 退出 = TOOL.EXEC.FAILED；用户拒绝审批另见 decision）
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
       };
       try {
         await this.auditSink.append(auditEntry);
       } catch (e) {
         log.warn({ tool: tool.name, err: String(e) }, 'audit append failed');
+      }
+    }
+
+    // §8.11.2 补全 · 写类工具成功后刷新 FileStateCache（详见 refreshFileStateCacheAfterWrite 注释）：
+    // 此前写路径从不更新缓存 → read_file 后同文件连续编辑的第二次必误报 PATCH.CONFLICT（自写当外写）。
+    // 必须 await：串行执行的下一个写工具要在冲突检查前看到刷新后的 mtime。
+    if (result.ok && opts.fileStateCache && EDIT_TOOL_NAMES.has(tool.name)) {
+      const rawArgs = opts.args as Record<string, unknown> | undefined;
+      const fp = typeof rawArgs?.file_path === 'string' ? rawArgs.file_path : undefined;
+      if (fp) {
+        await refreshFileStateCacheAfterWrite(opts.fileStateCache, fp, {
+          ...(opts.workspaceRoot ? { workspaceRoot: opts.workspaceRoot } : {}),
+          ...(tool.name === 'delete_file' ? { removed: true } : {}),
+        });
       }
     }
 

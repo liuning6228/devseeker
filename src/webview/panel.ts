@@ -133,6 +133,7 @@ import {
   WorkerEmbedder,
   defaultIndexStorePath,
   defaultBm25IndexStorePath,
+  hasIgnoredDirSegment,
   type CodebaseIndexLike,
   type Embedder,
   type IndexProgress,
@@ -146,7 +147,7 @@ import { defaultIndexSqlitePath } from '../core/storage/sqlite-db.js';
 import { KnowledgeIndex } from '../core/knowledge/index.js';
 import { VSCodeLspBridge, type LspBridge } from '../core/lsp/index.js';
 import { VSCodeProblemsBridge, type ProblemsBridge } from '../core/problems/index.js';
-import { MemoryManager, BuiltinMemoryProvider, enhanceWithVectorMatch, renderTaskContextSection, buildFrozenSnapshot, PrefetchEngine } from '../core/memory/index.js';
+import { MemoryManager, MemoryStore, BuiltinMemoryProvider, enhanceWithVectorMatch, renderTaskContextSection, buildFrozenSnapshot, PrefetchEngine } from '../core/memory/index.js';
 import { buildMemoryTreeBlock } from '../core/memory/explore-inject.js';
 import { buildCodeHintsBlock, buildKnowledgeHintsBlock, type HintHit } from '../core/index/context-hints.js';
 import type { MemoryExtractorFn } from '../core/memory/index.js';
@@ -232,10 +233,44 @@ const CODE_INDEX_EXTS = new Set([
   '.toml','.md','.sh','.ps1',
 ]);
 
-/** 判定相对路径是否属于可索引文件 */
+/** 判定相对路径是否属于可索引文件（扩展名白名单 + 排除噪声目录） */
 function isIndexableCodeFile(relPath: string): boolean {
   const ext = relPath.slice(relPath.lastIndexOf('.')).toLowerCase();
-  return CODE_INDEX_EXTS.has(ext);
+  if (!CODE_INDEX_EXTS.has(ext)) return false;
+  // 排除噪声目录（node_modules/.git/dist/out 等，与全量扫描的 DEFAULT_IGNORE_DIRS 对齐）。
+  // 此前只看扩展名 → npm install 期间 node_modules/** 的 .js 变更全量进入增量索引，
+  // 曾造成 embed 队列过载与 17 分钟 7944 条失败日志洪水。
+  return !hasIgnoredDirSegment(relPath);
+}
+
+/**
+ * 索引 watcher 错误去重器：同一错误仅记首条 + 之后每 60s 记一条汇总。
+ * 故障期（如 worker 退出后）watcher 会逐文件失败，逐条 warn 会刷屏数千行。
+ */
+function makeDedupedWatcherErrorHandler(tag: string) {
+  let lastMsg: string | undefined;
+  let suppressed = 0;
+  let lastLogAt = 0;
+  return (err: unknown, file: string, op: 'update' | 'remove'): void => {
+    const msg = String(err);
+    const now = Date.now();
+    if (msg !== lastMsg) {
+      if (suppressed > 0) {
+        log.warn({ err: lastMsg, suppressed }, `${tag} op failed (suppressed)`);
+        suppressed = 0;
+      }
+      lastMsg = msg;
+      lastLogAt = now;
+      log.warn({ err: msg, file, op }, `${tag} op failed`);
+      return;
+    }
+    suppressed++;
+    if (now - lastLogAt >= 60_000) {
+      log.warn({ err: msg, suppressed, sample: file }, `${tag} op failed (suppressed)`);
+      suppressed = 0;
+      lastLogAt = now;
+    }
+  };
 }
 
 // W3.6 · DEFAULT_SYSTEM_PROMPT 已迁移到 src/core/prompts/layers/identity.ts（L0 层）
@@ -1110,10 +1145,14 @@ export class DualMindChatPanel {
 
       // 链式写入：provider → model → baseUrl → 清理旧 Provider 遗留的 reasoningModel / contextWindow。
       // contextWindow 必须清：它会 override 新 Provider 的真实上下文窗口，导致上下文裁剪按错误的窗口计算。
+      // reasoningModel 仅 LLM 轨在 package.json 声明（vllm 无该配置项）：对 vllm 写入会抛
+      // CodeExpectedError 并中断整条链（contextWindow 清理 / UI 刷新 / 模型列表拉取全部被跳过）。
       write(key, newProvider)
         .then(() => write(`${prefix}.model`, defaultModel))
         .then(() => write(`${prefix}.baseUrl`, defaultBaseUrl))
-        .then(() => write(`${prefix}.reasoningModel`, defaults?.reasoningModel ?? ''))
+        .then(() => (track === 'llm'
+          ? write(`${prefix}.reasoningModel`, defaults?.reasoningModel ?? '')
+          : undefined))
         .then(() => this.clearConfigKey(config, `${prefix}.contextWindow`))
         .then(() => {
           this.pushModelConfig();
@@ -1844,7 +1883,7 @@ export class DualMindChatPanel {
         break;
 
       case 'open_memory':
-        this.handleOpenMemory();
+        void this.handleOpenMemory();
         break;
 
       case 'export_session':
@@ -2203,9 +2242,53 @@ export class DualMindChatPanel {
     log.info('all sessions cleared by user');
   }
 
-  /** 记忆管理 */
-  private handleOpenMemory(): void {
-    void vscode.commands.executeCommand('devSeeker.openMemory');
+  /**
+   * 记忆管理：QuickPick 浏览工作区记忆列表 → 打开只读详情文档。
+   * 原实现调用未注册命令 'devSeeker.openMemory'（恒抛 command not found）。
+   */
+  private async handleOpenMemory(): Promise<void> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+      void vscode.window.showWarningMessage('未打开工作区，无法浏览记忆。');
+      return;
+    }
+    try {
+      const store = new MemoryStore({ workspaceRoot });
+      await store.load();
+      const records = await store.list();
+      if (records.length === 0) {
+        void vscode.window.showInformationMessage('DevSeeker: 当前没有记忆条目。');
+        return;
+      }
+      const picked = await vscode.window.showQuickPick<vscode.QuickPickItem & { record: MemoryRecord }>(
+        records.map((r) => ({
+          label: r.title,
+          description: `${r.category}${r.scope === 'workspace' ? '' : ' · global'}`,
+          detail: r.keywords.length > 0 ? r.keywords.slice(0, 6).join(', ') : undefined,
+          record: r,
+        })),
+        {
+          title: `DevSeeker 记忆（${records.length}）`,
+          placeHolder: '选择查看详情',
+          matchOnDescription: true,
+          matchOnDetail: true,
+        },
+      );
+      if (!picked) return;
+      const r = picked.record;
+      const doc = await vscode.workspace.openTextDocument({
+        language: 'markdown',
+        content:
+          `# ${r.title}\n\n` +
+          `> category: ${r.category} · scope: ${r.scope}` +
+          `${r.keywords.length > 0 ? ` · keywords: ${r.keywords.join(', ')}` : ''}\n\n` +
+          `${r.content}\n`,
+      });
+      await vscode.window.showTextDocument(doc, { preview: true });
+    } catch (e) {
+      log.warn({ err: String(e) }, 'open memory browser failed');
+      void vscode.window.showWarningMessage(`记忆浏览失败：${(e as Error).message}`);
+    }
   }
 
   /** 导出当前会话 */
@@ -2761,11 +2844,6 @@ export class DualMindChatPanel {
           }
           // Checkpoint：写前快照
           if (coordinator && event.type === 'tool_exec_start' && TRACKED_WRITE_TOOLS.has(event.name)) {
-            // [dbg T-UI2] 诊断日志：记录 tool_exec_start 命中 TRACKED 白名单
-            log.info(
-              { tool: event.name, toolCallId: event.toolCallId, args: event.args, hasWsRoot: !!workspaceRoot, hasSession: !!this.currentSession },
-              '[dbg T-UI2] tool_exec_start TRACKED',
-            );
             // turn 级聚合（保留 W5b2b 原有逻辑，用于任务结束时兜底快照）
             coordinator.onToolExec(event.name, event.args);
             // W7b2 · step 粒度：每个写类工具独立 checkpoint，便于 per-step revert
@@ -2789,11 +2867,6 @@ export class DualMindChatPanel {
             // Bug-fix：pendingDiffs 不依赖 currentSession，只要 workspaceRoot 存在就记录
             if (workspaceRoot) {
               const target = resolveWriteTarget(event.args, workspaceRoot);
-              // [dbg T-UI2] 诊断日志：记录 resolveWriteTarget 是否成功
-              log.info(
-                { toolCallId: event.toolCallId, target, rawArgs: event.args },
-                '[dbg T-UI2] resolveWriteTarget result',
-              );
               if (target) {
                 const before = readBeforeSync(target.absPath);
                 this.pendingDiffs.set(event.toolCallId, {
@@ -2809,19 +2882,14 @@ export class DualMindChatPanel {
           if (event.type === 'tool_exec_end' && this.pendingDiffs.has(event.toolCallId)) {
             const pending = this.pendingDiffs.get(event.toolCallId)!;
             this.pendingDiffs.delete(event.toolCallId);
-            // [dbg T-UI2] 诊断日志：tool_exec_end 命中 pendingDiff
-            log.info(
-              { toolCallId: event.toolCallId, ok: event.ok, relPath: pending.relPath },
-              '[dbg T-UI2] tool_exec_end has pendingDiff',
-            );
             if (event.ok) {
               void this.emitToolDiff(event.toolCallId, event.name, pending);
             }
           } else if (event.type === 'tool_exec_end' && TRACKED_WRITE_TOOLS.has(event.name)) {
-            // [dbg T-UI2] 写类工具结束但没找到 pendingDiff —— 说明 start 阶段没 set
+            // 写类工具结束但没找到 pendingDiff —— 说明 start 阶段没 set（异常路径，保留告警）
             log.warn(
               { toolCallId: event.toolCallId, name: event.name, ok: event.ok },
-              '[dbg T-UI2] tool_exec_end MISSING pendingDiff',
+              'write tool exec_end without pendingDiff',
             );
           }
           // 成本累计（主会话 usage + 子代理 subagent_usage）
@@ -3999,7 +4067,11 @@ export class DualMindChatPanel {
           if (!debugMode) this.knowledgeHintsEmittedThisSession = true;
         }
       } catch (e) {
-        log.warn({ err: String(e) }, 'buildSystemPrompt(knowledgeHints) failed; continue');
+        // 知识库目录未创建属预期状态（INDEX.KB.EMPTY）：静默跳过（目录创建后自然恢复），
+        // 不再逐轮 warn（线上曾 17 轮刷 17 条）
+        if ((e as { code?: string })?.code !== ErrorCodes.KNOWLEDGE_BASE_EMPTY) {
+          log.warn({ err: String(e) }, 'buildSystemPrompt(knowledgeHints) failed; continue');
+        }
       }
     }
 
@@ -5168,7 +5240,7 @@ export class DualMindChatPanel {
         try { return await this.getCodebaseIndex(); } catch { return undefined; }
       },
       isCodeFile,
-      onError: (err, file, op) => log.warn({ err: String(err), file, op }, 'IndexWatcher op failed'),
+      onError: makeDedupedWatcherErrorHandler('IndexWatcher'),
       debounceMs: 2000,
     });
     this.disposables.push({ dispose: () => indexWatcher.dispose() });
@@ -5189,7 +5261,7 @@ export class DualMindChatPanel {
         }
       },
       isCodeFile,
-      onError: (err, file, op) => log.warn({ err: String(err), file, op }, 'GraphWatcher op failed'),
+      onError: makeDedupedWatcherErrorHandler('GraphWatcher'),
       debounceMs: 2000,
     });
     this.disposables.push({ dispose: () => graphWatcher.dispose() });
@@ -5657,12 +5729,6 @@ export class DualMindChatPanel {
 
       const checkpointId = await pending.checkpointPromise.catch(() => undefined);
 
-      // [dbg T-UI2] 即将 post tool_diff
-      log.info(
-        { toolCallId, relPath: pending.relPath, unifiedLen: diff.unified.length, added: diff.added, removed: diff.removed, hasCheckpoint: !!checkpointId },
-        '[dbg T-UI2] emitToolDiff POST tool_diff',
-      );
-
       // 大文件 Diff 截断：webview 只渲染前 30 个 hunk，防止 DOM 卡死
       const truncResult = truncateUnifiedDiff(diff.unified);
 
@@ -5722,7 +5788,7 @@ export class DualMindChatPanel {
         }
       }
     } catch (e) {
-      log.warn({ err: String(e), relPath: pending.relPath }, '[dbg T-UI2] emitToolDiff failed');
+      log.warn({ err: String(e), relPath: pending.relPath }, 'emitToolDiff failed');
     }
   }
 

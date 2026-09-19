@@ -21,8 +21,10 @@
 import { promises as fs } from 'node:fs';
 import { resolve as resolvePath, join, relative, sep as pathSep } from 'node:path';
 
-/** 默认忽略目录（与 list_dir 保持一致 + 索引专属） */
-const DEFAULT_IGNORE_DIRS = new Set<string>([
+/** 默认忽略目录（与 list_dir 保持一致 + 索引专属）。
+ * 导出供增量 watcher（panel.isIndexableCodeFile）共用，防止 npm install 期间
+ * node_modules/** 的变更全量进入增量索引（曾造成 embed 队列过载 + 日志洪水）。 */
+export const DEFAULT_IGNORE_DIRS = new Set<string>([
   'node_modules',
   '.git',
   '.hg',
@@ -46,6 +48,15 @@ const DEFAULT_IGNORE_DIRS = new Set<string>([
   '.idea',
   '.DS_Store',
 ]);
+
+/** 判定相对路径是否被忽略目录命中（任意层级段匹配，兼容 / 与 \\ 分隔符） */
+export function hasIgnoredDirSegment(relPath: string): boolean {
+  if (!relPath) return false;
+  for (const seg of relPath.split(/[\\/]/)) {
+    if (seg && DEFAULT_IGNORE_DIRS.has(seg)) return true;
+  }
+  return false;
+}
 
 /** 默认扩展名白名单（源码 + 常见文档） */
 export const DEFAULT_INCLUDE_EXT = new Set<string>([
