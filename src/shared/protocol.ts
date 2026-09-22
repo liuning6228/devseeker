@@ -695,11 +695,6 @@ export type WebviewOutboundMessage =
    * 卡片契约 K5：UI 声明（已拒绝）必须等于实际动作（是否真回滚）。
    */
   | { type: 'reject_result'; relPath: string; ok: boolean; message?: string }
-  /**
-   * 编辑器侧操作条（CodeLens：同意/拒绝）完成回执。
-   * 卡片契约 K5：编辑器动作与聊天卡片状态必须同源（避免两个入口显示不一致）。
-   */
-  | { type: 'diff_resolved'; relPath: string; action: 'accept' | 'reject'; ok: boolean; message?: string }
   /** W15.6 · hunk revert 完成回执 */
   | {
       type: 'revert_hunk_result';

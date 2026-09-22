@@ -13,6 +13,14 @@ export const ExtensionMode = {
   Test: 3,
 } as const;
 
+/** visibleTextEditors 变更监听（单测可经 __fireVisibleTextEditors 触发） */
+const visibleEditorsListeners: Array<(editors: unknown[]) => void> = [];
+
+/** 单测辅助：触发 onDidChangeVisibleTextEditors 回调 */
+export function __fireVisibleTextEditors(editors: unknown[]): void {
+  for (const cb of [...visibleEditorsListeners]) cb(editors);
+}
+
 export const StatusBarAlignment = {
   Left: 1,
   Right: 2,
@@ -50,7 +58,50 @@ export const window = {
   activeTerminal: undefined as unknown,
   /** TerminalProcess exitCode 兜底事件：单测中永不触发（由 safety timer 兜底） */
   onDidEndTerminalShellExecution: (_cb: (e: unknown) => void) => ({ dispose: () => undefined }),
+  /** 编辑器相关（InlineDiffController 等 UI 模块使用） */
+  visibleTextEditors: [] as unknown[],
+  activeTextEditor: undefined as unknown,
+  onDidChangeActiveTextEditor: (_cb: (e: unknown) => void) => ({ dispose: () => undefined }),
+  onDidChangeVisibleTextEditors: (cb: (e: unknown[]) => void) => {
+    visibleEditorsListeners.push(cb);
+    return {
+      dispose: () => {
+        const i = visibleEditorsListeners.indexOf(cb);
+        if (i >= 0) visibleEditorsListeners.splice(i, 1);
+      },
+    };
+  },
+  setStatusBarMessage: (_text: string, _timeout?: number) => ({ dispose: () => undefined }),
+  showWarningMessage: async () => undefined,
 };
+
+export class Range {
+  constructor(
+    public readonly start: Position,
+    public readonly end: Position,
+  ) {}
+}
+
+export class Position {
+  constructor(
+    public readonly line: number,
+    public readonly character: number,
+  ) {}
+}
+
+export const OverviewRulerLane = {
+  Left: 1,
+  Center: 2,
+  Right: 4,
+  Full: 7,
+} as const;
+
+export const TextEditorRevealType = {
+  Default: 0,
+  InCenter: 1,
+  InCenterIfOutsideViewport: 2,
+  AtTop: 3,
+} as const;
 
 export const workspace = {
   getConfiguration: () => ({

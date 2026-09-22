@@ -279,9 +279,8 @@ function makeDedupedWatcherErrorHandler(tag: string) {
 
 export class DualMindChatPanel {
   static current: DualMindChatPanel | undefined;
-  /** Phase 3 · 编辑器内联 hunk 装饰器（由 extension.ts 注入） */
+  /** 编辑器内联差异装饰 + 文件级回滚控制器（由 extension.ts 注入） */
   static inlineDiffController: import('../ui/inline-diff-decorator.js').InlineDiffController | undefined;
-    static editorChangeBar: import('../ui/editor-change-bar.js').EditorChangeBar | undefined;
   /** 共享 SQLite 连接（由 extension.ts 打开后注入，避免双重加载 ~35MB WASM 内存） */
   static sharedSqliteDb: SqliteDatabaseLike | undefined;
 
@@ -1950,12 +1949,10 @@ export class DualMindChatPanel {
         break;
 
       case 'accept_diff': {
-        // W-UI2 · webview Accept 单文件 → 清除 inline diff 装饰 + 更新 EditorChangeBar
+        // webview Accept 单文件 → 清除 inline diff 装饰与快照
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         const absPath = wsRoot ? path.resolve(wsRoot, msg.relPath) : msg.relPath;
         DualMindChatPanel.inlineDiffController?.acceptFile(absPath);
-        // 同步更新 EditorChangeBar：移除该文件
-        DualMindChatPanel.editorChangeBar?.removeFile(msg.relPath);
         // 清理该文件对应的 step checkpoint（不再需要回滚）
         this.cleanupCheckpointsOnAccept(msg.relPath).catch((e: unknown) =>
           log.warn({ err: String(e), relPath: msg.relPath }, 'accept_diff checkpoint cleanup failed'),
@@ -1964,9 +1961,8 @@ export class DualMindChatPanel {
       }
 
       case 'accept_all_diffs':
-        // W-UI2 · webview Accept All → 清除所有 inline diff 装饰 + 清空 EditorChangeBar
+        // webview Accept All → 清除所有 inline diff 装饰与快照
         DualMindChatPanel.inlineDiffController?.acceptAllFiles();
-        DualMindChatPanel.editorChangeBar?.clear();
         // 清理所有 step checkpoint（全量接受，不再需要回滚）
         this.cleanupAllStepCheckpoints().catch((e: unknown) =>
           log.warn({ err: String(e) }, 'accept_all_diffs checkpoint cleanup failed'),
@@ -1974,7 +1970,7 @@ export class DualMindChatPanel {
         break;
 
       case 'reject_diff': {
-        // W-UI2 · webview Reject 单文件 → 回滚该文件 + 清除 inline diff 装饰 + 更新 EditorChangeBar
+        // webview Reject 单文件 → 回滚该文件 + 清除 inline diff 装饰与快照
         // 卡片契约 K5：UI 声明（已拒绝）必须等于实际动作——成功/失败/无 checkpoint 都要回执
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         const absPath = wsRoot ? path.resolve(wsRoot, msg.relPath) : msg.relPath;
@@ -1984,7 +1980,6 @@ export class DualMindChatPanel {
             () => {
               // checkpoint 已把文件恢复到修改前 → 丢弃装饰与快照（避免二次 hunk 回滚）
               controller?.discardFile(absPath);
-              DualMindChatPanel.editorChangeBar?.removeFile(msg.relPath);
               this.post({ type: 'reject_result', relPath: msg.relPath, ok: true });
             },
             (e: unknown) => {
@@ -2005,7 +2000,6 @@ export class DualMindChatPanel {
             : Promise.resolve({ ok: false, message: 'InlineDiffController 未初始化' })
           ).then(
             (res) => {
-              if (res.ok) DualMindChatPanel.editorChangeBar?.removeFile(msg.relPath);
               this.post({
                 type: 'reject_result',
                 relPath: msg.relPath,
@@ -2030,7 +2024,7 @@ export class DualMindChatPanel {
       }
 
       case 'reject_all_diffs': {
-        // W-UI2 · webview Reject All → 回滚所有文件 + 清除所有 inline diff 装饰 + 清空 EditorChangeBar
+        // webview Reject All → 逐文件回滚 + 清除 inline diff 装饰与快照
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         const files = msg.files;
         for (const file of files) {
@@ -2041,7 +2035,6 @@ export class DualMindChatPanel {
               () => {
                 // checkpoint 已完成内容回滚 → 丢弃装饰与快照
                 controller?.discardFile(absPath);
-                DualMindChatPanel.editorChangeBar?.removeFile(file.relPath);
                 this.post({ type: 'reject_result', relPath: file.relPath, ok: true });
               },
               (e: unknown) => {
@@ -2063,7 +2056,6 @@ export class DualMindChatPanel {
               : Promise.resolve({ ok: false, message: 'InlineDiffController 未初始化' })
             ).then(
               (res) => {
-                if (res.ok) DualMindChatPanel.editorChangeBar?.removeFile(file.relPath);
                 this.post({
                   type: 'reject_result',
                   relPath: file.relPath,
@@ -2446,7 +2438,6 @@ export class DualMindChatPanel {
     // 清除暂停上下文（用户发了新消息而非点继续）
     if (this.pausedContext) {
       this.pausedContext = null;
-      DualMindChatPanel.editorChangeBar?.onTaskEnd();
     }
 
     // W-UI2 · Bug fix：提前 ensure session，确保 tool_exec_start 时 currentSession 已存在
@@ -3400,8 +3391,6 @@ export class DualMindChatPanel {
         }
 
         if (this.taskLoop === loop) this.taskLoop = null;
-        // 通知 EditorChangeBar 任务结束（重置暂停状态）
-        DualMindChatPanel.editorChangeBar?.onTaskEnd();
         log.info('runWithProvider finally: persisting session');
         await this.persistCurrentSession(loop);
         log.info('runWithProvider finally: session persisted');
@@ -5662,36 +5651,6 @@ export class DualMindChatPanel {
   }
 
   /**
-   * 编辑器侧操作条（CodeLens：同意/拒绝）完成后的状态同步。
-   * 卡片契约 K5：编辑器动作与聊天卡片状态必须同源——把结果回推 webview，
-   * 否则卡片仍显示"待处理"，两个入口声明不一致。
-   */
-  notifyDiffResolvedFromEditor(
-    relPath: string,
-    action: 'accept' | 'reject',
-    ok: boolean,
-    message?: string,
-  ): void {
-    try {
-      this.post({
-        type: 'diff_resolved',
-        relPath,
-        action,
-        ok,
-        ...(message !== undefined ? { message } : {}),
-      });
-    } catch (e) {
-      log.warn({ err: String(e), relPath, action }, 'notifyDiffResolvedFromEditor failed');
-    }
-    if (action === 'accept' && ok) {
-      // 编辑器侧已接受该文件：清理关联 step checkpoint（与 webview Accept 路径一致）
-      this.cleanupCheckpointsOnAccept(relPath).catch((e: unknown) =>
-        log.warn({ err: String(e), relPath }, 'accept from editor: checkpoint cleanup failed'),
-      );
-    }
-  }
-
-  /**
    * cleanupCheckpointsOnAccept · 单文件 accept 后清理关联的 step checkpoint。
    *
    * 删除 label 以 "step:" 开头且 fileSnapshots 中只有一个文件且 relPath 匹配的 checkpoint。
@@ -5851,22 +5810,13 @@ export class DualMindChatPanel {
         },
       });
 
-      // Phase 3 · EditorChangeBar 更新（不依赖编辑器/装饰是否成功）
-      if (DualMindChatPanel.editorChangeBar && !deleted && diff.added + diff.removed > 0) {
-        DualMindChatPanel.editorChangeBar.addChangedFile(
-          pending.relPath,
-          pending.absPath,
-          diff.added,
-          diff.removed,
-        );
-      }
-
       // Phase 3 · 自动打开文件编辑器 + 应用内联 hunk 装饰
       // 完整 diff（未截断）给编辑器装饰用
-      if (DualMindChatPanel.inlineDiffController && diff.unified) {
+      // 注意：deleted 文件跳过——快照/装饰只对存在的文件有意义，否则重开文件时会套用删除 diff
+      if (DualMindChatPanel.inlineDiffController && diff.unified && !deleted) {
         try {
-          // 自动打开被修改/新建的文件（非 deleted 场景）
-          if (!deleted && pending.absPath) {
+          // 自动打开被修改/新建的文件
+          if (pending.absPath) {
             const doc = await vscode.workspace.openTextDocument(pending.absPath);
             // 仅在文件尚未打开时打开编辑器（preserveFocus 避免抢焦点）
             const alreadyOpen = vscode.window.visibleTextEditors.some(
@@ -5885,6 +5835,7 @@ export class DualMindChatPanel {
             pending.absPath,
             pending.relPath,
             diff.unified, // 用完整 diff，不截断
+            after, // 记录 after 签名：重开恢复前校验内容是否仍与 diff 匹配
           );
         } catch (e) {
           log.warn({ err: String(e), relPath: pending.relPath }, 'inlineDiff auto-open failed');
@@ -5995,13 +5946,12 @@ export class DualMindChatPanel {
         });
 
         // 同时更新 inline decorations（异步避免阻塞 Extension Host）
-        if (DualMindChatPanel.inlineDiffController && diff.unified) {
+        // deleted 文件跳过：快照/装饰只对存在的文件有意义（否则文件重建后会套用删除 diff）
+        if (DualMindChatPanel.inlineDiffController && diff.unified && !deleted) {
           void Promise.resolve().then(() => {
-            DualMindChatPanel.inlineDiffController?.onToolDiff(absPath, relPath, diff.unified);
+            DualMindChatPanel.inlineDiffController?.onToolDiff(absPath, relPath, diff.unified, after);
           });
         }
-        // 同时登记到 EditorChangeBar：会话恢复后"上一个/下一个文件 + 同意/拒绝"操作条仍然可用
-        DualMindChatPanel.editorChangeBar?.addChangedFile(relPath, absPath, diff.added, diff.removed);
       }
 
       log.info(

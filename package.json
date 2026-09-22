@@ -3,7 +3,7 @@
   "displayName": "DevSeeker",
   "description": "为技术leader开发的 AI 编码助手，搭载 LLM + VLLM 双模型路由。",
   "icon": "logo.png",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "publisher": "devseeker",
   "license": "MIT",
   "repository": {
@@ -134,36 +134,6 @@
         "command": "devSeeker.showPreview",
         "title": "Show Preview Panel",
         "category": "DevSeeker"
-      },
-      {
-        "command": "devSeeker.inlineDiff.accept",
-        "title": "Accept Hunk",
-        "category": "DevSeeker Diff"
-      },
-      {
-        "command": "devSeeker.inlineDiff.reject",
-        "title": "Reject Hunk",
-        "category": "DevSeeker Diff"
-      },
-      {
-        "command": "devSeeker.inlineDiff.acceptAll",
-        "title": "Accept All Hunks",
-        "category": "DevSeeker Diff"
-      },
-      {
-        "command": "devSeeker.inlineDiff.rejectAll",
-        "title": "Reject All Hunks",
-        "category": "DevSeeker Diff"
-      },
-      {
-        "command": "devSeeker.inlineDiff.nextHunk",
-        "title": "Next Hunk",
-        "category": "DevSeeker Diff"
-      },
-      {
-        "command": "devSeeker.inlineDiff.prevHunk",
-        "title": "Previous Hunk",
-        "category": "DevSeeker Diff"
       }
     ],
     "keybindings": [
@@ -178,30 +148,6 @@
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
         "when": "editorTextFocus && editorHasSelection"
-      },
-      {
-        "command": "devSeeker.inlineDiff.accept",
-        "key": "ctrl+enter",
-        "mac": "cmd+enter",
-        "when": "editorTextFocus && devSeeker.inlineDiffActive"
-      },
-      {
-        "command": "devSeeker.inlineDiff.reject",
-        "key": "ctrl+backspace",
-        "mac": "cmd+backspace",
-        "when": "editorTextFocus && devSeeker.inlineDiffActive"
-      },
-      {
-        "command": "devSeeker.inlineDiff.nextHunk",
-        "key": "alt+down",
-        "mac": "alt+down",
-        "when": "editorTextFocus && devSeeker.inlineDiffActive"
-      },
-      {
-        "command": "devSeeker.inlineDiff.prevHunk",
-        "key": "alt+up",
-        "mac": "alt+up",
-        "when": "editorTextFocus && devSeeker.inlineDiffActive"
       }
     ],
     "menus": {

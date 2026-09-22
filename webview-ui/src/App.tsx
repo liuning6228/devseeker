@@ -504,22 +504,6 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
             ...(typeof msg.message === 'string' ? { message: msg.message } : {}),
           });
           break;
-        case 'diff_resolved': {
-          // 编辑器侧操作条（CodeLens 同意/拒绝）完成 → 同步聊天卡片状态（K5 同源）
-          const relPath = msg.relPath;
-          if (msg.action === 'accept' && msg.ok) {
-            dispatch({ type: 'ACCEPT_FILE', relPath });
-          } else if (msg.action === 'reject') {
-            if (msg.ok) dispatch({ type: 'REJECT_FILE', relPath });
-            dispatch({
-              type: 'REJECT_RESULT',
-              relPath,
-              ok: msg.ok,
-              ...(typeof msg.message === 'string' ? { message: msg.message } : {}),
-            });
-          }
-          break;
-        }
         case 'revert_hunk_result':
           dispatch({
             type: 'REVERT_HUNK_RESULT',

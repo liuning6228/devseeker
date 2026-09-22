@@ -43,8 +43,6 @@ import { formatDomPickedForChat } from './webview/panels/preview-bridge-protocol
 import { maybeAutoReindex } from './core/index/auto-indexer.js';
 import { initIndexStatusBar, setIndexStatusBar } from './ui/index-status-bar.js';
 import { InlineDiffController } from './ui/inline-diff-decorator.js';
-import { EditorChangeBar } from './ui/editor-change-bar.js';
-import { DiffActionLensProvider } from './ui/diff-action-lens.js';
 import { DIFF_VIEW_URI_SCHEME } from './ui/streaming-diff-view.js';
 import { openSqliteDatabase, defaultSqlitePath } from './core/storage/sqlite-db.js';
 import { SqliteCheckpointStore } from './core/storage/sqlite-checkpoint-store.js';
@@ -177,7 +175,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 注册命令：暂停/继续 Agent 任务（供 EditorChangeBar 调用）
+  // 注册命令：暂停/继续 Agent 任务（供面板调用）
   context.subscriptions.push(
     vscode.commands.registerCommand('devSeeker.pauseTask', () => {
       log.info('command: pauseTask');
@@ -701,31 +699,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // B-1.0.1-D · 索引状态栏（三态图标，点击跳 reindex）
   initIndexStatusBar(context);
 
-  // Phase 3 · 编辑器内联 hunk 级 Accept/Reject 装饰器
+  // 编辑器内联差异装饰 + 文件级回滚（审批入口统一在 DevSeeker 面板 Changed Files）
   const inlineDiffController = new InlineDiffController(context);
   context.subscriptions.push(inlineDiffController);
   DualMindChatPanel.inlineDiffController = inlineDiffController;
-
-  // EditorChangeBar · 文件变更清单 + 文件上方操作条（CodeLens）命令
-  const editorChangeBar = new EditorChangeBar(inlineDiffController);
-  editorChangeBar.registerCommands(context);
-  context.subscriptions.push(editorChangeBar);
-  DualMindChatPanel.editorChangeBar = editorChangeBar;
-
-  // 文件上方操作条（CodeLens）：← 上一个文件 | 下一个文件 → | ✓ 同意 | ✗ 拒绝
-  // 编辑器侧完成操作后回推 webview 卡片（K5：两个入口状态同源）
-  editorChangeBar.onFileResolved = (relPath, action, ok, message) => {
-    DualMindChatPanel.current?.notifyDiffResolvedFromEditor(relPath, action, ok, message);
-  };
-  const diffActionLens = new DiffActionLensProvider(editorChangeBar);
-  context.subscriptions.push(
-    // 覆盖本地与远程（Remote-SSH / WSL / Container）工作区文件
-    vscode.languages.registerCodeLensProvider(
-      [{ scheme: 'file' }, { scheme: 'vscode-remote' }],
-      diffActionLens,
-    ),
-    diffActionLens,
-  );
 
   // B-1.0.1-A · 打开工作区自动后台索引（检测到项目标识文件且 24h 内未跑过时触发）
   // 全程不弹 UI、失败只打 log，不影响激活主路径
