@@ -33,7 +33,7 @@ import { getLogger } from '../../infra/logger.js';
 import { classifyCommand, findBlacklistReason } from './safety-classifier.js';
 import { findWorkspaceMutationReason } from '../subagent/delegate-guards.js';
 import type { ITerminalPool } from './terminal-pool.js';
-import { VscodeTerminalManager } from './vscode-terminal.js';
+import { VscodeTerminalManager, hasMultilineCommand } from './vscode-terminal.js';
 import {
   detectSandboxingError,
   makeAuditEntry,
@@ -98,7 +98,7 @@ const parameters = {
     command: {
       type: 'string',
       description:
-        '要执行的 shell 命令（Windows 使用 PowerShell，其他系统使用 sh）。禁用 rm -rf / format / shutdown / git reset --hard / sudo / curl|bash 等危险模式。',
+        '要执行的 shell 命令（Windows 使用 PowerShell，其他系统使用 sh），必须单行（多条语句用 ; 或 && 串接；多行脚本先写入文件再执行）。禁用 rm -rf / format / shutdown / git reset --hard / sudo / curl|bash 等危险模式。',
     },
     cwd: {
       type: 'string',
@@ -157,7 +157,7 @@ export interface BashToolDeps {
 export class BashTool implements ITool<BashArgs, ToolResult> {
   readonly name = 'bash';
   readonly description =
-    '在工作区根执行单行 shell 命令（Windows=PowerShell, 其他=sh）。返回合并的 stdout/stderr 与 exit code。有黑名单拦截（rm -rf、format、shutdown、git reset --hard、sudo 等）。对于上传、下载、编译、打包等长时间执行的命令，请设置 is_background=true 避免超时，再用 get_terminal_output 等轮询获取结果。';
+    '在工作区根执行单行 shell 命令（Windows=PowerShell, 其他=sh）。返回合并的 stdout/stderr 与 exit code。有黑名单拦截（rm -rf、format、shutdown、git reset --hard、sudo 等）。command 必须是单行：多条语句用 ; 或 && 串接；需要多行脚本时先写入脚本文件再执行（含内嵌换行的命令无法可靠跟踪输出与退出码）。对于上传、下载、编译、打包等长时间执行的命令，请设置 is_background=true 避免超时，再用 get_terminal_output 等轮询获取结果。';
   readonly parameters = parameters as unknown as Record<string, unknown>;
   readonly safetyLevel: ToolSafetyLevel = 'destructive';
   // 由 ToolRunner 的 decideApproval 统一管理审批。
@@ -326,6 +326,9 @@ export class BashTool implements ITool<BashArgs, ToolResult> {
       const header =
         `$ ${preview(command)}\n` +
         `[background] terminal_id=${snapshot.id} status=${snapshot.status}\n` +
+        (hasMultilineCommand(command)
+          ? '[note] 含内嵌换行 → 已用 child_process 降级执行（shell integration 多行不可靠）\n'
+          : '') +
         `使用 get_terminal_output({ terminal_id: "${snapshot.id}" }) 读取输出。\n`;
       return {
         ok: true,
@@ -380,10 +383,18 @@ export class BashTool implements ITool<BashArgs, ToolResult> {
       const sandboxingDetected = !ok && !escalationApproved && detectSandboxingError(result.output);
 
       const exitCodeStr = exitCode !== null && exitCode !== undefined ? String(exitCode) : 'unknown';
+      // 多行命令经 child_process 降级：显式说明执行路径；
+      // user_visible（用户选择“终端运行”）时明确“未在终端面板展示”，避免与审批卡的“在终端中执行”预期冲突
+      const multilineNote = hasMultilineCommand(command)
+        ? useUserTerminal
+          ? '[note] 含内嵌换行 → 已用 child_process 降级执行（未在终端面板展示；shell integration 多行不可靠）\n'
+          : '[note] 含内嵌换行 → 已用 child_process 降级执行（shell integration 多行不可靠）\n'
+        : '';
       const header =
         `$ ${preview(command)}\n` +
         `exit=${exitCodeStr}${result.signal ? ` signal=${result.signal}` : ''}` +
         `${escalationApproved ? ' [escalated]' : ''}\n` +
+        multilineNote +
         `---\n`;
       const sandboxHint = sandboxingDetected
         ? `\n---\n> SANDBOXING suspected. If this failure is caused by sandbox restrictions (and NOT a syntax/dependency/logic error), you MAY retry the same command with required_permissions='all' to request a user approval.\n`

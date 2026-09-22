@@ -19,10 +19,13 @@
  * - terminal.shellIntegration.executeCommand(cmd) → { read(): AsyncIterable<string> }
  * - OSC 633;D;exitCode 序列提供退出码
  * - 无 shellIntegration 时降级到 child_process.spawn
+ * - 多行命令（内嵌换行）一律绕开 shellIntegration → child_process 降级
+ *   （上游缺陷：read 流不结束/无完成事件/输出串台，见 hasMultilineCommand 注释）
  */
 
 import * as vscode from 'vscode';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { platform } from 'node:os';
 import { getLogger } from '../../infra/logger.js';
@@ -56,6 +59,108 @@ const TRUNCATE_KEEP_LINES = 100;
 const FALLBACK_WAIT_MS = 3000;
 
 // VS Code 1.93+ 已内置 Terminal.shellIntegration 类型，无需 declare module 扩展
+
+// ─────────── 多行命令守卫 ───────────
+
+/**
+ * 检测命令是否含内嵌换行（\n / \r）。
+ *
+ * 为什么需要守卫：VS Code Shell Integration 对含内嵌换行的命令有一系列已知缺陷——
+ * - read() 流永不结束 / onDidEndTerminalShellExecution 不触发（microsoft/vscode#316556、#250764）
+ * - 极端情况下流零数据、无完成事件，扩展侧永久等待（microsoft/vscode#324392）
+ * - PowerShell 下多行输入被 VS Code 拆成多次执行，exit code / 输出边界错乱（#267344 相邻行为）
+ * 线上表现：命令实际执行成功但工具侧超时、输出缺失、或与下一条命令的输出串台（“shell 不稳定”）。
+ *
+ * 策略：多行命令一律绕开 shellIntegration，走 child_process 降级路径
+ * （sh -c / powershell -Command 一次性执行），输出与 exit code 可靠。
+ */
+export function hasMultilineCommand(command: string): boolean {
+  return /[\r\n]/.test(command);
+}
+
+// ─────────── 命令回显过滤 ───────────
+
+/**
+ * 过滤输出开头的“命令回显”行（终端会把已执行的命令原样回显进输出流）。
+ *
+ * 规则：仅当整行（trim 后）与命令的某一行完全一致时，才视为回显并丢弃；
+ * 空白行按噪声静默丢弃。一旦出现首个真实输出行，后续不再过滤（回显只会出现在开头）。
+ *
+ * 旧实现用 `command.includes(line)` 判断，只要输出行是命令文本的“子串”就会被当作回显丢弃：
+ * 例如 `echo hello` / `node -e "console.log('x')"` / `printf ok` 的输出本身就写在命令里，
+ * 表现为「命令执行完成、终端有输出，但工具侧抓不到输出内容」。
+ *
+ * 取舍：宁可残留少量回显噪声（如终端折行导致的行片段），也不丢真实输出——
+ * 丢输出会让模型误判命令未产生结果并重复执行。
+ *
+ * @param data 待过滤的文本（可能含多行）
+ * @param commandLines 命令的各行（trim 后、去空行）集合
+ * @param alreadyOutput 是否已出现真实输出（true 时不再过滤）
+ */
+export function stripLeadingCommandEcho(
+  data: string,
+  commandLines: ReadonlySet<string>,
+  alreadyOutput: boolean,
+): { data: string; alreadyOutput: boolean } {
+  if (alreadyOutput || !data) return { data, alreadyOutput };
+  const lines = data.split('\n');
+  let started = false;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '' || commandLines.has(trimmed)) {
+      lines.splice(i, 1);
+      i--;
+      continue;
+    }
+    started = true;
+    break;
+  }
+  return { data: lines.join('\n'), alreadyOutput: started };
+}
+
+/** 构建回显过滤用的命令行集合（trim 后、去空行）；run() 与单测共用同一实现 */
+export function buildCommandLines(command: string): Set<string> {
+  return new Set(
+    command.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0),
+  );
+}
+
+// ─────────── child_process 降级 shell 解析 ───────────
+
+/** 缓存 POSIX 降级 shell 解析结果（每个进程只解析一次） */
+let cachedPosixShell: string | undefined;
+
+/**
+ * 解析 child_process 降级使用的 shell，尽量与用户终端语义对齐：
+ * - Windows：powershell.exe（与既有降级路径保持一致）
+ * - POSIX：优先 $SHELL（用户登录 shell，通常与 VS Code 终端默认 profile 一致），
+ *   未设置或路径不存在时退回 /bin/sh。
+ *
+ * 为什么不用固定的 /bin/sh：多行命令绕开 shell integration 后（见 hasMultilineCommand），
+ * 改动前它们在集成终端里由用户 shell 执行；固定 /bin/sh 在 Ubuntu 是 dash，
+ * 会让 `set -o pipefail` / `[[ ]]` / 数组等本来可用的脚本出现“单行能跑、多行报错”。
+ */
+function fallbackShell(): string {
+  if (platform() === 'win32') return 'powershell.exe';
+  if (cachedPosixShell !== undefined) return cachedPosixShell;
+  const envShell = process.env.SHELL;
+  cachedPosixShell = envShell && existsSync(envShell) ? envShell : '/bin/sh';
+  return cachedPosixShell;
+}
+
+/**
+ * 构建降级 shell 参数（按平台判断，避免与 shell 名耦合）。
+ *
+ * Windows 包装 `& { <cmd>\n}; exit $LASTEXITCODE`：
+ * - 闭合括号前换行：避免命令末行为注释时 `# ...` 把 `}; exit ...` 一并注释掉导致块未闭合；
+ * - 注意 $LASTEXITCODE 对纯 cmdlet 脚本为 $null（exit $null = 0），与既有行为保持一致，
+ *   不改为 $? 判定（-ErrorAction SilentlyContinue 等被抑制的错误会让 $? 为 false，造成误报失败）。
+ */
+function fallbackShellArgs(command: string): string[] {
+  return platform() === 'win32'
+    ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `& { ${command}\n}; exit $LASTEXITCODE`]
+    : ['-c', command];
+}
 
 // ─────────── TerminalRegistry ───────────
 
@@ -193,6 +298,8 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
       let isFirstChunk = true;
       let didOutputNonCommand = false;
       let didEmitEmptyLine = false;
+      // 命令行（trim 后、去空行）用于回显过滤：仅整行完全一致才视为回显（见 stripLeadingCommandEcho）
+      const commandLines = buildCommandLines(command);
       // 标准 for await...of 消费 stream —— Cline 方案
       // stream 自然结束即命令完成，不再需要 Promise.race / idle timeout
       // 注意：emitIfChunk 已确保每次 chunk 都立即 emit（不等待换行），
@@ -265,19 +372,12 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
           break;
         }
 
-        // 跳过命令回显
+        // 跳过命令回显（仅“整行与命令行完全一致”才视为回显；
+        // 旧版子串匹配会吞掉 echo/console.log 等“输出文本写在命令里”的真实输出）
         if (!didOutputNonCommand) {
-          const lines = data.split('\n');
-          for (let i = 0; i < lines.length; i++) {
-            if (command.includes(lines[i].trim())) {
-              lines.splice(i, 1);
-              i--;
-            } else {
-              didOutputNonCommand = true;
-              break;
-            }
-          }
-          data = lines.join('\n');
+          const filtered = stripLeadingCommandEcho(data, commandLines, didOutputNonCommand);
+          data = filtered.data;
+          didOutputNonCommand = filtered.alreadyOutput;
         }
 
         if (!didEmitEmptyLine && !this.fullOutput && data) {
@@ -332,20 +432,40 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
         if (eventExitCode !== undefined) {
           this.exitCode = eventExitCode;
         } else {
-          // stream 已自然结束但 exitCode 仍未知 → 标记为 0（命令正常完成无输出）
-          this.exitCode = 0;
+          // stream 已自然结束但 exitCode 仍未知 → 保持 undefined（不伪造 0）。
+          // BashTool 对 unknown 不判失败并显示 exit=unknown；
+          // 伪造 0 会把真实失败伪装成成功（“shell 不稳定”的观感来源之一）。
+          log.warn('shell integration ended without exit code; reporting exit=unknown');
         }
       }
 
-      // 空输出回退：shell integration 捕获失败，用剪贴板快照（Cline fallback 方案）
+      // 空输出回退：shell integration 捕获失败，用剪贴板快照（Cline fallback 方案）。
+      // 仅在目标终端为当前激活终端时使用：selectAll/copySelection 只作用于激活终端，
+      // 若命令跑在隐藏沙箱终端而激活终端是用户终端，会把无关内容当成命令输出（串台）。
       if (!this.fullOutput.trim()) {
-        try {
-          const clipboardSnapshot = await captureTerminalOutput();
-          if (clipboardSnapshot) {
-            this.fullOutput = clipboardSnapshot;
+        // 诊断线索：exit=0 且输出为空 → 多为命令本身无输出（debug 级，避免日志噪声）；
+        // 否则（exit 非 0 / 未知）→ warn，便于区分上游流数据缺失（microsoft/vscode#324392）
+        const emptyLog = {
+          exitCode: this.exitCode,
+          signal: this.signal,
+          cmd: command.slice(0, 80),
+        };
+        if (this.exitCode === 0) {
+          log.debug(emptyLog, 'shell integration captured empty output (exit=0)');
+        } else {
+          log.warn(emptyLog, 'shell integration captured empty output');
+        }
+        if (vscode.window.activeTerminal === terminal) {
+          try {
+            const clipboardSnapshot = await captureTerminalOutput();
+            if (clipboardSnapshot) {
+              this.fullOutput = clipboardSnapshot;
+            }
+          } catch (e) {
+            log.warn({ err: String(e) }, 'clipboard fallback failed');
           }
-        } catch (e) {
-          log.warn({ err: String(e) }, 'clipboard fallback failed');
+        } else {
+          log.debug('empty output and terminal not active; skip clipboard fallback');
         }
       }
 
@@ -586,6 +706,12 @@ export class VscodeTerminalManager implements ITerminalPool {
 
     log.debug({ cmd: command.slice(0, 80), cwd: opts.cwd }, 'runCommand (foreground, terminal visible)');
 
+    // 多行命令守卫：shell integration 对内嵌换行不可靠 → child_process 降级（见 hasMultilineCommand 注释）
+    if (hasMultilineCommand(command)) {
+      log.warn({ cmd: command.slice(0, 80) }, 'runCommand: multiline command → child_process fallback');
+      return this.runCommandFallback(opts);
+    }
+
     // 获取/创建 VS Code 终端（沙箱单终端）
     const terminalInfo = await this.getOrCreateTerminal(opts.cwd);
 
@@ -657,8 +783,14 @@ export class VscodeTerminalManager implements ITerminalPool {
    * 与 runCommand 的区别：
    * - runCommand 使用沙箱终端（show(false)）
    * - runCommandOnUserTerminal 使用用户可见终端（show(true)）
+   *
+   * guard.allowMultilineShellIntegration：多行命令默认走 child_process 降级（可靠但不可见）；
+   * 仅 UI「↪终端」重放这类 fire-and-forget、以“用户可见”为首要目标的调用可显式放行。
    */
-  async runCommandOnUserTerminal(opts: SpawnOptions): Promise<{
+  async runCommandOnUserTerminal(
+    opts: SpawnOptions,
+    guard: { allowMultilineShellIntegration?: boolean } = {},
+  ): Promise<{
     output: string;
     exitCode: number | null;
     signal: string | null;
@@ -670,6 +802,12 @@ export class VscodeTerminalManager implements ITerminalPool {
     if (!command) throw new Error('command 不能为空');
 
     log.debug({ cmd: command.slice(0, 80), cwd: opts.cwd }, 'runCommandOnUserTerminal');
+
+    // 多行命令守卫：shell integration 对内嵌换行不可靠 → child_process 降级（见 hasMultilineCommand 注释）
+    if (hasMultilineCommand(command) && !guard.allowMultilineShellIntegration) {
+      log.warn({ cmd: command.slice(0, 80) }, 'runCommandOnUserTerminal: multiline command → child_process fallback');
+      return this.runCommandFallback(opts);
+    }
 
     const terminalInfo = await this.getOrCreateUserTerminal(opts.cwd);
 
@@ -855,6 +993,14 @@ export class VscodeTerminalManager implements ITerminalPool {
    * 而是直接使用传入的 terminalInfo。
    */
   private async executeInTerminalWithInfo(session: ManagedSession, opts: SpawnOptions, terminalInfo: TerminalInfo): Promise<void> {
+    // 多行命令守卫：shell integration 对内嵌换行不可靠 → child_process 降级（见 hasMultilineCommand 注释）。
+    // 注意：此处不设置 session.terminalInfo，避免 killSession 时向无关终端发送 Ctrl+C。
+    if (hasMultilineCommand(opts.command)) {
+      log.warn({ id: session.id, cmd: opts.command.slice(0, 80) }, 'multiline command → executeFallback');
+      await this.executeFallback(session, opts);
+      return;
+    }
+
     session.terminalInfo = terminalInfo;
 
     // shellIntegration 已确认就绪过 → 跳过等待
@@ -918,6 +1064,12 @@ export class VscodeTerminalManager implements ITerminalPool {
    * 在 VS Code 沙箱终端中异步执行命令（用于 is_background 模式）。
    */
   private async executeInTerminal(session: ManagedSession, opts: SpawnOptions): Promise<void> {
+    // 多行命令守卫：不创建终端，直接 child_process 降级（见 hasMultilineCommand 注释）
+    if (hasMultilineCommand(opts.command)) {
+      log.warn({ id: session.id, cmd: opts.command.slice(0, 80) }, 'multiline command → executeFallback');
+      await this.executeFallback(session, opts);
+      return;
+    }
     const terminalInfo = await this.getOrCreateTerminal(opts.cwd);
     return this.executeInTerminalWithInfo(session, opts, terminalInfo);
   }
@@ -978,11 +1130,9 @@ export class VscodeTerminalManager implements ITerminalPool {
    * 降级执行：使用 child_process.spawn（保留原 TerminalPool 行为）。
    */
   private async executeFallback(session: ManagedSession, opts: SpawnOptions): Promise<void> {
-    const isWindows = platform() === 'win32';
-    const shell = isWindows ? 'powershell.exe' : '/bin/sh';
-    const shellArgs = isWindows
-      ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `& { ${opts.command} }; exit $LASTEXITCODE`]
-      : ['-c', opts.command];
+    // 降级 shell：POSIX 优先用户 $SHELL（与终端语义对齐），Windows=powershell.exe（见 fallbackShell）
+    const shell = fallbackShell();
+    const shellArgs = fallbackShellArgs(opts.command);
 
     let child: ChildProcess;
     try {
@@ -1063,11 +1213,9 @@ export class VscodeTerminalManager implements ITerminalPool {
     signal: string | null;
   }> {
     return new Promise((resolve) => {
-      const isWindows = platform() === 'win32';
-      const shell = isWindows ? 'powershell.exe' : '/bin/sh';
-      const shellArgs = isWindows
-        ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `& { ${opts.command} }; exit $LASTEXITCODE`]
-        : ['-c', opts.command];
+      // 降级 shell：POSIX 优先用户 $SHELL（与终端语义对齐），Windows=powershell.exe（见 fallbackShell）
+      const shell = fallbackShell();
+      const shellArgs = fallbackShellArgs(opts.command);
 
       const chunks: Buffer[] = [];
       let totalBytes = 0;
@@ -1109,7 +1257,9 @@ export class VscodeTerminalManager implements ITerminalPool {
 
       child.on('error', (err) => {
         clearTimeout(timer);
-        resolve({ output: `spawn failed: ${err.message}`, exitCode: null, signal: null });
+        // exitCode=-1 明确标记“进程根本没起来”：不能返回 null，
+        // 否则上层（bash.ts 视 null 为不失败）会把 spawn 失败当成成功。
+        resolve({ output: `spawn failed: ${err.message}`, exitCode: -1, signal: null });
       });
 
       child.on('close', (code, sig) => {

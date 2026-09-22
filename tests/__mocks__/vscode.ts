@@ -46,6 +46,10 @@ export const window = {
     key: 'mock-decoration-type',
     dispose: () => undefined,
   }),
+  /** 单测默认无激活终端（TerminalProcess 剪贴板回退会被跳过） */
+  activeTerminal: undefined as unknown,
+  /** TerminalProcess exitCode 兜底事件：单测中永不触发（由 safety timer 兜底） */
+  onDidEndTerminalShellExecution: (_cb: (e: unknown) => void) => ({ dispose: () => undefined }),
 };
 
 export const workspace = {

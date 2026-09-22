@@ -2069,14 +2069,19 @@ export class DualMindChatPanel {
 
       case 'open_terminal':
         // 点击「↪终端」→ 在用户可见终端执行（fire-and-forget，不需等待返回）
+        // 多行命令显式放行 shell integration：此调用以“用户可见”为首要目标（不消费输出），
+        // AI 工具调用路径仍默认走 child_process 降级（多行守卫）。
         {
           const cmd = msg.command;
           if (cmd) {
             const cwd = msg.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-            this.terminalManager.runCommandOnUserTerminal({
-              command: cmd,
-              cwd,
-            }).catch((e: unknown) => {
+            this.terminalManager.runCommandOnUserTerminal(
+              {
+                command: cmd,
+                cwd,
+              },
+              { allowMultilineShellIntegration: true },
+            ).catch((e: unknown) => {
               log.error({ err: String(e) }, 'open_terminal failed');
             });
           }
