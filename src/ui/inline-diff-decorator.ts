@@ -22,7 +22,7 @@
  */
 
 import * as vscode from 'vscode';
-import { parseUnifiedDiff, type Hunk, type ParsedDiff } from '../core/diff/hunk-parser.js';
+import { parseUnifiedDiff, type ParsedDiff } from '../core/diff/hunk-parser.js';
 import { revertHunk } from '../core/diff/hunk-reverter.js';
 import { getLogger } from '../infra/logger.js';
 import { getNickname } from '../infra/nickname.js';
@@ -92,7 +92,7 @@ class FileDecorator implements vscode.Disposable {
     private readonly editor: vscode.TextEditor,
     private readonly absPath: string,
     private readonly relPath: string,
-    private readonly onDispose: (absPath: string) => void,
+    private readonly onDispose: (absPath: string, resolved: boolean) => void,
   ) {}
 
   /** 应用 diff 装饰 */
@@ -181,22 +181,35 @@ class FileDecorator implements vscode.Disposable {
     this.clearAll();
   }
 
-  /** Reject 全部 pending hunks */
-  async rejectAll(): Promise<void> {
-    if (!this.parsedDiff) return;
+  /** Reject 全部 pending hunks（返回实际回滚结果：K5 · 失败不谎报成功） */
+  async rejectAll(): Promise<{ ok: boolean; failed: number; message?: string }> {
+    if (!this.parsedDiff) return { ok: true, failed: 0 };
+    let failed = 0;
+    let firstError = '';
     for (let i = 0; i < this.hunks.length; i++) {
       if (this.hunks[i].state !== 'pending') continue;
       const hunk = this.parsedDiff.hunks[i];
       if (!hunk) continue;
       try {
-        await revertHunk(this.absPath, hunk);
-        this.hunks[i].state = 'rejected';
-      } catch {
-        // 继续处理其他 hunk
+        const result = await revertHunk(this.absPath, hunk);
+        if (result.ok) {
+          this.hunks[i].state = 'rejected';
+        } else {
+          failed++;
+          if (!firstError) firstError = result.message;
+        }
+      } catch (e) {
+        failed++;
+        if (!firstError) firstError = String(e);
       }
     }
     this.render();
-    this.clearAll();
+    if (failed === 0) {
+      this.clearAll();
+      return { ok: true, failed: 0 };
+    }
+    log.warn({ relPath: this.relPath, failed, firstError }, 'rejectAll: partial failure');
+    return { ok: false, failed, message: `${failed} 个 hunk 回滚失败：${firstError}` };
   }
 
   /** 跳转到下一个 hunk */
@@ -328,7 +341,7 @@ class FileDecorator implements vscode.Disposable {
     }
   }
 
-  /** 清除所有装饰 */
+  /** 清除所有装饰（全部收敛：accept/reject 完成） */
   private clearAll(): void {
     try {
       this.editor.setDecorations(addedLineType, []);
@@ -338,7 +351,7 @@ class FileDecorator implements vscode.Disposable {
     } catch {
       // ignore
     }
-    this.onDispose(this.absPath);
+    this.onDispose(this.absPath, true);
   }
 
   dispose(): void {
@@ -360,8 +373,18 @@ class FileDecorator implements vscode.Disposable {
 /** 大文件保护：超过此行数的文件跳过内联装饰（防止 Extension Host 卡死） */
 const MAX_LINES_FOR_INLINE_DIFF = 2000;
 
+/** 单文件待处理 diff 快照（编辑器关闭/装饰跳过时仍保留，用于重开恢复与回滚兜底） */
+interface PendingDiffSnapshot {
+  relPath: string;
+  unified: string;
+  /** hunk 总数（大文件保护判定，避免重开恢复时重复统计） */
+  hunkCount: number;
+}
+
 export class InlineDiffController implements vscode.Disposable {
   private readonly decorators = new Map<string, FileDecorator>();
+  /** absPath → 待处理 diff 快照（accept/reject 收敛后移除） */
+  private readonly pendingDiffs = new Map<string, PendingDiffSnapshot>();
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -385,7 +408,9 @@ export class InlineDiffController implements vscode.Disposable {
       }),
     );
 
-    // 监听编辑器关闭 → 清理
+    // 监听编辑器关闭/重新打开（快照保留）：
+    // - 关闭：释放装饰，diff 快照保留
+    // - 打开：文件有待处理快照 → 从快照恢复装饰/操作条（否则文件重开后按钮与装饰全部消失）
     this.disposables.push(
       vscode.window.onDidChangeVisibleTextEditors((editors) => {
         const visiblePaths = new Set(editors.map((e) => e.document.uri.fsPath));
@@ -395,14 +420,56 @@ export class InlineDiffController implements vscode.Disposable {
             this.decorators.delete(absPath);
           }
         }
+        for (const editor of editors) {
+          const absPath = editor.document.uri.fsPath;
+          if (this.decorators.has(absPath)) continue;
+          const snapshot = this.pendingDiffs.get(absPath);
+          if (!snapshot) continue;
+          // 大文件保护：与首次应用一致，重开恢复也跳过超大文件
+          if (snapshot.hunkCount > MAX_LINES_FOR_INLINE_DIFF) continue;
+          if (editor.document.lineCount > MAX_LINES_FOR_INLINE_DIFF) continue;
+          this.attachDecorator(editor, absPath, snapshot.relPath, snapshot.unified, false);
+        }
       }),
     );
+  }
+
+  /**
+   * 创建/刷新某文件的装饰器。
+   * @param jumpToFirst 是否跳转到第一个 pending hunk（首次应用 diff 为 true；重开恢复为 false，避免抢滚动位置）
+   */
+  private attachDecorator(
+    editor: vscode.TextEditor,
+    absPath: string,
+    relPath: string,
+    unified: string,
+    jumpToFirst: boolean,
+  ): void {
+    const existing = this.decorators.get(absPath);
+    if (existing) {
+      existing.applyDiff(unified);
+      if (jumpToFirst) existing.navigateNext();
+      return;
+    }
+
+    const decorator = new FileDecorator(editor, absPath, relPath, (path, resolved) => {
+      this.decorators.delete(path);
+      // 收敛（accept/reject 完成）→ 丢弃快照；编辑器关闭触发的 dispose 不走此回调，快照保留
+      if (resolved) this.pendingDiffs.delete(path);
+    });
+    decorator.applyDiff(unified);
+    this.decorators.set(absPath, decorator);
+    if (jumpToFirst) decorator.navigateNext();
   }
 
   /** 接收 tool_diff 数据，为对应文件创建装饰 */
   async onToolDiff(absPath: string, relPath: string, unified: string): Promise<void> {
     // 大文件保护：统计 hunk 数量，过多时跳过内联装饰
     const hunkCount = (unified.match(/^@@/gm) || []).length;
+
+    // 先记录快照：即使装饰被跳过（大文件保护/编辑器未打开），"同意/拒绝"与重开恢复仍可用
+    this.pendingDiffs.set(absPath, { relPath, unified, hunkCount });
+
     if (hunkCount > MAX_LINES_FOR_INLINE_DIFF) {
       log.info(
         { relPath, hunkCount, max: MAX_LINES_FOR_INLINE_DIFF },
@@ -436,23 +503,16 @@ export class InlineDiffController implements vscode.Disposable {
       return;
     }
 
-    // 已有装饰 → 更新
-    let decorator = this.decorators.get(absPath);
-    if (decorator) {
-      decorator.applyDiff(unified);
-    } else {
-      decorator = new FileDecorator(editor, absPath, relPath, (path) => {
-        this.decorators.delete(path);
-      });
-      decorator.applyDiff(unified);
-      this.decorators.set(absPath, decorator);
-    }
-
-    // 自动跳转到第一个 hunk
-    decorator.navigateNext();
+    this.attachDecorator(editor, absPath, relPath, unified, true);
 
     // 显示状态栏提示（使用助手昵称）
-    const status = decorator.getStatus();
+    const status = this.decorators.get(absPath)?.getStatus() ?? {
+      total: hunkCount,
+      pending: hunkCount,
+      accepted: 0,
+      rejected: 0,
+      activeIdx: -1,
+    };
     vscode.window.setStatusBarMessage(
       `${getNickname()} Diff: ${relPath} — Hunk ${status.activeIdx + 1}/${status.total}  (${status.pending} pending)  Ctrl+Enter Accept · Ctrl+Backspace Reject`,
       5000,
@@ -503,17 +563,99 @@ export class InlineDiffController implements vscode.Disposable {
     }
   }
 
-  /** 对所有已装饰文件执行 Accept All（供 EditorChangeBar 调用） */
-  async acceptAllFiles(): Promise<void> {
-    for (const decorator of this.decorators.values()) {
+  /** 该文件是否存在待处理变更（装饰或快照） */
+  hasPending(absPath: string): boolean {
+    return this.decorators.has(absPath) || this.pendingDiffs.has(absPath);
+  }
+
+  /** 接受单文件全部变更：清除装饰与 diff 快照，保留文件当前内容 */
+  acceptFile(absPath: string): void {
+    const decorator = this.decorators.get(absPath);
+    if (decorator) {
+      // acceptAll → clearAll → onDispose(absPath, true)：同时清掉 decorators / pendingDiffs
       decorator.acceptAll();
+    }
+    // 兜底：无装饰（编辑器未打开/大文件跳过）时直接丢弃快照
+    this.decorators.delete(absPath);
+    this.pendingDiffs.delete(absPath);
+  }
+
+  /** 拒绝单文件变更：逐 hunk 回滚；无装饰时用 diff 快照兜底 */
+  async rejectFile(absPath: string): Promise<{ ok: boolean; message?: string }> {
+    const decorator = this.decorators.get(absPath);
+    if (decorator) {
+      const res = await decorator.rejectAll();
+      if (res.ok) {
+        this.decorators.delete(absPath);
+        this.pendingDiffs.delete(absPath);
+        return { ok: true };
+      }
+      return { ok: false, ...(res.message !== undefined ? { message: res.message } : {}) };
+    }
+
+    const snapshot = this.pendingDiffs.get(absPath);
+    if (!snapshot) return { ok: false, message: '没有待处理的变更记录，无法回滚' };
+    const parsed = parseUnifiedDiff(snapshot.unified);
+    if (!parsed || parsed.hunks.length === 0) {
+      return { ok: false, message: 'diff 解析失败，无法回滚' };
+    }
+
+    let failed = 0;
+    let firstError = '';
+    for (const hunk of parsed.hunks) {
+      try {
+        const result = await revertHunk(absPath, hunk);
+        if (!result.ok) {
+          failed++;
+          if (!firstError) firstError = result.message;
+        }
+      } catch (e) {
+        failed++;
+        if (!firstError) firstError = String(e);
+      }
+    }
+    if (failed === 0) {
+      this.pendingDiffs.delete(absPath);
+      return { ok: true };
+    }
+    return { ok: false, message: `${failed} 个 hunk 回滚失败：${firstError}` };
+  }
+
+  /** 丢弃某文件的全部待处理状态（装饰 + 快照），不改变文件内容 */
+  discardFile(absPath: string): void {
+    this.pendingDiffs.delete(absPath);
+    const decorator = this.decorators.get(absPath);
+    if (decorator) {
+      decorator.dispose();
+      this.decorators.delete(absPath);
     }
   }
 
-  /** 对所有已装饰文件执行 Reject All（供 EditorChangeBar 调用） */
+  /** 丢弃所有待处理状态（装饰 + 快照），不改变文件内容 */
+  discardAll(): void {
+    for (const decorator of this.decorators.values()) decorator.dispose();
+    this.decorators.clear();
+    this.pendingDiffs.clear();
+  }
+
+  /** 对所有待处理文件执行 Accept All（供操作条/命令调用） */
+  async acceptAllFiles(): Promise<void> {
+    for (const decorator of Array.from(this.decorators.values())) {
+      decorator.acceptAll();
+    }
+    // 无装饰的文件（编辑器未打开/大文件跳过）：直接丢弃快照
+    this.decorators.clear();
+    this.pendingDiffs.clear();
+  }
+
+  /** 对所有待处理文件执行 Reject All（逐 hunk 回滚，无装饰时用快照兜底） */
   async rejectAllFiles(): Promise<void> {
-    for (const decorator of this.decorators.values()) {
-      await decorator.rejectAll();
+    const targets = new Set<string>([...this.pendingDiffs.keys(), ...this.decorators.keys()]);
+    for (const absPath of targets) {
+      const res = await this.rejectFile(absPath);
+      if (!res.ok) {
+        log.warn({ absPath, message: res.message }, 'rejectAllFiles: file revert failed');
+      }
     }
   }
 

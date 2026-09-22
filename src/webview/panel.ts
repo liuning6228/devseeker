@@ -1951,18 +1951,11 @@ export class DualMindChatPanel {
 
       case 'accept_diff': {
         // W-UI2 · webview Accept 单文件 → 清除 inline diff 装饰 + 更新 EditorChangeBar
-        if (DualMindChatPanel.inlineDiffController) {
-          const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          const absPath = wsRoot ? path.resolve(wsRoot, msg.relPath) : msg.relPath;
-          const decorator = (DualMindChatPanel.inlineDiffController as any).decorators?.get(absPath) as any;
-          if (decorator) {
-            decorator.acceptAll();
-          }
-        }
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const absPath = wsRoot ? path.resolve(wsRoot, msg.relPath) : msg.relPath;
+        DualMindChatPanel.inlineDiffController?.acceptFile(absPath);
         // 同步更新 EditorChangeBar：移除该文件
-        if (DualMindChatPanel.editorChangeBar) {
-          DualMindChatPanel.editorChangeBar.removeFile(msg.relPath);
-        }
+        DualMindChatPanel.editorChangeBar?.removeFile(msg.relPath);
         // 清理该文件对应的 step checkpoint（不再需要回滚）
         this.cleanupCheckpointsOnAccept(msg.relPath).catch((e: unknown) =>
           log.warn({ err: String(e), relPath: msg.relPath }, 'accept_diff checkpoint cleanup failed'),
@@ -1983,9 +1976,17 @@ export class DualMindChatPanel {
       case 'reject_diff': {
         // W-UI2 · webview Reject 单文件 → 回滚该文件 + 清除 inline diff 装饰 + 更新 EditorChangeBar
         // 卡片契约 K5：UI 声明（已拒绝）必须等于实际动作——成功/失败/无 checkpoint 都要回执
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const absPath = wsRoot ? path.resolve(wsRoot, msg.relPath) : msg.relPath;
+        const controller = DualMindChatPanel.inlineDiffController;
         if (msg.checkpointId) {
           this.handleRevertStep(msg.checkpointId).then(
-            () => this.post({ type: 'reject_result', relPath: msg.relPath, ok: true }),
+            () => {
+              // checkpoint 已把文件恢复到修改前 → 丢弃装饰与快照（避免二次 hunk 回滚）
+              controller?.discardFile(absPath);
+              DualMindChatPanel.editorChangeBar?.removeFile(msg.relPath);
+              this.post({ type: 'reject_result', relPath: msg.relPath, ok: true });
+            },
             (e: unknown) => {
               log.error({ err: String(e), checkpointId: msg.checkpointId }, 'reject_diff revert failed');
               this.post({
@@ -1997,37 +1998,52 @@ export class DualMindChatPanel {
             },
           );
         } else {
-          log.warn({ relPath: msg.relPath }, 'reject_diff: no checkpointId, cannot revert');
-          this.post({
-            type: 'reject_result',
-            relPath: msg.relPath,
-            ok: false,
-            message: '该文件没有可用的 checkpoint：仅清除了编辑器装饰，内容未回滚',
-          });
-        }
-        // 清除 inline diff 装饰
-        if (DualMindChatPanel.inlineDiffController) {
-          const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          const absPath = wsRoot ? path.resolve(wsRoot, msg.relPath) : msg.relPath;
-          const decorator = (DualMindChatPanel.inlineDiffController as any).decorators?.get(absPath) as any;
-          if (decorator) {
-            decorator.rejectAll();
-          }
-        }
-        // 同步更新 EditorChangeBar：移除该文件
-        if (DualMindChatPanel.editorChangeBar) {
-          DualMindChatPanel.editorChangeBar.removeFile(msg.relPath);
+          // 无 checkpoint：退化为 hunk 级回滚（尽力回滚，失败如实回报）
+          log.warn({ relPath: msg.relPath }, 'reject_diff: no checkpointId, fallback to hunk revert');
+          void (controller
+            ? controller.rejectFile(absPath)
+            : Promise.resolve({ ok: false, message: 'InlineDiffController 未初始化' })
+          ).then(
+            (res) => {
+              if (res.ok) DualMindChatPanel.editorChangeBar?.removeFile(msg.relPath);
+              this.post({
+                type: 'reject_result',
+                relPath: msg.relPath,
+                ok: res.ok,
+                ...(res.ok
+                  ? {}
+                  : { message: `该文件没有可用的 checkpoint：${res.message ?? '内容未回滚'}` }),
+              });
+            },
+            (e: unknown) => {
+              log.error({ err: String(e), relPath: msg.relPath }, 'reject_diff hunk revert failed');
+              this.post({
+                type: 'reject_result',
+                relPath: msg.relPath,
+                ok: false,
+                message: `回滚失败：${e instanceof Error ? e.message : String(e)}`,
+              });
+            },
+          );
         }
         break;
       }
 
       case 'reject_all_diffs': {
         // W-UI2 · webview Reject All → 回滚所有文件 + 清除所有 inline diff 装饰 + 清空 EditorChangeBar
+        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         const files = msg.files;
         for (const file of files) {
+          const absPath = wsRoot ? path.resolve(wsRoot, file.relPath) : file.relPath;
           if (file.checkpointId) {
+            const controller = DualMindChatPanel.inlineDiffController;
             this.handleRevertStep(file.checkpointId).then(
-              () => this.post({ type: 'reject_result', relPath: file.relPath, ok: true }),
+              () => {
+                // checkpoint 已完成内容回滚 → 丢弃装饰与快照
+                controller?.discardFile(absPath);
+                DualMindChatPanel.editorChangeBar?.removeFile(file.relPath);
+                this.post({ type: 'reject_result', relPath: file.relPath, ok: true });
+              },
               (e: unknown) => {
                 log.error({ err: String(e), checkpointId: file.checkpointId }, 'reject_all_diffs revert failed');
                 this.post({
@@ -2039,19 +2055,36 @@ export class DualMindChatPanel {
               },
             );
           } else {
-            log.warn({ relPath: file.relPath }, 'reject_all_diffs: no checkpointId for file, skipping');
-            this.post({
-              type: 'reject_result',
-              relPath: file.relPath,
-              ok: false,
-              message: '该文件没有可用的 checkpoint：内容未回滚',
-            });
+            // 无 checkpoint：退化为 hunk 级回滚（尽力回滚，失败如实回报）
+            log.warn({ relPath: file.relPath }, 'reject_all_diffs: no checkpointId, fallback to hunk revert');
+            const controller = DualMindChatPanel.inlineDiffController;
+            void (controller
+              ? controller.rejectFile(absPath)
+              : Promise.resolve({ ok: false, message: 'InlineDiffController 未初始化' })
+            ).then(
+              (res) => {
+                if (res.ok) DualMindChatPanel.editorChangeBar?.removeFile(file.relPath);
+                this.post({
+                  type: 'reject_result',
+                  relPath: file.relPath,
+                  ok: res.ok,
+                  ...(res.ok
+                    ? {}
+                    : { message: `该文件没有可用的 checkpoint：${res.message ?? '内容未回滚'}` }),
+                });
+              },
+              (e: unknown) => {
+                log.error({ err: String(e), relPath: file.relPath }, 'reject_all_diffs hunk revert failed');
+                this.post({
+                  type: 'reject_result',
+                  relPath: file.relPath,
+                  ok: false,
+                  message: `回滚失败：${e instanceof Error ? e.message : String(e)}`,
+                });
+              },
+            );
           }
         }
-        // 清除所有 inline diff 装饰
-        DualMindChatPanel.inlineDiffController?.rejectAllFiles();
-        // 清空 EditorChangeBar
-        DualMindChatPanel.editorChangeBar?.clear();
         break;
       }
 
@@ -5629,6 +5662,36 @@ export class DualMindChatPanel {
   }
 
   /**
+   * 编辑器侧操作条（CodeLens：同意/拒绝）完成后的状态同步。
+   * 卡片契约 K5：编辑器动作与聊天卡片状态必须同源——把结果回推 webview，
+   * 否则卡片仍显示"待处理"，两个入口声明不一致。
+   */
+  notifyDiffResolvedFromEditor(
+    relPath: string,
+    action: 'accept' | 'reject',
+    ok: boolean,
+    message?: string,
+  ): void {
+    try {
+      this.post({
+        type: 'diff_resolved',
+        relPath,
+        action,
+        ok,
+        ...(message !== undefined ? { message } : {}),
+      });
+    } catch (e) {
+      log.warn({ err: String(e), relPath, action }, 'notifyDiffResolvedFromEditor failed');
+    }
+    if (action === 'accept' && ok) {
+      // 编辑器侧已接受该文件：清理关联 step checkpoint（与 webview Accept 路径一致）
+      this.cleanupCheckpointsOnAccept(relPath).catch((e: unknown) =>
+        log.warn({ err: String(e), relPath }, 'accept from editor: checkpoint cleanup failed'),
+      );
+    }
+  }
+
+  /**
    * cleanupCheckpointsOnAccept · 单文件 accept 后清理关联的 step checkpoint。
    *
    * 删除 label 以 "step:" 开头且 fileSnapshots 中只有一个文件且 relPath 匹配的 checkpoint。
@@ -5937,6 +6000,8 @@ export class DualMindChatPanel {
             DualMindChatPanel.inlineDiffController?.onToolDiff(absPath, relPath, diff.unified);
           });
         }
+        // 同时登记到 EditorChangeBar：会话恢复后"上一个/下一个文件 + 同意/拒绝"操作条仍然可用
+        DualMindChatPanel.editorChangeBar?.addChangedFile(relPath, absPath, diff.added, diff.removed);
       }
 
       log.info(

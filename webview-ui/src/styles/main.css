@@ -1310,15 +1310,17 @@ body {
   gap: 8px;
   padding: 12px;
   margin: 8px 0;
-  border: 1px solid var(--vscode-widget-border, #333);
+  border: 1px solid var(--vscode-widget-border, #d4d4d4);
   border-radius: 6px;
-  background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.03));
+  background: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.06));
+  /* 不继承宿主默认前景色：宿主未注入变量时保证浅色背景上的深色文字 */
+  color: var(--vscode-foreground, #1f1f1f);
 }
 
 .approval-card__title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--vscode-settings-headerForeground, var(--vscode-foreground));
+  color: var(--vscode-settings-headerForeground, var(--vscode-foreground, #1f1f1f));
 }
 
 .approval-card__info {
@@ -1336,12 +1338,12 @@ body {
 
 .approval-card__label {
   flex-shrink: 0;
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-descriptionForeground, #616161);
   min-width: 48px;
 }
 
 .approval-card__value {
-  color: var(--vscode-foreground);
+  color: var(--vscode-foreground, #1f1f1f);
   word-break: break-all;
 }
 
@@ -1349,8 +1351,8 @@ body {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: var(--vscode-badge-background, rgba(128,128,128,0.15));
-  color: var(--vscode-badge-foreground, var(--vscode-foreground));
+  background: var(--vscode-badge-background, #c4c4c4);
+  color: var(--vscode-badge-foreground, var(--vscode-foreground, #333333));
   flex-shrink: 0;
   text-transform: uppercase;
 }
@@ -1358,7 +1360,8 @@ body {
 .approval-card__code {
   font-size: 11px;
   font-family: var(--vscode-editor-font-family, monospace);
-  background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.05));
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
+  color: var(--vscode-editor-foreground, #1f1f1f);
   padding: 2px 6px;
   border-radius: 3px;
   word-break: break-all;
@@ -1368,7 +1371,8 @@ body {
 .approval-card__code-block {
   font-size: 11px;
   font-family: var(--vscode-editor-font-family, monospace);
-  background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.08));
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
+  color: var(--vscode-editor-foreground, #1f1f1f);
   padding: 6px 8px;
   border-radius: 4px;
   margin: 2px 0;
@@ -1377,7 +1381,7 @@ body {
   overflow-y: auto;
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--vscode-widget-border, #333);
+  border: 1px solid var(--vscode-widget-border, #d4d4d4);
 }
 
 .approval-card__row--command {
@@ -1387,16 +1391,16 @@ body {
 .approval-card__args {
   font-size: 11px;
   font-family: monospace;
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-descriptionForeground, #616161);
 }
 
 .approval-card__hint {
   font-size: 11px;
-  color: var(--vscode-descriptionForeground);
+  color: var(--vscode-descriptionForeground, #616161);
   padding: 6px 8px;
-  background: var(--vscode-editorInfo-background, rgba(0,120,212,0.08));
+  background: var(--vscode-editorInfo-background, rgba(0, 120, 212, 0.08));
   border-radius: 4px;
-  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+  border-left: 3px solid var(--vscode-textLink-foreground, #005fb8);
   line-height: 1.4;
 }
 
@@ -1405,7 +1409,7 @@ body {
   justify-content: flex-end;
   gap: 6px;
   padding-top: 4px;
-  border-top: 1px solid var(--vscode-widget-border, #333);
+  border-top: 1px solid var(--vscode-widget-border, #e5e5e5);
 }
 
 .approval-card__btn {
@@ -1418,34 +1422,34 @@ body {
 }
 
 .approval-card__btn--allow {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background, #005fb8);
+  color: var(--vscode-button-foreground, #ffffff);
 }
 
 .approval-card__btn--allow:hover {
-  background: var(--vscode-button-hoverBackground);
+  background: var(--vscode-button-hoverBackground, #0258a8);
 }
 
 .approval-card__btn--deny {
   background: transparent;
-  color: var(--vscode-errorForeground);
-  border: 1px solid var(--vscode-errorForeground);
+  color: var(--vscode-errorForeground, #b5200d);
+  border: 1px solid var(--vscode-errorForeground, #b5200d);
 }
 
 .approval-card__btn--deny:hover {
-  background: var(--vscode-errorForeground);
-  color: var(--vscode-button-foreground);
+  background: var(--vscode-errorForeground, #b5200d);
+  color: var(--vscode-button-foreground, #ffffff);
 }
 
 .approval-card__btn--remember {
   background: transparent;
-  color: var(--vscode-textLink-foreground, #3794ff);
-  border: 1px solid var(--vscode-textLink-foreground, #3794ff);
+  color: var(--vscode-textLink-foreground, #005fb8);
+  border: 1px solid var(--vscode-textLink-foreground, #005fb8);
 }
 
 .approval-card__btn--remember:hover {
-  background: var(--vscode-textLink-foreground, #3794ff);
-  color: var(--vscode-button-foreground);
+  background: var(--vscode-textLink-foreground, #005fb8);
+  color: var(--vscode-button-foreground, #ffffff);
 }
 
 /* ═══════════════════════════════════════════════
@@ -1738,8 +1742,10 @@ body {
 }
 
 .ask-modal {
-  background: var(--vscode-editor-background, #1e1e1e);
-  border: 1px solid var(--vscode-widget-border, #333);
+  /* fallback 必须是浅色：宿主未注入 --vscode-* 时，浏览器默认黑字 + 深色 fallback = 黑底黑字看不清 */
+  background: var(--vscode-editor-background, #ffffff);
+  color: var(--vscode-foreground, #1f1f1f);
+  border: 1px solid var(--vscode-widget-border, #d4d4d4);
   border-radius: 8px;
   padding: 20px 24px;
   max-width: 520px;
@@ -1757,14 +1763,43 @@ body {
 
 .ask-modal__hint {
   font-size: 12px;
-  color: var(--vscode-descriptionForeground, #999);
+  color: var(--vscode-descriptionForeground, #616161);
   margin-bottom: 16px;
+}
+
+/* 进度条（已回答 x / y） */
+.ask-modal__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ask-modal__progress-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.25));
+}
+
+.ask-modal__progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--vscode-progressBar-background, var(--vscode-button-background, #005fb8));
+  transition: width 0.2s ease;
+}
+
+.ask-modal__progress-text {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #616161);
 }
 
 .ask-modal__question {
   margin-bottom: 16px;
   padding: 12px;
-  background: var(--vscode-sidebar-background, #252526);
+  background: var(--vscode-sidebar-background, #f3f3f3);
   border-radius: 6px;
 }
 
@@ -1781,13 +1816,13 @@ body {
   font-weight: 500;
   padding: 1px 6px;
   border-radius: 3px;
-  background: var(--vscode-badge-background, #4d4d4d);
-  color: var(--vscode-badge-foreground, #fff);
+  background: var(--vscode-badge-background, #c4c4c4);
+  color: var(--vscode-badge-foreground, #333333);
 }
 
 .ask-modal__multi {
   font-size: 10px;
-  color: var(--vscode-textLink-foreground, #3794ff);
+  color: var(--vscode-textLink-foreground, #005fb8);
 }
 
 .ask-modal__text {
@@ -1798,7 +1833,7 @@ body {
 
 .ask-modal__select-hint {
   font-size: 11px;
-  color: var(--vscode-descriptionForeground, #999);
+  color: var(--vscode-descriptionForeground, #616161);
   margin-bottom: 6px;
 }
 
@@ -1818,15 +1853,17 @@ body {
 
 .ask-modal__option:hover,
 .ask-modal__option:focus-visible {
-  background: var(--vscode-list-hoverBackground, #2a2a2a);
+  background: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.06));
 }
 
 .ask-modal__option--checked {
-  background: var(--vscode-list-activeSelectionBackground, #094771);
+  background: var(--vscode-list-activeSelectionBackground, #0060c0);
+  /* 选中态必须同时给前景色：高亮底色上不能继续用普通前景色 */
+  color: var(--vscode-list-activeSelectionForeground, #ffffff);
 }
 
 .ask-modal__option--checked:hover {
-  background: var(--vscode-list-activeSelectionBackground, #094771);
+  background: var(--vscode-list-activeSelectionBackground, #0060c0);
   opacity: 0.9;
 }
 
@@ -1848,7 +1885,12 @@ body {
   line-height: 1.4;
   width: 16px;
   text-align: center;
-  color: var(--vscode-textLink-foreground, #3794ff);
+  color: var(--vscode-textLink-foreground, #005fb8);
+}
+
+/* 选中态：指示符/描述跟随选中前景色，避免高亮底色上对比度不足 */
+.ask-modal__option--checked .ask-modal__option-indicator {
+  color: inherit;
 }
 
 .ask-modal__option-text {
@@ -1864,9 +1906,14 @@ body {
 
 .ask-modal__option-desc {
   font-size: 11px;
-  color: var(--vscode-descriptionForeground, #999);
+  color: var(--vscode-descriptionForeground, #616161);
   display: block;
   margin-top: 2px;
+}
+
+.ask-modal__option--checked .ask-modal__option-desc {
+  color: inherit;
+  opacity: 0.85;
 }
 
 .ask-modal__other {
@@ -1875,7 +1922,7 @@ body {
 
 .ask-modal__other-header {
   font-size: 11px;
-  color: var(--vscode-descriptionForeground, #999);
+  color: var(--vscode-descriptionForeground, #616161);
   margin-bottom: 4px;
 }
 
@@ -1883,10 +1930,10 @@ body {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
-  border: 1px solid var(--vscode-input-border, #555);
+  border: 1px solid var(--vscode-input-border, #cecece);
   border-radius: 4px;
-  background: var(--vscode-input-background, #3c3c3c);
-  color: var(--vscode-input-foreground, #ccc);
+  background: var(--vscode-input-background, #ffffff);
+  color: var(--vscode-input-foreground, #1f1f1f);
   font-size: 12px;
   line-height: 1.4;
   resize: vertical;
@@ -1895,12 +1942,12 @@ body {
 
 .ask-modal__other-input:focus {
   outline: none;
-  border-color: var(--vscode-focusBorder, #007acc);
-  box-shadow: 0 0 0 1px var(--vscode-focusBorder, #007acc);
+  border-color: var(--vscode-focusBorder, #005fb8);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder, #005fb8);
 }
 
 .ask-modal__other-input::placeholder {
-  color: var(--vscode-input-placeholderForeground, #777);
+  color: var(--vscode-input-placeholderForeground, #767676);
 }
 
 .ask-modal__actions {
@@ -1909,7 +1956,7 @@ body {
   gap: 8px;
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid var(--vscode-widget-border, #333);
+  border-top: 1px solid var(--vscode-widget-border, #e5e5e5);
 }
 
 .ask-modal__btn {
@@ -1921,21 +1968,21 @@ body {
 }
 
 .ask-modal__btn--cancel {
-  background: var(--vscode-button-secondaryBackground, #3a3a3a);
-  color: var(--vscode-button-secondaryForeground, #ccc);
+  background: var(--vscode-button-secondaryBackground, #e5e5e5);
+  color: var(--vscode-button-secondaryForeground, #1f1f1f);
 }
 
 .ask-modal__btn--cancel:hover {
-  background: var(--vscode-button-secondaryHoverBackground, #4a4a4a);
+  background: var(--vscode-button-secondaryHoverBackground, #cccccc);
 }
 
 .ask-modal__btn--submit {
-  background: var(--vscode-button-background, #007acc);
-  color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-background, #005fb8);
+  color: var(--vscode-button-foreground, #ffffff);
 }
 
 .ask-modal__btn--submit:hover:not(:disabled) {
-  background: var(--vscode-button-hoverBackground, #0098ff);
+  background: var(--vscode-button-hoverBackground, #0258a8);
 }
 
 .ask-modal__btn--submit:disabled {
