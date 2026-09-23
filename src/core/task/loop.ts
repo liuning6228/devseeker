@@ -55,6 +55,7 @@ import { sleepWithAbort } from '../retry/backoff.js';
 import { StreamingDiffViewProvider } from '../../ui/streaming-diff-view.js';
 import { runConcurrent } from '../subagent/thread-pool.js';
 import {
+  buildCompletionFallbackSummary,
   buildGatePrompt,
   buildUnverifiedWarning,
   computeAffectedTests,
@@ -723,8 +724,9 @@ export class TaskLoop {
       }
       if (outcome.kind === 'completed') {
         // W-UI10 · 如果本轮没有助理文本（纯 tool call 场景），补一条总结提示
+        // v0.8.7 · 兜底总结并入验证结果（验证 FAILED 时降级为 ⚠️ 口径，不给 ✅）
         if (!lastAssistantText?.trim() && totalToolCalls > 0) {
-          const summary = `✅ 任务执行完成，共调用 ${totalToolCalls} 个工具。`;
+          const summary = buildCompletionFallbackSummary(totalToolCalls, this.lastTestSummary);
           this.emit({ type: 'text_delta', taskId: this.taskId, text: summary });
           lastAssistantText = summary;
         }
@@ -1738,9 +1740,11 @@ export class TaskLoop {
     if (summary.status === 'passed') {
       this.verificationState = 'Passed';
       this.gateWarning = undefined;
+      // hard 门没有模型轮次可重写结论：把计数与命令并入追加小结，使其与结论同一条消息内自足
+      const cmdPart = ctx.command ? `，命令：\`${ctx.command}\`` : '';
       this.emit({
         type: 'text_delta', taskId: this.taskId,
-        text: `\n\n✅ 验证通过（Verify 子代理）：${summary.passed} passed\n`,
+        text: `\n\n✅ 验证通过（Verify 子代理）：${summary.passed} passed / ${summary.failed} failed${cmdPart}。\n`,
       });
       return 'allow';
     }

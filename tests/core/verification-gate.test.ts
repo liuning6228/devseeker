@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_VERIFICATION_CONFIG,
   MAX_SOFT_PROMPTS,
+  buildCompletionFallbackSummary,
   buildFixPrompt,
   buildGatePrompt,
   buildUnverifiedWarning,
@@ -191,6 +192,13 @@ describe('buildGatePrompt', () => {
     expect(p).toContain('Status:');
     expect(p).toContain('Commands run:');
     expect(p).toContain('Counts:');
+  });
+
+  it('要求验证后输出"综合最终答复"（结论 + 验证结果合并，禁止只回一句测试通过）', () => {
+    const p = buildGatePrompt({ ...base, tier: 'L1-test' });
+    expect(p).toContain('综合最终答复');
+    expect(p).toContain('合并重写');
+    expect(p).toContain('不要只回一句"测试通过"');
   });
 
   it('L1 给出命令与受影响测试', () => {
@@ -387,6 +395,37 @@ describe('decideTier · 降级链', () => {
       conventions: { testDir: 'tests', filePattern: '*.test.ts' },
     };
     expect(decideTier(plan, false, true)).toBe('L4-manual');
+  });
+});
+
+describe('buildCompletionFallbackSummary · 兜底总结并入验证结果', () => {
+  const PASSED = { status: 'passed' as const, passed: 12, failed: 0, firstFailures: [] };
+  const FAILED = { status: 'failed' as const, passed: 9, failed: 3, firstFailures: [] };
+
+  it('未跑过验证：保持原有纯完成口径（不含验证段）', () => {
+    const s = buildCompletionFallbackSummary(4, undefined);
+    expect(s).toBe('✅ 任务执行完成，共调用 4 个工具。');
+    expect(s).not.toContain('验证结果');
+  });
+
+  it('parse-error（输出无法解析）不臆造验证结论', () => {
+    const s = buildCompletionFallbackSummary(4, { status: 'parse-error', passed: 0, failed: 0, firstFailures: [] });
+    expect(s).not.toContain('验证结果');
+    expect(s.startsWith('✅')).toBe(true);
+  });
+
+  it('验证通过：✅ 完成 + ✅ PASSED 与计数', () => {
+    const s = buildCompletionFallbackSummary(4, PASSED);
+    expect(s).toContain('✅ 任务执行完成');
+    expect(s).toContain('验证结果：✅ PASSED（12 passed / 0 failed）');
+  });
+
+  it('验证失败：不得出现 ✅ 与 ❌ 并存的自相矛盾（前缀降级为 ⚠️）', () => {
+    const s = buildCompletionFallbackSummary(4, FAILED);
+    expect(s.startsWith('⚠️')).toBe(true);
+    expect(s).toContain('验证未通过');
+    expect(s).toContain('验证结果：❌ FAILED（9 passed / 3 failed）');
+    expect(s).not.toContain('✅');
   });
 });
 

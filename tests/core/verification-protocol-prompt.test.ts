@@ -58,6 +58,14 @@ describe('VERIFICATION_PROTOCOL_MODULE', () => {
     expect(m).toContain('Next step:');
   });
 
+  it('要求"测试晚于结论"时重写综合最终答复（结论 + 验证结果合并，自包含）', () => {
+    const m = VERIFICATION_PROTOCOL_MODULE;
+    expect(m).toContain('## Consolidated final answer');
+    expect(m).toContain('is NOT your final answer');
+    expect(m).toContain('rewrite ONE consolidated final answer');
+    expect(m).toContain('Never leave a pre-verification conclusion as your last word');
+  });
+
   it('不含任何动态内容（变更清单/命令由运行时注入，否则击穿 L1 缓存）', () => {
     expect(VERIFICATION_PROTOCOL_MODULE).not.toContain('[Verification Gate]');
     expect(VERIFICATION_PROTOCOL_MODULE).not.toMatch(/npx vitest run \S/);

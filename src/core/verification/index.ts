@@ -51,6 +51,7 @@ export {
   buildGatePrompt,
   buildFixPrompt,
   buildUnverifiedWarning,
+  buildCompletionFallbackSummary,
   isVerificationCommand,
 } from './gate.js';
 

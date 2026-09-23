@@ -40,7 +40,7 @@ import type { MemoryRecord } from '../memory/types.js';
  *   2. 归档 PerfProbe / session 导出时随行，建立性能/行为数据与版本的映射
  *   3. B-P3-2：与 `dumpPromptSnapshot()` 结合输出结构化调试信息
  */
-export const PROMPT_BUILDER_VERSION = '2026-09-15';
+export const PROMPT_BUILDER_VERSION = '2026-09-23';
 
 export interface PromptBuildContext {
   mode: Mode;

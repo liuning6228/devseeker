@@ -144,6 +144,27 @@ export function buildUnverifiedWarning(reason: UnverifiedReason, fixRounds?: num
   }
 }
 
+/**
+ * 任务完成但最终轮没有助理文本时的兜底总结（含验证结果并入）。
+ *
+ * 语义约束：验证 FAILED 时不得给出 ✅ 前缀（避免"✅ 完成 + ❌ 验证"自相矛盾），
+ * 改为 ⚠️ 并显式标注验证未通过；未跑过验证时保持原有的纯完成口径。
+ */
+export function buildCompletionFallbackSummary(
+  toolCalls: number,
+  summary?: TestRunSummary | undefined,
+): string {
+  const verified = summary && (summary.status === 'passed' || summary.status === 'failed');
+  if (!verified) {
+    return `✅ 任务执行完成，共调用 ${toolCalls} 个工具。`;
+  }
+  const mark = summary.status === 'passed' ? '✅ PASSED' : '❌ FAILED';
+  const verifyPart = `验证结果：${mark}（${summary.passed} passed / ${summary.failed} failed）。`;
+  return summary.status === 'passed'
+    ? `✅ 任务执行完成，共调用 ${toolCalls} 个工具。${verifyPart}`
+    : `⚠️ 任务执行完成，但验证未通过，共调用 ${toolCalls} 个工具。${verifyPart}`;
+}
+
 /** 验证指令文本的组装上下文 */
 export interface GatePromptContext {
   tier: VerificationTier;
@@ -190,7 +211,10 @@ export function buildGatePrompt(ctx: GatePromptContext): string {
   lines.push(...tierInstructions(ctx));
 
   lines.push('');
-  lines.push('完成后按此格式给出最终答复的验证段：');
+  lines.push('完成后必须输出一份**综合最终答复**（自包含，用户无需回翻上一条消息）：');
+  lines.push('- 把验证前的结论与本次验证结果合并重写成一份：先简述变更结论（改了什么 / 为什么 / 影响），再附验证结果；');
+  lines.push('- 不要只回一句"测试通过"，也不要让此前的结论停留在验证之前的消息里充当最终答复；');
+  lines.push('- 结尾按此格式给出验证段：');
   lines.push('Status: ✅ PASSED / ❌ FAILED / ⚠️ UNVERIFIED');
   lines.push('Commands run: <实际执行的命令>');
   lines.push('Counts: <passed>/<failed>（若适用）');
