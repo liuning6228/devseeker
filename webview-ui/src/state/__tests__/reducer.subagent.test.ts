@@ -159,4 +159,38 @@ describe('reducer · subagent_event', () => {
     const textPart = lastMsg.parts.find((p) => p.kind === 'text');
     expect(textPart && textPart.kind === 'text' ? textPart.text : undefined).toBe('');
   });
+
+  it('subagent_turn 更新轮次；subagent_end partial → 部分完成标记', () => {
+    const s = apply([
+      ...baseEvents(),
+      subagentEvent({ type: 'subagent_start', agentType: 'Research', description: '调研', startTime: 1000, maxTurns: 40 }),
+      subagentEvent({ type: 'subagent_turn', turn: 1 }),
+      subagentEvent({ type: 'subagent_turn', turn: 40 }),
+      subagentEvent({ type: 'subagent_tool_start', name: 'read_file', toolId: 'tc1' }),
+      subagentEvent({ type: 'subagent_tool_end', name: 'read_file', toolId: 'tc1', ok: true }),
+      subagentEvent({
+        type: 'subagent_end',
+        ok: true,
+        summary: '⚠️ 达到轮次上限，部分成果…',
+        toolCalls: 56,
+        partial: true,
+      }),
+    ]);
+
+    const sub = findTool(s, CARD_ID)!.subagent!;
+    // 轮次口径：最近一次 subagent_turn 的值
+    expect(sub.round).toBe(40);
+    // 部分完成：status 仍为 done（有成果回传），partial 单独标记供 UI 显示「⚠️ 部分完成」
+    expect(sub.status).toBe('done');
+    expect(sub.partial).toBe(true);
+    expect(sub.toolCalls).toBe(56);
+  });
+
+  it('subagent_end 缺省 partial → 不携带部分完成标记', () => {
+    const s = apply([
+      ...baseEvents(),
+      subagentEvent({ type: 'subagent_end', ok: true, summary: 'done', toolCalls: 3 }),
+    ]);
+    expect(findTool(s, CARD_ID)!.subagent!.partial).toBeUndefined();
+  });
 });

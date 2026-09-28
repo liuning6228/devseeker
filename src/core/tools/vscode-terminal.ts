@@ -125,6 +125,45 @@ export function buildCommandLines(command: string): Set<string> {
   );
 }
 
+// ─────────── shell integration cwd 对齐 ───────────
+
+/** POSIX 单引号转义：内部单引号 → `'\''`，其余字符全部按字面量处理 */
+function quotePosixSingle(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * shell integration 执行的 cwd 对齐包装（仅用于终端内执行路径）。
+ *
+ * 背景：`terminal.shellIntegration.executeCommand()` 在终端「当前工作目录」执行命令。
+ * 终端是复用的单例（沙箱/用户可见各一个），cwd 会因以下原因漂移：
+ *   ① 用户手动 cd（用户可见终端尤为常见）；
+ *   ② 上一条命令内嵌 cd 的残留（模型常用 `cd xxx && ...`）；
+ *   ③ 复用历史终端（终端早于当前 workspace 创建）。
+ * 漂移后命令在错误目录执行 → 相对路径全部失效（如 `cd DevSeeker` 报 "No such file or directory"），
+ * 违背工具契约「cwd 默认 = workspaceRoot」。
+ *
+ * 包装形态（POSIX）：`cd '<cwd>' && (<command>)`
+ * - 单引号包裹：cwd 内的 $、反引号、空格等一律按字面量处理；
+ * - 括号子 shell：命令内部的 cd/export 不会残留到终端状态，终端 cwd 保持稳定；
+ * - 原子性：cd 失败（目标不存在，理论上不会）时命令不执行，退出码 = cd 退出码。
+ *
+ * win32：暂不包装——PowerShell 5.1 不接受 `&&`、cmd 对 `;`/`&` 语义各异，
+ * 单命令前缀无法跨 shell 方言兼容；保持原命令执行（cwd 漂移为已知限制）。
+ *
+ * child_process / spawn 降级路径不需要本包装（spawn 自带 cwd 参数）。
+ */
+export function wrapCommandWithCwd(
+  command: string,
+  cwd: string | undefined,
+  platformOverride?: NodeJS.Platform,
+): string {
+  if (!cwd || !cwd.trim()) return command;
+  const plat = platformOverride ?? platform();
+  if (plat === 'win32') return command;
+  return `cd ${quotePosixSingle(cwd)} && (${command})`;
+}
+
 // ─────────── child_process 降级 shell 解析 ───────────
 
 /** 缓存 POSIX 降级 shell 解析结果（每个进程只解析一次） */
@@ -272,13 +311,21 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
 
   /**
    * 在 VS Code 终端中执行命令并流式读取输出。
+   *
+   * @param alignCwd 目标工作目录（POSIX 下包装为 `cd '<cwd>' && (cmd)` 前缀执行）。
+   *   终端为复用单例，cwd 会漂移（用户手动 cd / 命令内嵌 cd 残留），
+   *   包装确保每条命令都在工具承诺的 cwd 下执行（见 wrapCommandWithCwd）。
+   *   不传时保持历史行为（不包装）。
    */
-  async run(terminal: vscode.Terminal, command: string): Promise<void> {
+  async run(terminal: vscode.Terminal, command: string, alignCwd?: string): Promise<void> {
     this.exitCode = undefined;
     this.signal = null;
 
+    // cwd 对齐：执行与回显过滤都使用包装后的命令（终端回显的是包装命令整行）
+    const effectiveCommand = wrapCommandWithCwd(command, alignCwd);
+
     if (terminal.shellIntegration?.executeCommand) {
-      const execution = terminal.shellIntegration.executeCommand(command);
+      const execution = terminal.shellIntegration.executeCommand(effectiveCommand);
 
       // 注册 onDidEndTerminalShellExecution 作为 exitCode 第二来源（兜底）
       // stream 中 OSC 633;D 序列是第一来源
@@ -299,7 +346,7 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
       let didOutputNonCommand = false;
       let didEmitEmptyLine = false;
       // 命令行（trim 后、去空行）用于回显过滤：仅整行完全一致才视为回显（见 stripLeadingCommandEcho）
-      const commandLines = buildCommandLines(command);
+      const commandLines = buildCommandLines(effectiveCommand);
       // 标准 for await...of 消费 stream —— Cline 方案
       // stream 自然结束即命令完成，不再需要 Promise.race / idle timeout
       // 注意：emitIfChunk 已确保每次 chunk 都立即 emit（不等待换行），
@@ -448,7 +495,7 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
         const emptyLog = {
           exitCode: this.exitCode,
           signal: this.signal,
-          cmd: command.slice(0, 80),
+          cmd: effectiveCommand.slice(0, 80),
         };
         if (this.exitCode === 0) {
           log.debug(emptyLog, 'shell integration captured empty output (exit=0)');
@@ -475,7 +522,7 @@ export class TerminalProcess extends EventEmitter<TerminalProcessEvents> {
       // 无 shellIntegration → 降级
       log.warn('No shell integration available, falling back');
       this.emit('no_shell_integration');
-      terminal.sendText(command, true);
+      terminal.sendText(effectiveCommand, true);
       await new Promise((resolve) => setTimeout(resolve, FALLBACK_WAIT_MS));
       this.emit('completed', this.getCompletionDetails());
       this.emit('continue');
@@ -690,13 +737,16 @@ export class VscodeTerminalManager implements ITerminalPool {
    * 供 BashTool 非后台模式使用。
    *
    * 超时逻辑：1 层 Promise.race（参考 Cline CommandOrchestrator 方案）。
-   * 超时 = 切背景模式（process.continue），非杀死。
+   * 超时 = 切背景模式（process.continue），非杀死；返回结果带 `timedOut: true`
+   * 供上层区分「超时未返回」与「命令失败/被信号杀死」（BashTool → TOOL.EXEC.TIMEOUT）。
    * 无 shell integration 时降级到 child_process.spawn。
    */
   async runCommand(opts: SpawnOptions): Promise<{
     output: string;
     exitCode: number | null;
     signal: string | null;
+    /** true = 命中 timeoutMs 上限被切后台（进程未杀，可能仍在终端运行） */
+    timedOut?: boolean;
   }> {
     if (this.disposed) {
       throw new Error('VscodeTerminalManager has been disposed');
@@ -746,7 +796,8 @@ export class VscodeTerminalManager implements ITerminalPool {
       // 超时 = process.continue() 切背景，不杀死
       let timedOut = false;
       const timeoutMs = opts.timeoutMs ?? 30_000;
-      const runPromise = process.run(terminalInfo.terminal, command);
+      // cwd 对齐：复用单例终端的 cwd 会漂移（用户手动 cd / 上条命令内嵌 cd 残留）
+      const runPromise = process.run(terminalInfo.terminal, command, opts.cwd);
 
       const timeoutPromise = new Promise<TerminalCompletionDetails>((resolve) => {
         setTimeout(() => {
@@ -769,6 +820,7 @@ export class VscodeTerminalManager implements ITerminalPool {
         output: output.trimEnd(),
         exitCode: details.exitCode ?? null,
         signal: (details.signal as string) ?? null,
+        ...(timedOut ? { timedOut: true } : {}),
       };
     } finally {
       terminalInfo.busy = false;
@@ -784,6 +836,9 @@ export class VscodeTerminalManager implements ITerminalPool {
    * - runCommand 使用沙箱终端（show(false)）
    * - runCommandOnUserTerminal 使用用户可见终端（show(true)）
    *
+   * cwd 语义：无论终端如何复用/漂移，每条命令都通过对齐包装在 opts.cwd（默认
+   * workspaceRoot）下执行——用户可见终端常被用户手动 cd，不能依赖其当前目录。
+   *
    * guard.allowMultilineShellIntegration：多行命令默认走 child_process 降级（可靠但不可见）；
    * 仅 UI「↪终端」重放这类 fire-and-forget、以“用户可见”为首要目标的调用可显式放行。
    */
@@ -794,6 +849,8 @@ export class VscodeTerminalManager implements ITerminalPool {
     output: string;
     exitCode: number | null;
     signal: string | null;
+    /** true = 命中 timeoutMs 上限被切后台（进程未杀；用户可见终端中可能仍在前台等待输入） */
+    timedOut?: boolean;
   }> {
     if (this.disposed) {
       throw new Error('VscodeTerminalManager has been disposed');
@@ -840,7 +897,8 @@ export class VscodeTerminalManager implements ITerminalPool {
 
       let timedOut = false;
       const timeoutMs = opts.timeoutMs ?? 30_000;
-      const runPromise = process.run(terminalInfo.terminal, command);
+      // cwd 对齐：用户可见终端复用后 cwd 易被用户手动 cd 漂移
+      const runPromise = process.run(terminalInfo.terminal, command, opts.cwd);
 
       const timeoutPromise = new Promise<TerminalCompletionDetails>((resolve) => {
         setTimeout(() => {
@@ -862,6 +920,7 @@ export class VscodeTerminalManager implements ITerminalPool {
         output: output.trimEnd(),
         exitCode: details.exitCode ?? null,
         signal: (details.signal as string) ?? null,
+        ...(timedOut ? { timedOut: true } : {}),
       };
     } finally {
       terminalInfo.busy = false;
@@ -941,8 +1000,10 @@ export class VscodeTerminalManager implements ITerminalPool {
    * 获取或创建沙箱单终端。整个 `VscodeTerminalManager` 生命周期内只建一个终端，
    * 所有前台命令（runCommand / executeInTerminal）都复用它。
    *
-   * cwd 参数仅在首次创建时生效；后续复用不再检查 cwd，
-   * 因为 shellIntegration.executeCommand() 在每个命令独立工作目录。
+   * cwd 参数仅在首次创建时生效。注意：`shellIntegration.executeCommand()` 是在终端
+   * 「当前工作目录」执行命令（并非“每个命令独立目录”）——复用终端时 cwd 会漂移，
+   * 因此每条命令由 `TerminalProcess.run(command, alignCwd)` 通过
+   * `wrapCommandWithCwd` 前缀包装逐条对齐（见该函数注释）。
    * 终端被用户手动关闭后会自动重建。
    */
   private async getOrCreateTerminal(cwd: string): Promise<TerminalInfo> {
@@ -1030,7 +1091,8 @@ export class VscodeTerminalManager implements ITerminalPool {
         });
       });
 
-      const runPromise = process.run(terminalInfo.terminal, opts.command);
+      // cwd 对齐：后台/用户终端模式同样在复用终端中执行，cwd 可能漂移
+      const runPromise = process.run(terminalInfo.terminal, opts.command, opts.cwd);
 
       if (opts.timeoutMs && opts.timeoutMs > 0) {
         session.timeoutTimer = setTimeout(() => {

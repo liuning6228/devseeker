@@ -109,7 +109,7 @@ const parameters = {
       type: 'integer',
       minimum: 1000,
       maximum: MAX_TIMEOUT_MS,
-      description: `执行超时（毫秒），默认 ${DEFAULT_TIMEOUT_MS}，上限 ${MAX_TIMEOUT_MS}。is_background=true 时为命令最长存活时间，默认无上限。`,
+      description: `执行超时（毫秒），默认 ${DEFAULT_TIMEOUT_MS}，上限 ${MAX_TIMEOUT_MS}。超时后进程转后台（不杀）并返回 TOOL.EXEC.TIMEOUT 提示，可用 get_terminal_output 轮询；is_background=true 时为命令最长存活时间，默认无上限。`,
     },
     is_background: {
       type: 'boolean',
@@ -375,12 +375,15 @@ export class BashTool implements ITool<BashArgs, ToolResult> {
       // 有 signal (SIGTERM等) 时判为超时/被杀死
       const exitCode = result.exitCode;
       const hasSignal = result.signal !== null && result.signal !== undefined;
+      // 超时（timeoutMs 上限触发，进程未杀）：与管理层区分「超时未返回」与「失败/被信号杀死」，
+      // 使用专属 errorCode TOOL.EXEC.TIMEOUT + 提示（模型据此 poll 而非盲目重跑）
+      const timedOut = result.timedOut === true;
       const ok = hasSignal
         ? false
         : (exitCode === 0 || exitCode === null || exitCode === undefined);
 
       // W9.13 沙箱遇黑判定
-      const sandboxingDetected = !ok && !escalationApproved && detectSandboxingError(result.output);
+      const sandboxingDetected = !ok && !timedOut && !escalationApproved && detectSandboxingError(result.output);
 
       const exitCodeStr = exitCode !== null && exitCode !== undefined ? String(exitCode) : 'unknown';
       // 多行命令经 child_process 降级：显式说明执行路径；
@@ -390,11 +393,17 @@ export class BashTool implements ITool<BashArgs, ToolResult> {
           ? '[note] 含内嵌换行 → 已用 child_process 降级执行（未在终端面板展示；shell integration 多行不可靠）\n'
           : '[note] 含内嵌换行 → 已用 child_process 降级执行（shell integration 多行不可靠）\n'
         : '';
+      const timeoutNote = timedOut
+        ? `[timeout] 命令 ${Math.round(timeout / 1000)}s 未返回，已转后台（进程未杀）。可能仍在终端执行/等待输入——` +
+          `若命令本应很快完成，多为终端捕获异常：请检查终端是否被占用，或改用其它方式验证；` +
+          `长任务请用 get_terminal_output 轮询，不要重复执行。\n`
+        : '';
       const header =
         `$ ${preview(command)}\n` +
         `exit=${exitCodeStr}${result.signal ? ` signal=${result.signal}` : ''}` +
         `${escalationApproved ? ' [escalated]' : ''}\n` +
         multilineNote +
+        timeoutNote +
         `---\n`;
       const sandboxHint = sandboxingDetected
         ? `\n---\n> SANDBOXING suspected. If this failure is caused by sandbox restrictions (and NOT a syntax/dependency/logic error), you MAY retry the same command with required_permissions='all' to request a user approval.\n`
@@ -410,14 +419,17 @@ export class BashTool implements ITool<BashArgs, ToolResult> {
           truncated: false,
           byteCount: result.output.length,
           ...(escalationApproved ? { escalated: true } : {}),
+          ...(timedOut ? { timedOut: true } : {}),
           ...(sandboxingDetected ? { sandboxingSuggested: true } : {}),
         },
         ...(ok
           ? {}
           : {
-              errorCode: sandboxingDetected
-                ? ErrorCodes.TOOL_SANDBOXING_DETECTED
-                : ErrorCodes.TOOL_EXEC_FAILED,
+              errorCode: timedOut
+                ? ErrorCodes.TOOL_EXEC_TIMEOUT
+                : sandboxingDetected
+                  ? ErrorCodes.TOOL_SANDBOXING_DETECTED
+                  : ErrorCodes.TOOL_EXEC_FAILED,
             }),
       };
     } catch (err) {

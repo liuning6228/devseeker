@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, Loader2, Users, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Users, XCircle } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { fmtDuration } from '../../utils/duration.js';
 import type { SubagentState } from '../../state/reducer';
@@ -21,9 +21,12 @@ interface SubagentGroupBarProps {
  */
 export function SubagentGroupBar({ states, collapsed, onToggle, className }: SubagentGroupBarProps): JSX.Element {
   const running = states.filter((s) => s.status === 'running');
-  const doneCount = states.filter((s) => s.status === 'done').length;
+  const doneCount = states.filter((s) => s.status === 'done' && !s.partial).length;
+  const partialCount = states.filter((s) => s.status === 'done' && s.partial).length;
   const failedCount = states.filter((s) => s.status === 'error').length;
+  // 工具调用总数（分子与展示口径分离：轮次/预算用于进度，工具次数用于工作量）
   const totalSteps = states.reduce((sum, s) => sum + (s.toolCalls || s.steps.length), 0);
+  const totalRounds = states.reduce((sum, s) => sum + (s.round ?? 0), 0);
   const budget = states.every((s) => s.maxTurns !== undefined)
     ? states.reduce((sum, s) => sum + (s.maxTurns ?? 0), 0)
     : undefined;
@@ -62,6 +65,12 @@ export function SubagentGroupBar({ states, collapsed, onToggle, className }: Sub
           {doneCount}
         </span>
       )}
+      {partialCount > 0 && (
+        <span className="flex items-center gap-1 text-xs text-amber-500 shrink-0" title="达到轮次上限，返回部分成果">
+          <AlertTriangle className="h-3 w-3" />
+          {partialCount} 部分完成
+        </span>
+      )}
       {failedCount > 0 && (
         <span className="flex items-center gap-1 text-xs text-red-500 shrink-0">
           <XCircle className="h-3 w-3" />
@@ -69,8 +78,13 @@ export function SubagentGroupBar({ states, collapsed, onToggle, className }: Sub
         </span>
       )}
       {totalSteps > 0 && (
-        <span className="text-xs text-vscode-fg/40 shrink-0">
-          {totalSteps}{budget !== undefined && budget > 0 ? `/${budget}` : ''} 步
+        <span
+          className="text-xs text-vscode-fg/40 shrink-0"
+          title="合计消耗轮次 / 轮次预算 · 工具调用总次数"
+        >
+          {budget !== undefined && budget > 0
+            ? `轮 ${totalRounds}/${budget} · 工具 ${totalSteps} 次`
+            : `工具 ${totalSteps} 次`}
         </span>
       )}
       {elapsedMs > 0 && (

@@ -89,16 +89,26 @@ export type SubagentProgressEvent =
       description: string;
       /** 子代理启动时间戳（已用时 / ETA 计算基准） */
       startTime: number;
-      /** 步数预算（def.maxTurns），用于进度与 ETA 估算；缺省则不展示 */
+      /** 轮次预算（def.maxTurns），用于进度与 ETA 估算；缺省则不展示 */
       maxTurns?: number;
     }
   /** 子代理正文增量（text_delta 映射，bridge 侧已做合并节流） */
   | { type: 'subagent_text'; text: string }
+  /** 子代理进入新一轮 LLM 交互（turn_start 映射）：UI 进度按「轮次/预算」口径展示 */
+  | { type: 'subagent_turn'; turn: number }
   | { type: 'subagent_tool_start'; name: string; toolId: string; startTime?: number }
   | { type: 'subagent_tool_end'; name: string; toolId: string; ok: boolean; durationMs?: number }
   /** 子代理自身 LLM 调用的 token 消耗（用于成本记账） */
   | { type: 'subagent_usage'; promptTokens: number; completionTokens: number; cachedTokens?: number }
-  | { type: 'subagent_end'; ok: boolean; summary: string; toolCalls: number; durationMs?: number };
+  | {
+      type: 'subagent_end';
+      ok: boolean;
+      summary: string;
+      toolCalls: number;
+      durationMs?: number;
+      /** true = 未全部完成（如 max_turns 轮次用尽降级回传部分成果）；UI 显示「部分完成」 */
+      partial?: boolean;
+    };
 
 export type TaskEvent =
   | { type: 'task_start'; taskId: string; userInput: string }
@@ -164,7 +174,6 @@ export type TaskEvent =
       items?: ContextItemEntry[];
     }
   /** Phase 5 Phase D · 后台子代理完成事件 */
-  /** Phase 5 Phase D · 后台子代理完成事件 */
   | {
       type: 'subagent_completed';
       taskId: string;
@@ -178,6 +187,8 @@ export type TaskEvent =
       agentType?: string;
       /** 是否失败 */
       failed?: boolean;
+      /** true = 未全部完成（max_turns 降级回传部分成果）；UI 显示「部分完成」 */
+      partial?: boolean;
     }
   /** F1 · 模糊度检测结果（TaskLoop 自动触发，不阻塞执行） */
   | {

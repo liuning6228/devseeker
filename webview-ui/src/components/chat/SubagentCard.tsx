@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, Loader2, XCircle } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { fmtDuration, fmtEta } from '../../utils/duration.js';
 import type { SubagentState, SubagentStep } from '../../state/reducer';
@@ -57,23 +57,24 @@ export function SubagentCard({ state, className }: SubagentCardProps): JSX.Eleme
     ? (state.startTime !== undefined ? Math.max(0, now - state.startTime) : undefined)
     : state.durationMs;
 
-  // ETA：按「已完成步骤的墙钟平均耗时 × 剩余预算步数」估算。
-  // 用墙钟而非步骤耗时之和：LLM 每回合思考/生成时间常占大头，只累加工具耗时会系统性低估。
-  // 需 ≥1 个已完成步骤、已知预算、且已运行 ≥3s（避开早期抖动）。
-  const completedSteps = state.steps.filter((s) => s.status !== 'running').length;
-  const wallPerStepMs = completedSteps > 0 && elapsedMs !== undefined
-    ? elapsedMs / completedSteps
+  // ETA：按「已完成轮次的墙钟平均耗时 × 剩余轮次预算」估算。
+  // 轮次口径与进度条一致；旧实现把「工具调用次数」当分子、把「轮次预算」当分母（2-3 次/轮
+  // 的并发调用会让进度条恒满、剩余预算恒为 0），是「59/20 步」误导显示的根源。
+  // 需 ≥1 个已完成轮次、已知预算、且已运行 ≥3s（避开早期抖动）。
+  const completedRounds = state.round ?? 0;
+  const wallPerRoundMs = completedRounds > 0 && elapsedMs !== undefined
+    ? elapsedMs / completedRounds
     : undefined;
-  const remainingBudget = state.maxTurns !== undefined
-    ? Math.max(0, state.maxTurns - state.steps.length)
+  const remainingBudget = state.maxTurns !== undefined && state.round !== undefined
+    ? Math.max(0, state.maxTurns - state.round)
     : undefined;
   const etaMs = isRunning
-    && wallPerStepMs !== undefined
+    && wallPerRoundMs !== undefined
     && remainingBudget !== undefined
     && remainingBudget > 0
     && elapsedMs !== undefined
     && elapsedMs >= 3000
-    ? wallPerStepMs * remainingBudget
+    ? wallPerRoundMs * remainingBudget
     : undefined;
 
   const lastStep = state.steps[state.steps.length - 1];
@@ -88,7 +89,11 @@ export function SubagentCard({ state, className }: SubagentCardProps): JSX.Eleme
     <div
       className={cn(
         'subagent-card rounded-lg border overflow-hidden',
-        isRunning ? 'border-blue-500/30 bg-blue-500/5' : 'border-vscode-input-border',
+        isRunning
+          ? 'border-blue-500/30 bg-blue-500/5'
+          : state.partial
+            ? 'border-amber-500/30 bg-amber-500/5'
+            : 'border-vscode-input-border',
         className,
       )}
     >
@@ -102,14 +107,16 @@ export function SubagentCard({ state, className }: SubagentCardProps): JSX.Eleme
         <span className={cn('p-1 rounded shrink-0', isRunning ? 'bg-blue-500/10' : 'bg-vscode-sidebar-bg')}>
           {isRunning
             ? <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-            : state.status === 'done'
-              ? <CheckCircle2 className="h-4 w-4 text-green-500" />
-              : <XCircle className="h-4 w-4 text-red-500" />}
+            : state.partial
+              ? <AlertTriangle className="h-4 w-4 text-amber-500" />
+              : state.status === 'done'
+                ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+                : <XCircle className="h-4 w-4 text-red-500" />}
         </span>
         <span className="min-w-0 flex-1">
           <span className="text-sm font-medium text-vscode-fg truncate block">
             {state.agentType}
-            {isRunning ? ' 执行中...' : state.status === 'done' ? ' 已完成' : ' 失败'}
+            {isRunning ? ' 执行中...' : state.partial ? ' ⚠️ 部分完成（达轮次上限）' : state.status === 'done' ? ' 已完成' : ' 失败'}
           </span>
           {!expanded && collapsedLine && (
             <span className="text-xs text-vscode-fg/60 truncate block">{collapsedLine}</span>
@@ -126,14 +133,19 @@ export function SubagentCard({ state, className }: SubagentCardProps): JSX.Eleme
         {etaMs !== undefined && (
           <span
             className="text-xs text-vscode-fg/40 shrink-0 font-mono"
-            title={`按已完成 ${completedSteps} 步的平均耗时 × 剩余预算 ${remainingBudget ?? 0} 步估算（预算为 maxTurns 回合上界）`}
+            title={`按已完成 ${completedRounds} 轮的平均耗时 × 剩余 ${remainingBudget ?? 0} 轮预算估算（预算为 maxTurns 轮次上界）`}
           >
             预计 ~{fmtEta(etaMs)}
           </span>
         )}
-        {state.steps.length > 0 && (
-          <span className="text-xs text-vscode-fg/40 shrink-0">
-            {state.toolCalls || state.steps.length}{state.maxTurns ? `/${state.maxTurns}` : ''} 步
+        {(state.steps.length > 0 || state.round !== undefined || state.toolCalls > 0) && (
+          <span
+            className="text-xs text-vscode-fg/40 shrink-0"
+            title={`消耗轮次 / 轮次预算 · 工具调用共 ${state.toolCalls || state.steps.length} 次`}
+          >
+            {state.maxTurns !== undefined
+              ? `轮 ${state.round ?? 0}/${state.maxTurns} · 工具 ${state.toolCalls || state.steps.length} 次`
+              : `工具 ${state.toolCalls || state.steps.length} 次`}
           </span>
         )}
         <svg
@@ -147,12 +159,12 @@ export function SubagentCard({ state, className }: SubagentCardProps): JSX.Eleme
         </svg>
       </button>
 
-      {/* 步数预算进度条（仅运行中且已知预算时展示） */}
-      {isRunning && state.maxTurns !== undefined && state.maxTurns > 0 && (
+      {/* 轮次预算进度条（仅运行中且已知轮次时展示；口径 = 已消耗轮次 / 轮次预算） */}
+      {isRunning && state.maxTurns !== undefined && state.maxTurns > 0 && state.round !== undefined && (
         <div className="h-0.5 w-full bg-vscode-input-border/40">
           <div
             className="h-full bg-blue-500/60 transition-all duration-500"
-            style={{ width: `${Math.min(100, Math.round((state.steps.length / state.maxTurns) * 100))}%` }}
+            style={{ width: `${Math.min(100, Math.round((state.round / state.maxTurns) * 100))}%` }}
           />
         </div>
       )}

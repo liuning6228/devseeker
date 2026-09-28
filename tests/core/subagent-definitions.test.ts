@@ -177,10 +177,10 @@ describe('SubagentDefinition', () => {
     expect(GUIDE_URL_HOST_WHITELIST.length).toBeGreaterThan(0);
   });
 
-  it('maxTurns sane (1..30) for all defs', () => {
+  it('maxTurns sane (1..40) for all defs', () => {
     for (const def of [BROWSER_DEFINITION, RESEARCH_DEFINITION, GUIDE_DEFINITION, VERIFY_DEFINITION, getSubagentDefinition('Vision')!]) {
       expect(def.maxTurns).toBeGreaterThanOrEqual(1);
-      expect(def.maxTurns).toBeLessThanOrEqual(30);
+      expect(def.maxTurns).toBeLessThanOrEqual(40);
     }
   });
 
@@ -192,9 +192,12 @@ describe('SubagentDefinition', () => {
     }
   });
 
-  it('长任务角色给足预算：Verify / Debug = 300s（对齐 bash 上限，不再被 120s 默认值杀死）', () => {
+  it('长任务角色给足预算：Verify / Debug / Research = 300s（对齐 bash 上限，不再被 120s 默认值杀死）', () => {
     expect(getSubagentDefinition('Verify')!.timeoutMs).toBe(300_000);
     expect(getSubagentDefinition('Debug')!.timeoutMs).toBe(300_000);
+    // Research：20 轮在多子系统调研中频繁触顶（1 成 1 败临界）→ 40 轮 + 300s
+    expect(getSubagentDefinition('Research')!.timeoutMs).toBe(300_000);
+    expect(getSubagentDefinition('Research')!.maxTurns).toBe(40);
   });
 
   it('preset def 也带角色级超时预算', () => {

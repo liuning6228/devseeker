@@ -492,7 +492,11 @@ export function ToolCard(props: ToolCardProps): JSX.Element {
           </span>
           <span className="tool-card__status-badge">
             {/* 后台子代理：工具已 success 但子代理仍在跑 → 显脉冲而非 ✓，避免误导 */}
-            {status === 'success' && !(isSubagentTool && subagent?.status === 'running') && '✓'}
+            {status === 'success' && !(isSubagentTool && subagent?.status === 'running') && !(isSubagentTool && subagent?.partial) && '✓'}
+            {/* 子代理部分完成（达轮次上限）：与子卡 ⚠️ 状态一致，不显示绿勾 */}
+            {status === 'success' && isSubagentTool && subagent?.partial && (
+              <span className="text-amber-500" title="部分完成（达轮次上限）">⚠️</span>
+            )}
             {status === 'error' && '✗'}
             {status === 'pending' && <ProcessingIndicator />}
             {(status === 'running' || (isSubagentTool && subagent?.status === 'running' && status === 'success')) && (

@@ -62,6 +62,12 @@ export interface SubagentResult {
   stats?: SubagentRunStats;
   artifacts?: string[];
   /**
+   * true = 任务未全部完成（当前唯一来源：max_turns 轮次用尽降级回传部分成果）。
+   * 调用方（Agent 工具 / UI 卡片）据此区分「完成」与「部分完成」：
+   * 母代理可决定直接利用部分成果，或拆分任务后重新派发。
+   */
+  partial?: boolean;
+  /**
    * CVW · 子代理在自己 loop 内编辑成功的文件（绝对路径）。
    *
    * 设计上子代理为**只读**（写工具被 DELEGATE_BLOCKED_TOOLS 硬禁），

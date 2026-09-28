@@ -114,6 +114,7 @@ export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
     + 'Built-in agents (case-insensitive): Browser (pure web) / Research (codebase + web) / Guide (how to configure DevSeeker) / Verify (run tests / build / type-check) / Vision (image understanding) / Debug (root-cause a bug). '
     + 'Custom agents live under `.devseeker/agents/<name>/AGENT.md`. '
     + 'RESULT CONTRACT: only the subagent\'s final summary returns to you — its internal steps are NOT part of this conversation, so relay the key findings to the user yourself. '
+    + 'BUDGET: each subagent has a limited turn budget (Research 40 / Browser 15 / Debug 20 turns). For large investigations, split into 2-3 focused subagents (one subsystem each) instead of one broad task — over-budget subagents return partial results marked partial="true" (relay what they covered and dispatch follow-ups for the rest). '
     + 'DISPATCH POLICY: give each subagent a self-contained prompt; issue independent Agent calls in the SAME turn (they run in parallel) instead of sequentially; never re-do work you delegated. Dispatch Debug only when the user explicitly asks for debugging / root-cause analysis. '
     + 'Subagents are READ-ONLY investigators/verifiers and never modify the workspace — do NOT use for tasks that need direct code modification (edits stay in the main agent, which owns approval / checkpoint / verification).';
   readonly parameters = parameters as unknown as Record<string, unknown>;
@@ -210,7 +211,7 @@ export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
         signal: ctx.signal,
         onEvent: bridge.onEvent,
       });
-      bridge.end(true, result.summary, result.stats?.toolCalls ?? 0);
+      bridge.end(true, result.summary, result.stats?.toolCalls ?? 0, result.partial);
       return formatSubagentResult(invocation.subagent_type, invocation.description, result);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -349,7 +350,7 @@ export class AgentTool implements ITool<AgentToolArgs, ToolResult> {
       const result = await runSubagent(runnerDeps, runOpts);
       // 后台模式：卡片终态由 subagent_completed 异步触发（bridge 内部处理），此处不重复上报
       if (!isBackground) {
-        bridge.end(true, result.summary, result.stats?.toolCalls ?? 0);
+        bridge.end(true, result.summary, result.stats?.toolCalls ?? 0, result.partial);
       }
       return formatSubagentResult(agentType, args.description, result);
     } catch (e) {
@@ -371,22 +372,26 @@ function formatBackgroundResultNote(ev: Extract<TaskEvent, { type: 'subagent_com
   const MAX = 4000;
   const summary = ev.summary.length > MAX ? `${ev.summary.slice(0, MAX)}\n...[已截断]` : ev.summary;
   return [
-    `<background_subagent_result agent_id="${escapeAttr(ev.agentId)}" type="${escapeAttr(ev.agentType ?? 'unknown')}" failed="${ev.failed === true}" tool_calls="${ev.toolCalls}">`,
+    `<background_subagent_result agent_id="${escapeAttr(ev.agentId)}" type="${escapeAttr(ev.agentType ?? 'unknown')}" failed="${ev.failed === true}" tool_calls="${ev.toolCalls}"${ev.partial ? ' partial="true"' : ''}>`,
     summary,
     '</background_subagent_result>',
     '（这是你先前派发的后台子代理完成后的回报，不是用户的新指令。',
-    '请把它当作背景信息继续当前任务，不要重复派发同一调研。）',
+    ev.partial
+      ? '注意 partial="true"：子代理达到轮次上限，仅返回部分成果——如需剩余部分请拆分后重新派发。）'
+      : '请把它当作背景信息继续当前任务，不要重复派发同一调研。）',
   ].join('\n');
 }
 
 function formatSubagentResult(agentType: string, description: string, result: import('../subagent/types.js').SubagentResult): ToolResult {
   const content = [
-    `<subagent_result type="${escapeAttr(agentType)}" description="${escapeAttr(description)}">`,
+    `<subagent_result type="${escapeAttr(agentType)}" description="${escapeAttr(description)}"${result.partial ? ' partial="true"' : ''}>`,
     result.summary,
     result.stats ? `\n[stats: ${result.stats.toolCalls} tool calls]` : '',
     `</subagent_result>`,
     '',
-    '（以上是子代理回报的最终摘要，请基于此继续主任务。）',
+    result.partial
+      ? '（以上是子代理达到轮次上限后回报的**部分成果**（partial="true"）——任务未全部完成。你可以直接利用已有部分，或把剩余工作拆分为更小的子任务后重新派发。）'
+      : '（以上是子代理回报的最终摘要，请基于此继续主任务。）',
   ].join('\n');
   return {
     ok: true,
@@ -395,6 +400,7 @@ function formatSubagentResult(agentType: string, description: string, result: im
       subagentType: agentType,
       description,
       summaryPreview: result.summary.slice(0, 200),
+      ...(result.partial ? { partial: true } : {}),
       // CVW · 子代理编辑清单：由主 loop 的验证门并入 editedFiles（§4.3 C.5）
       ...(result.editedFiles && result.editedFiles.length > 0
         ? { editedFiles: [...result.editedFiles] }

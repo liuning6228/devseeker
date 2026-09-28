@@ -15,7 +15,7 @@
  * - 父 signal abort → SUBAGENT_INTERRUPTED_BY_RESTART
  * - timeout 触发 → SUBAGENT_INTERRUPTED_BY_RESTART
  * - provider error → SUBAGENT_FAILED
- * - max_turns → SUBAGENT_FAILED
+ * - max_turns → 降级回传部分成果（partial=true；有正文带正文，无正文给拆分建议）
  * - 自定义 systemPrompt 透传至 Provider
  */
 
@@ -152,7 +152,7 @@ describe('runSubagent - validation', () => {
         { provider, toolRegistry: buildRegistry() },
         {
           invocation: {
-            // @ts-expect-error intentional invalid
+            // 'NotExist' 在类型层合法（SubagentType 放宽为 string），运行时由 validateInvocation 拒绝
             subagent_type: 'NotExist',
             description: 'x',
             prompt: 'y',
@@ -443,10 +443,38 @@ describe('runSubagent - failure modes', () => {
     ).rejects.toMatchObject({ code: ErrorCodes.SUBAGENT_FAILED });
   });
 
-  it('maps max_turns to SUBAGENT_FAILED', async () => {
+  it('max_turns → 降级回传部分成果（partial=true），不再硬失败丢成果', async () => {
     const provider = new ScriptedProvider();
     // 脚本上始终请求 tool_use，让 TaskLoop 达到 maxTurns
-    // Browser.maxTurns = 15，推 20 份脚本让其耗尽
+    // Browser.maxTurns = 15，推 20 份脚本让其耗尽；第 14 轮带一段正文模拟"已产出的部分成果"
+    for (let i = 0; i < 20; i++) {
+      const evs: StreamEvent[] = [
+        { type: 'tool_start', id: `c${i}`, name: 'search_web' },
+        { type: 'tool_args_delta', id: `c${i}`, partial: '{}' },
+        { type: 'tool_end', id: `c${i}` },
+        { type: 'done', reason: 'tool_use' },
+      ];
+      if (i === 13) {
+        evs.unshift({ type: 'text_delta', text: '部分调研结论 A' });
+      }
+      provider.push(evs);
+    }
+
+    const r = await runSubagent(
+      { provider, toolRegistry: buildRegistry() },
+      {
+        invocation: { subagent_type: 'Browser', description: 'x', prompt: 'y' },
+      },
+    );
+
+    expect(r.partial).toBe(true);
+    expect(r.summary).toContain('达到轮次上限');
+    expect(r.summary).toContain('部分调研结论 A');
+    expect(r.stats?.toolCalls).toBeGreaterThan(0);
+  });
+
+  it('max_turns 且无正文 → 降级 summary 提示拆分任务（含工具调用数）', async () => {
+    const provider = new ScriptedProvider();
     for (let i = 0; i < 20; i++) {
       provider.push([
         { type: 'tool_start', id: `c${i}`, name: 'search_web' },
@@ -456,14 +484,17 @@ describe('runSubagent - failure modes', () => {
       ]);
     }
 
-    await expect(
-      runSubagent(
-        { provider, toolRegistry: buildRegistry() },
-        {
-          invocation: { subagent_type: 'Browser', description: 'x', prompt: 'y' },
-        },
-      ),
-    ).rejects.toMatchObject({ code: ErrorCodes.SUBAGENT_FAILED });
+    const r = await runSubagent(
+      { provider, toolRegistry: buildRegistry() },
+      {
+        invocation: { subagent_type: 'Browser', description: 'x', prompt: 'y' },
+      },
+    );
+
+    expect(r.partial).toBe(true);
+    expect(r.summary).toContain('未输出文本总结');
+    expect(r.summary).toContain('拆分');
+    expect(r.stats?.toolCalls).toBeGreaterThan(0);
   });
 });
 

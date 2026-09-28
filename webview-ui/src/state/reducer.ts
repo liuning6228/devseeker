@@ -72,10 +72,14 @@ export interface SubagentState {
   toolCalls: number;
   /** 完成摘要（subagent_end 携带） */
   summary?: string;
+  /** 是否未全部完成（max_turns 降级回传 → UI 显示「部分完成」） */
+  partial?: boolean;
   /** 子代理启动时间戳（已用时 / ETA 计算基准） */
   startTime?: number;
   /** 步数预算（def.maxTurns），进度与 ETA 估算用 */
   maxTurns?: number;
+  /** 当前轮次（subagent_turn 事件；UI 以「轮次/预算」展示进度口径） */
+  round?: number;
   /** 总耗时 ms（subagent_end 终态回填） */
   durationMs?: number;
 }
@@ -600,6 +604,9 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
           case 'subagent_usage':
             // 成本记账由 extension 侧处理（panel.ts），卡片不展示
             return part;
+          case 'subagent_turn':
+            // 轮次进度：UI 按「轮次/预算」展示（替代把工具调用数当步数的混淆口径）
+            return { ...part, subagent: { ...prev, round: p.turn } };
           case 'subagent_end':
             return {
               ...part,
@@ -608,6 +615,7 @@ function reduceTaskEvent(state: AppState, ev: TaskEvent): AppState {
                 status: p.ok ? 'done' : 'error',
                 summary: p.summary,
                 toolCalls: p.toolCalls,
+                ...(p.partial ? { partial: true } : {}),
                 ...(p.durationMs !== undefined ? { durationMs: p.durationMs } : {}),
               },
             };

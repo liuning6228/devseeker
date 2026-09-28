@@ -348,11 +348,28 @@ export async function runSubagent(
           message: `子代理 ${def.type} 被中断（超时或父任务取消）`,
         });
       }
-      if (end.reason === 'error' || end.reason === 'max_turns') {
+      if (end.reason === 'error') {
         throw new AgentError({
           code: ErrorCodes.SUBAGENT_FAILED,
           message: `子代理 ${def.type} 失败：${end.errorMessage ?? end.reason}`,
         });
+      }
+      if (end.reason === 'max_turns') {
+        // 轮次用尽 → 降级回传已收集的部分成果（与下方 completed-无文本的降级同型）。
+        // 旧行为直接抛 SUBAGENT_FAILED：30-60 次工具调用收集的调研材料被整体丢弃，
+        // 母代理只能拿到一句"失败"（验收反馈：多子系统调研 1 成 1 败，失败者成果全废）。
+        const partial = lastAssistantText.trim() || lastNonEmptyText.trim();
+        const stats: SubagentRunStats = { toolCalls: toolCallCount };
+        const editedFiles = loop.getEditedFiles();
+        const summary = partial.length > 0
+          ? `⚠️ 子代理 ${def.type} 达到轮次上限（${def.maxTurns} 轮，已执行 ${toolCallCount} 次工具调用），任务未全部完成，以下为已收集的部分成果：\n\n${partial}`
+          : `⚠️ 子代理 ${def.type} 达到轮次上限（${def.maxTurns} 轮，已执行 ${toolCallCount} 次工具调用）且未输出文本总结。如需继续：请把任务拆分为更小的子任务后重新派发，并在 prompt 里明确要求先输出总结再继续探索。`;
+        return {
+          summary,
+          stats,
+          partial: true,
+          ...(editedFiles.length > 0 ? { editedFiles } : {}),
+        };
       }
 
       const summary = (lastAssistantText.trim() || lastNonEmptyText.trim());
@@ -428,14 +445,19 @@ async function runSubagentBackground(
   prompt: string,
 ): Promise<SubagentResult> {
   const { agentId } = runBackgroundAgent(
-    async (): Promise<{ summary: string; toolCalls: number }> => {
+    async (): Promise<{ summary: string; toolCalls: number; partial?: boolean }> => {
       // 去掉 background 标记，递归调用自身（同步执行）
       const syncOpts: RunSubagentOptions = {
         ...opts,
         background: false,
       };
       const result = await runSubagent(deps, syncOpts);
-      return { summary: result.summary, toolCalls: result.stats?.toolCalls ?? 0 };
+      return {
+        summary: result.summary,
+        toolCalls: result.stats?.toolCalls ?? 0,
+        // partial 透传：max_turns 降级回传的部分成果在后台路径同样要标记
+        ...(result.partial ? { partial: true } : {}),
+      };
     },
     (ev) => opts.onEvent?.(ev),
     agentType,

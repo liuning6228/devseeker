@@ -43,8 +43,9 @@ export interface SubagentEventBridge {
    * 终态上报。
    * - 同步路径：agent.ts 在 await / catch 后调用（携带真实 summary）
    * - 后台路径：由内部 `subagent_completed` 映射触发（agent.ts 不重复调用）
+   * @param partial true = 未全部完成（max_turns 降级回传）；UI 显示「部分完成」
    */
-  end: (ok: boolean, summary: string, toolCalls: number) => void;
+  end: (ok: boolean, summary: string, toolCalls: number, partial?: boolean) => void;
   /** 清理定时器（异常路径兜底，防止悬挂） */
   dispose: () => void;
 }
@@ -98,11 +99,18 @@ export function createSubagentEventBridge(ctx: SubagentBridgeContext): SubagentE
     stepStartedAt.clear();
   };
 
-  const end = (ok: boolean, summary: string, toolCalls: number): void => {
+  const end = (ok: boolean, summary: string, toolCalls: number, partial?: boolean): void => {
     if (ended) return;
     ended = true;
     flush();
-    emit({ type: 'subagent_end', ok, summary, toolCalls, durationMs: Date.now() - startedAt });
+    emit({
+      type: 'subagent_end',
+      ok,
+      summary,
+      toolCalls,
+      durationMs: Date.now() - startedAt,
+      ...(partial ? { partial: true } : {}),
+    });
   };
 
   // 首帧：卡片立即进入 running 态（含 agentType / description / 计时基准）
@@ -151,12 +159,16 @@ export function createSubagentEventBridge(ctx: SubagentBridgeContext): SubagentE
           ...(ev.cachedTokens !== undefined ? { cachedTokens: ev.cachedTokens } : {}),
         });
         break;
+      case 'turn_start':
+        // 轮次进度（UI 以「轮次/预算」为口径展示，替代此前把工具调用数当步数的混淆显示）
+        emit({ type: 'subagent_turn', turn: ev.turn });
+        break;
       case 'subagent_completed':
-        // 后台子代理完成（runBackgroundAgent 发射）→ 卡片终态
-        end(ev.failed !== true, ev.summary, ev.toolCalls);
+        // 后台子代理完成（runBackgroundAgent 发射）→ 卡片终态（partial 透传：部分完成）
+        end(ev.failed !== true, ev.summary, ev.toolCalls, ev.partial);
         break;
       default:
-        // turn_start / tool_start / tool_args_delta / reasoning_delta / task_end ...
+        // tool_start / tool_args_delta / reasoning_delta / task_end ...
         // 子代理卡片不消费这些内部事件，忽略
         break;
     }

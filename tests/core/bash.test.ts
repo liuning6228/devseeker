@@ -284,3 +284,51 @@ describe('BashTool - 子代理只读守卫（自动拒绝，不弹审批）', ()
     expect(r.errorCode).not.toBe(ErrorCodes.SUBAGENT_TOOL_NOT_ALLOWED);
   });
 });
+
+describe('BashTool · 超时语义（TOOL.EXEC.TIMEOUT，与普通失败区分）', () => {
+  it('timedOut 标记 → 专属 errorCode + 转后台提示（引导 poll 而非重跑）', async () => {
+    const tool = new BashTool({
+      terminalManager: {
+        runCommand: () =>
+          Promise.resolve({
+            output: 'partial output',
+            exitCode: null,
+            signal: 'SIGTERM',
+            timedOut: true,
+          }),
+      },
+    } as unknown as BashToolDeps);
+    const r = await tool.execute({ command: 'node -v' }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.TOOL_EXEC_TIMEOUT);
+    expect(r.content).toContain('[timeout]');
+    expect(r.content).toContain('已转后台');
+    expect(r.content).toContain('get_terminal_output');
+  });
+
+  it('有 signal 但非超时（被信号杀死）→ 保持 TOOL.EXEC.FAILED，无 timeout 提示', async () => {
+    const tool = new BashTool({
+      terminalManager: {
+        runCommand: () =>
+          Promise.resolve({ output: 'killed', exitCode: null, signal: 'SIGKILL' }),
+      },
+    } as unknown as BashToolDeps);
+    const r = await tool.execute({ command: 'node -v' }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.TOOL_EXEC_FAILED);
+    expect(r.content).not.toContain('[timeout]');
+  });
+
+  it('非零退出（无信号、非超时）→ 保持 TOOL.EXEC.FAILED（不受新逻辑影响）', async () => {
+    const tool = new BashTool({
+      terminalManager: {
+        runCommand: () =>
+          Promise.resolve({ output: 'boom', exitCode: 1, signal: null }),
+      },
+    } as unknown as BashToolDeps);
+    const r = await tool.execute({ command: 'node -v' }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe(ErrorCodes.TOOL_EXEC_FAILED);
+    expect(r.content).not.toContain('[timeout]');
+  });
+});

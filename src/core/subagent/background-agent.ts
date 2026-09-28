@@ -38,7 +38,7 @@ export type BackgroundAgentStatus = 'running' | 'paused' | 'completed' | 'failed
  * @param prompt - 任务描述用于 UI 展示
  */
 export function runBackgroundAgent(
-  runFn: () => Promise<{ summary: string; toolCalls: number }>,
+  runFn: () => Promise<{ summary: string; toolCalls: number; partial?: boolean }>,
   onEvent: (ev: TaskEvent) => void,
   agentType?: string,
   prompt?: string,
@@ -92,6 +92,7 @@ export function runBackgroundAgent(
         toolCalls,
         agentType: agentType ?? undefined,
         failed: false,
+        ...(result.partial ? { partial: true } : {}),
       } as unknown as TaskEvent);
     })
     .catch((error) => {

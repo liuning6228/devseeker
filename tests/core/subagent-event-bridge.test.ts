@@ -182,6 +182,27 @@ describe('createSubagentEventBridge', () => {
     expect(ends[0]).toMatchObject({ type: 'subagent_end', ok: true, summary: 'a', toolCalls: 1 });
   });
 
+  it('后台部分完成（subagent_completed.partial）→ subagent_end 携带 partial 标记', () => {
+    const { bridge, progress } = setup();
+    bridge.onEvent({
+      type: 'subagent_completed',
+      taskId: 't',
+      agentId: 'bg_3',
+      summary: '⚠️ 达到轮次上限，部分成果',
+      toolCalls: 8,
+      failed: false,
+      partial: true,
+    });
+    expect(progress().filter((p) => p.type === 'subagent_end')[0]).toMatchObject({
+      type: 'subagent_end',
+      ok: true,
+      summary: '⚠️ 达到轮次上限，部分成果',
+      toolCalls: 8,
+      partial: true,
+    });
+    bridge.dispose();
+  });
+
   it('后台完成事件（subagent_completed）映射为 subagent_end', () => {
     const { bridge, progress } = setup();
     bridge.onEvent({
@@ -232,6 +253,38 @@ describe('createSubagentEventBridge', () => {
       completionTokens: 5,
       cachedTokens: 2,
     });
+    bridge.dispose();
+  });
+
+  it('turn_start → subagent_turn（UI 轮次进度口径）', () => {
+    const { bridge, progress } = setup();
+    bridge.onEvent({ type: 'turn_start', taskId: 't', turn: 1 });
+    bridge.onEvent({ type: 'turn_start', taskId: 't', turn: 7 });
+    const turns = progress().filter((p) => p.type === 'subagent_turn');
+    expect(turns).toEqual([
+      { type: 'subagent_turn', turn: 1 },
+      { type: 'subagent_turn', turn: 7 },
+    ]);
+    bridge.dispose();
+  });
+
+  it('end(partial=true) → subagent_end 携带 partial 标记（部分完成）', () => {
+    const { bridge, progress } = setup();
+    bridge.end(true, '⚠️ 部分成果', 56, true);
+    expect(progress().filter((p) => p.type === 'subagent_end')[0]).toMatchObject({
+      type: 'subagent_end',
+      ok: true,
+      summary: '⚠️ 部分成果',
+      toolCalls: 56,
+      partial: true,
+    });
+    bridge.dispose();
+  });
+
+  it('end(partial 缺省) → subagent_end 不含 partial 字段（完全完成）', () => {
+    const { bridge, progress } = setup();
+    bridge.end(true, 'done', 3);
+    expect(progress().filter((p) => p.type === 'subagent_end')[0]).not.toHaveProperty('partial');
     bridge.dispose();
   });
 });
