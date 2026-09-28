@@ -19,6 +19,13 @@
 /** 协议版本号。主版本变更时，旧版 webview 应提示用户升级扩展。 */
 export const PROTOCOL_VERSION = '1.0.0';
 
+/**
+ * Phase 3 · 会话恢复重推 diff 的合成 toolCallId 前缀（`restore-{sessionId}-{index}`）。
+ * 宿主在 webview 重载/切换会话后用该前缀重推变更快照；消息流中无对应工具卡，
+ * webview 据此识别并存入独立的恢复快照状态（restoredDiffs），而非按 toolCallId 丢弃。
+ */
+export const RESTORE_DIFF_TOOLCALL_PREFIX = 'restore-';
+
 /** Step 4: 上下文条目（context_stats.items 中的单个条目） */
 export interface ContextItemEntry {
   id: string;

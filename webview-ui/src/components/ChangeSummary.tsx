@@ -332,6 +332,9 @@ export function ChangeSummary({
  * W-UI2 · 从 messages 中聚合变更文件清单。
  * - 同一 relPath 多次修改 → added/removed 累加，edits++，latestCheckpointId 取最后一次
  * - 若任一该文件的 diff 已 revert，则 reverted=true（UI 提示）
+ *
+ * Phase 3 · `restoredDiffs`（webview 重载/切换会话后宿主重推的快照，无承载工具卡）
+ * 作为初始条目并入清单，消息流中的真实 diff 在其上继续累加。
  */
 export function aggregateChangedFiles(
   messages: ReadonlyArray<{
@@ -348,8 +351,22 @@ export function aggregateChangedFiles(
       | { kind: 'text'; text: string }
     >;
   }>,
+  restoredDiffs?: Readonly<Record<string, ToolDiffPayload>>,
 ): ChangedFileItem[] {
   const map = new Map<string, ChangedFileItem>();
+  // 恢复快照先入清单：随后的真实 diff part 按顺序累加/更新状态
+  if (restoredDiffs) {
+    for (const diff of Object.values(restoredDiffs)) {
+      map.set(diff.relPath, {
+        relPath: diff.relPath,
+        added: diff.added,
+        removed: diff.removed,
+        edits: 1,
+        latestCheckpointId: diff.checkpointId,
+        reverted: false,
+      });
+    }
+  }
   for (const msg of messages) {
     for (const part of msg.parts) {
       if (part.kind !== 'tool') continue;
@@ -379,7 +396,13 @@ export function aggregateChangedFiles(
         prev.removed += diff.removed;
         prev.edits += 1;
         prev.latestCheckpointId = diff.checkpointId ?? prev.latestCheckpointId;
-        prev.reverted = prev.reverted || revertedNow;
+        // 顺序语义：文件的 revert 状态由最新一条 part 决定。
+        // 旧实现用 `||` 永久粘住 true，导致“回滚后再次被修改”的文件
+        // 一直显示“已回滚”，accept/reject 按钮不再出现。
+        prev.reverted = revertedNow;
+        // 该文件已捕获到真实 diff（有 checkpoint）→ 清除 noDiff 兜底标记，
+        // 恢复 accept/reject 能力（否则按钮永远不会出现）。
+        delete prev.noDiff;
       } else {
         map.set(diff.relPath, {
           relPath: diff.relPath,

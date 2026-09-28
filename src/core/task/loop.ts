@@ -54,6 +54,8 @@ import { StreamingFileWriter } from '../tools/streaming-file-writer.js';
 import { sleepWithAbort } from '../retry/backoff.js';
 import { StreamingDiffViewProvider } from '../../ui/streaming-diff-view.js';
 import { runConcurrent } from '../subagent/thread-pool.js';
+import { ReminderInjector, RULE_STALE_TODO } from '../prompts/reminder-injector.js';
+import type { TodoItem } from '../../shared/protocol.js';
 import {
   buildCompletionFallbackSummary,
   buildGatePrompt,
@@ -239,6 +241,11 @@ export interface TaskLoopConfig {
     /** 可选图索引：约定映射未命中时用反向依赖定位测试 */
     graphIndex?: GraphIndexLike | undefined;
   };
+  /**
+   * M3.8 · session 级已有 todo 快照（stale_todo 运行时提醒的数据源基线）。
+   * panel 在构造时传入 getTodos()；子代理 loop 不传。
+   */
+  initialTodos?: TodoItem[];
 }
 
 /**
@@ -334,6 +341,16 @@ export class TaskLoop {
    *  把任务前就存在的脏文件全部误当成本次变更 */
   private gitBaselinePromise: Promise<Set<string>> | undefined;
   private delegateEditsAbsorbed = false;
+  /** M3.8 · 运行时提醒注入器（对齐 Qoder <system-reminder> 动态规则） */
+  private readonly reminderInjector = new ReminderInjector();
+  /** M3.8 · 本任务内最近一次 todo 快照（stale_todo 提醒数据源；todo_write 成功后更新） */
+  private todoSnapshot: TodoItem[] = [];
+  /** M3.8 · todo 提醒计时基数（send() 时置为任务开始时刻） */
+  private todosLastUpdatedAt = 0;
+  /** M3.8 · 提醒节流指纹（ruleId → 已注入文本）：同文本任务内只注入一次，避免跨轮刷屏 */
+  private readonly reminderFingerprints = new Map<string, string>();
+  /** M3.8 · 最近一条用户输入（identity_protection 等规则的匹配上下文） */
+  private lastUserInput = '';
   /** P0-1 · 同轮并行执行的最大工具数（read_only/network 级并发上限） */
   private static readonly MAX_PARALLEL_TOOLS = 4;
   private static readonly MAX_DEGRADE = 2;
@@ -370,6 +387,8 @@ export class TaskLoop {
     this.codebaseIndex = cfg.codebaseIndex;
     this.verificationConfig = cfg.verification?.config;
     this.graphIndex = cfg.verification?.graphIndex;
+    // M3.8 · 已有 todo 快照（stale_todo 提醒基线；时间戳在 send() 置为任务开始时刻）
+    this.todoSnapshot = cfg.initialTodos ?? [];
     // §8.11.2 · 文件变更冲突检测缓存
     this.fileStateCache = cfg.workspaceRoot ? new FileStateCache() : undefined;
     // W15.8 · 流式文件写入器（需 workspaceRoot）
@@ -497,6 +516,11 @@ export class TaskLoop {
         log.warn({ err: String(e) }, 'pre_task hook failed; continue');
       }
     }
+
+    // M3.8 · 运行时提醒状态：新任务重置（提醒计时从任务开始，节流指纹清空）
+    this.lastUserInput = userInput;
+    this.todosLastUpdatedAt = Date.now();
+    this.reminderFingerprints.clear();
 
     this.history.addUser(userInput, images);
     this.emit({ type: 'task_start', taskId: this.taskId, userInput });
@@ -646,6 +670,43 @@ export class TaskLoop {
     });
   }
 
+  /**
+   * M3.8 · 运行时提醒注入（Runtime Reminder Injector，对齐 Qoder <system-reminder>）：
+   * 每轮 LLM 调用前按规则收集提醒，追加到最后一条 user/tool 消息末尾进入模型上下文。
+   *
+   * 当前接线规则（ReminderInjector 内建）：
+   * - stale_todo：待办 ≥3 项且超过 60s 未更新 → 提醒调用 todo_write 标记进度；
+   * - identity_protection：用户询问底层模型身份 → 提醒拒绝披露。
+   *
+   * 节流：同 ruleId 且同指纹在任务内只注入一次（reminderFingerprints），避免跨轮刷屏。
+   * stale_todo 的指纹附加"todo 时间戳"维度：todo 更新后再次进入静止期 → 允许再次提醒。
+   * 未提供上下文的规则（语言偏好 / 大文件 / skill 等）自然不触发。
+   */
+  private injectRuntimeReminders(): void {
+    const pendingTodoCount = this.todoSnapshot.filter(
+      (t) => t.status === 'PENDING' || t.status === 'IN_PROGRESS',
+    ).length;
+    const hits = this.reminderInjector.collect({
+      recentUserText: this.lastUserInput,
+      pendingTodoCount,
+      todosLastUpdatedAgoMs: Date.now() - this.todosLastUpdatedAt,
+    });
+    if (hits.length === 0) return;
+    const fingerprint = (id: string, text: string): string =>
+      id === RULE_STALE_TODO.id ? `${text}@${this.todosLastUpdatedAt}` : text;
+    const fresh = hits.filter((h) => this.reminderFingerprints.get(h.id) !== fingerprint(h.id, h.text));
+    if (fresh.length === 0) return;
+    for (const h of fresh) this.reminderFingerprints.set(h.id, fingerprint(h.id, h.text));
+    const block = fresh
+      .map((h) => `<system-reminder>\n${h.text}\n</system-reminder>`)
+      .join('\n\n');
+    this.history.appendReminder(block);
+    log.info(
+      { taskId: this.taskId, rules: fresh.map((h) => h.id) },
+      'TaskLoop: runtime reminders injected (M3.8)',
+    );
+  }
+
   private async runUntilTerminal(): Promise<{
     toolCalls: number;
     finalAssistantText: string;
@@ -667,6 +728,9 @@ export class TaskLoop {
 
       // 后台子代理回报等外部便签：在下一轮开始前注入 history（进入 LLM 上下文）
       this.drainContextNotes();
+
+      // M3.8 · 运行时提醒注入（stale todo / 身份保护等；每轮 LLM 调用前检查）
+      this.injectRuntimeReminders();
 
       const outcome = await this.runOneTurn(turn);
 
@@ -1386,6 +1450,14 @@ export class TaskLoop {
         if (TaskLoop.EDIT_TOOLS.has(o.call.name)) {
           this.editToolFailures = 0;
           this.isDegraded = false;
+        }
+        // M3.8 · 捕获 todo 快照（stale_todo 运行时提醒的数据源，仅程序侧消费）
+        if (o.call.name === 'todo_write') {
+          const todos = o.display?.['todos'];
+          if (Array.isArray(todos)) {
+            this.todoSnapshot = todos as TodoItem[];
+            this.todosLastUpdatedAt = Date.now();
+          }
         }
       }
 

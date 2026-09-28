@@ -1183,6 +1183,9 @@ body {
 /* 文件列表 */
 .change-summary__list--files {
   padding: 0 12px 6px;
+  /* 文件多时列表内部滚动，避免面板撑高后被裁剪导致看不到全部变更（无滚动条） */
+  max-height: min(40vh, 360px);
+  overflow-y: auto;
 }
 
 .change-summary__file {

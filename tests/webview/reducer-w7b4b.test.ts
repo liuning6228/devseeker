@@ -86,6 +86,8 @@ describe('reducer · TOOL_DIFF', () => {
     const s2 = reducer(s, { type: 'TOOL_DIFF', payload: diff });
     const part = getToolPart(s2, 'tc-1');
     expect(part?.diff).toBeUndefined();
+    // 非 restore- 前缀且无承载工具卡 → 不得落入恢复快照（防旧会话迟到 diff 混入）
+    expect(s2.restoredDiffs).toEqual({});
   });
 });
 

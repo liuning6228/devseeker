@@ -8,11 +8,12 @@
  * B-P2-9 · V2 M3.14 · Prompt 14 模块抽离断言
  * W13.1-A · Phase 3 新增 I18N_COMMENTS_MODULE（中文本地化）
  * V2 M3.14 · 新增 THINKING_FRAMEWORK_MODULE + OUTPUT_STYLE_MODULE
+ * M3.14+ · 新增 PROGRESS_NARRATION_MODULE（执行过程播报）
  *
  * 保证：
- *   1. L0 8 个新拆模块都非空 + 各自有唯一特征字串
- *   2. modules/index.ts 恰好汇出 8 个 L0 新模块常量
- *   3. DEFAULT_SYSTEM_PROMPT = 8 个模块按序 '\n\n' 拼接（字节级）
+ *   1. L0 9 个新拆模块都非空 + 各自有唯一特征字串
+ *   2. modules/index.ts 恰好汇出 9 个 L0 新模块常量
+ *   3. DEFAULT_SYSTEM_PROMPT = 9 个模块按序 '\n\n' 拼接（字节级）
  *   4. PromptBuilder.build 得到的 full 字符串依旧包含 14 模块的关键特征串
  */
 import { describe, expect, it } from 'vitest';
@@ -21,6 +22,7 @@ import {
   AGENT_IDENTITY_MODULE,
   THINKING_FRAMEWORK_MODULE,
   OUTPUT_STYLE_MODULE,
+  PROGRESS_NARRATION_MODULE,
   TOOL_CONTRACTS_MODULE,
   GENERAL_BEHAVIOR_MODULE,
   MEMORY_POLICY_MODULE,
@@ -37,11 +39,12 @@ import type { Rule } from '../../src/core/rules/types.js';
 import type { MemoryRecord } from '../../src/core/memory/types.js';
 
 describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
-  it('L0 八个新模块都非空且互不重复', () => {
+  it('L0 九个新模块都非空且互不重复', () => {
     const mods = [
       AGENT_IDENTITY_MODULE,
       THINKING_FRAMEWORK_MODULE,
       OUTPUT_STYLE_MODULE,
+      PROGRESS_NARRATION_MODULE,
       TOOL_CONTRACTS_MODULE,
       GENERAL_BEHAVIOR_MODULE,
       REFACTORING_SOP_MODULE,
@@ -49,7 +52,7 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
       MEMORY_POLICY_MODULE,
     ];
     for (const m of mods) expect(m.length).toBeGreaterThan(0);
-    expect(new Set(mods).size).toBe(8);
+    expect(new Set(mods).size).toBe(9);
   });
 
   it('每个模块含可识别特征串（V2 更新）', () => {
@@ -67,6 +70,10 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
     // V2 新增 output-style
     expect(OUTPUT_STYLE_MODULE).toContain('Output Style');
     expect(OUTPUT_STYLE_MODULE).toContain('emojis');
+    // 新增 progress-narration（执行过程播报）
+    expect(PROGRESS_NARRATION_MODULE).toContain('Progress Narration');
+    expect(PROGRESS_NARRATION_MODULE).toContain('state the plan in 1-2 sentences');
+    expect(PROGRESS_NARRATION_MODULE).toContain('never execute many tool calls in silence');
     // V2 精简版 tool-contracts
     expect(TOOL_CONTRACTS_MODULE).toContain('read_file');
     expect(TOOL_CONTRACTS_MODULE).toContain('get_problems');
@@ -84,11 +91,12 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
     expect(I18N_COMMENTS_MODULE).toContain('通义灵码');
   });
 
-  it('DEFAULT_SYSTEM_PROMPT 等价于 8 模块 \\n\\n 拼接（V2 顺序）', () => {
+  it('DEFAULT_SYSTEM_PROMPT 等价于 9 模块 \\n\\n 拼接（V2 顺序 + progress-narration）', () => {
     const composed = [
       AGENT_IDENTITY_MODULE,
       THINKING_FRAMEWORK_MODULE,
       OUTPUT_STYLE_MODULE,
+      PROGRESS_NARRATION_MODULE,
       TOOL_CONTRACTS_MODULE,
       GENERAL_BEHAVIOR_MODULE,
       REFACTORING_SOP_MODULE,
@@ -172,6 +180,9 @@ describe('B-P2-9 · prompt modules抽离 · V2 M3.14', () => {
     // 3. output-style (V2 新增)
     expect(full).toContain('Output Style');
     expect(full).toContain('emojis');
+    // 3b. progress-narration（执行过程播报）
+    expect(full).toContain('Progress Narration');
+    expect(full).toContain('report progress briefly');
     // 4. tool-contracts
     expect(full).toContain('read_file');
     expect(full).toContain('get_problems');

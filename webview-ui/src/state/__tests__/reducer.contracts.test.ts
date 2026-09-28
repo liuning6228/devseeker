@@ -231,6 +231,243 @@ describe('P1 · 变更汇总补源（H8）与拒绝回执（H4）', () => {
     expect(s.rejectedFiles).toContain('src/a.ts');
     expect(findTool(s, 'c1')?.revertState?.ok).toBe(true);
   });
+
+  it('TOOL_DIFF：已接受文件再次被修改 → 清除 accept 标记（按钮可重新出现）', () => {
+    let s = apply([
+      { type: 'turn_start', taskId: 't1', turn: 1 },
+      { type: 'tool_start', taskId: 't1', toolCallId: 'c1', name: 'write_file' },
+      { type: 'tool_start', taskId: 't1', toolCallId: 'c2', name: 'write_file' },
+    ]);
+    const diff = {
+      toolCallId: 'c1',
+      toolName: 'write_file',
+      relPath: 'src/a.ts',
+      added: 3,
+      removed: 1,
+      unified: '@@ -1 +1 @@\n-a\n+b',
+    };
+    s = reducer(s, { type: 'TOOL_DIFF', payload: diff });
+    s = reducer(s, { type: 'ACCEPT_FILE', relPath: 'src/a.ts' });
+    expect(s.acceptedFiles).toContain('src/a.ts');
+
+    // 第二次修改同一文件：新 diff 到达必须清除旧“已接受”，否则按钮不再出现
+    s = reducer(s, {
+      type: 'TOOL_DIFF',
+      payload: { ...diff, toolCallId: 'c2', added: 1, removed: 0 },
+    });
+    expect(s.acceptedFiles).not.toContain('src/a.ts');
+  });
+
+  it('TOOL_DIFF：已拒绝文件再次被修改 → 清除 reject 标记', () => {
+    let s = apply([
+      { type: 'turn_start', taskId: 't1', turn: 1 },
+      { type: 'tool_start', taskId: 't1', toolCallId: 'c1', name: 'write_file' },
+      { type: 'tool_start', taskId: 't1', toolCallId: 'c2', name: 'write_file' },
+    ]);
+    const diff = {
+      toolCallId: 'c1',
+      toolName: 'write_file',
+      relPath: 'src/a.ts',
+      added: 1,
+      removed: 1,
+      unified: '@@ -1 +1 @@\n-a\n+b',
+    };
+    s = reducer(s, { type: 'TOOL_DIFF', payload: diff });
+    s = reducer(s, { type: 'REJECT_FILE', relPath: 'src/a.ts' });
+    expect(s.rejectedFiles).toContain('src/a.ts');
+
+    s = reducer(s, {
+      type: 'TOOL_DIFF',
+      payload: { ...diff, toolCallId: 'c2' },
+    });
+    expect(s.rejectedFiles).not.toContain('src/a.ts');
+  });
+
+  it('aggregateChangedFiles：回滚后再次修改 → reverted 重置（回到待处理）', async () => {
+    const { aggregateChangedFiles } = await import('../../components/ChangeSummary');
+    const items = aggregateChangedFiles([
+      {
+        parts: [
+          {
+            kind: 'tool',
+            name: 'write_file',
+            status: 'success',
+            diff: {
+              toolCallId: 'c1',
+              toolName: 'write_file',
+              relPath: 'src/a.ts',
+              added: 2,
+              removed: 1,
+              unified: '',
+            },
+            revertState: { ok: true },
+          },
+          {
+            kind: 'tool',
+            name: 'write_file',
+            status: 'success',
+            diff: {
+              toolCallId: 'c2',
+              toolName: 'write_file',
+              relPath: 'src/a.ts',
+              added: 1,
+              removed: 0,
+              unified: '',
+            },
+          },
+        ],
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].reverted).toBe(false);
+    expect(items[0].edits).toBe(2);
+  });
+
+  it('aggregateChangedFiles：先无 diff 兜底条目、后捕获到 diff → 清除 noDiff 恢复可接受', async () => {
+    const { aggregateChangedFiles } = await import('../../components/ChangeSummary');
+    const items = aggregateChangedFiles([
+      {
+        parts: [
+          { kind: 'tool', name: 'write_file', status: 'success', argsPreview: '{"file_path":"src/a.ts"}' },
+          {
+            kind: 'tool',
+            name: 'write_file',
+            status: 'success',
+            argsPreview: '{"file_path":"src/a.ts"}',
+            diff: {
+              toolCallId: 'c2',
+              toolName: 'write_file',
+              relPath: 'src/a.ts',
+              added: 1,
+              removed: 0,
+              unified: '',
+              checkpointId: 'cp-2',
+            },
+          },
+        ],
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0].noDiff).toBeUndefined();
+    expect(items[0].latestCheckpointId).toBe('cp-2');
+  });
+
+  it('TOOL_DIFF：无对应工具卡（restore-* 恢复推送）→ 落入 restoredDiffs，不丢弃', () => {
+    let s = apply([
+      { type: 'turn_start', taskId: 't1', turn: 1 },
+      { type: 'tool_start', taskId: 't1', toolCallId: 'c1', name: 'read_file' },
+    ]);
+    s = reducer(s, {
+      type: 'TOOL_DIFF',
+      payload: {
+        toolCallId: 'restore-s1-1',
+        toolName: 'write_file',
+        relPath: 'src/a.ts',
+        added: 3,
+        removed: 1,
+        unified: '@@ -1 +1 @@\n-a\n+b',
+        checkpointId: 'cp-restore',
+      },
+    });
+
+    expect(s.restoredDiffs['src/a.ts']).toMatchObject({
+      relPath: 'src/a.ts',
+      added: 3,
+      removed: 1,
+      checkpointId: 'cp-restore',
+    });
+    // 不注入消息流：不产生幽灵工具卡
+    expect(findTool(s, 'restore-s1-1')).toBeUndefined();
+  });
+
+  it('TOOL_DIFF：非恢复推送（真实 id）无对应工具卡 → 静默忽略，不污染 restoredDiffs', () => {
+    let s = apply([
+      { type: 'turn_start', taskId: 't1', turn: 1 },
+      { type: 'tool_start', taskId: 't1', toolCallId: 'c1', name: 'read_file' },
+    ]);
+    // 迟到/陈旧的旧会话 diff（如任务中止后 in-flight 推送）不得混入当前会话清单
+    s = reducer(s, {
+      type: 'TOOL_DIFF',
+      payload: {
+        toolCallId: 'call_stale_001',
+        toolName: 'write_file',
+        relPath: 'src/old.ts',
+        added: 9,
+        removed: 9,
+        unified: '',
+      },
+    });
+    expect(s.restoredDiffs).toEqual({});
+  });
+
+  it('HISTORY_RESET：清空 restoredDiffs（切换会话后由宿主重推新快照）', () => {
+    let s = reducer(initialState, {
+      type: 'TOOL_DIFF',
+      payload: {
+        toolCallId: 'restore-s1-1',
+        toolName: 'write_file',
+        relPath: 'src/a.ts',
+        added: 1,
+        removed: 0,
+        unified: '',
+      },
+    });
+    expect(Object.keys(s.restoredDiffs)).toHaveLength(1);
+
+    s = reducer(s, { type: 'HISTORY_RESET', messages: [], sessionId: 's2' });
+    expect(s.restoredDiffs).toEqual({});
+  });
+
+  it('aggregateChangedFiles：restoredDiffs 并入清单，真实 diff 在其上累加', async () => {
+    const { aggregateChangedFiles } = await import('../../components/ChangeSummary');
+    const items = aggregateChangedFiles(
+      [
+        {
+          parts: [
+            {
+              kind: 'tool',
+              name: 'write_file',
+              status: 'success',
+              diff: {
+                toolCallId: 'c9',
+                toolName: 'write_file',
+                relPath: 'src/a.ts',
+                added: 1,
+                removed: 0,
+                unified: '',
+                checkpointId: 'cp-new',
+              },
+            },
+          ],
+        },
+      ],
+      {
+        'src/a.ts': {
+          toolCallId: 'restore-s1-1',
+          toolName: 'write_file',
+          relPath: 'src/a.ts',
+          added: 3,
+          removed: 1,
+          unified: '',
+          checkpointId: 'cp-restore',
+        },
+        'src/b.ts': {
+          toolCallId: 'restore-s1-2',
+          toolName: 'write_file',
+          relPath: 'src/b.ts',
+          added: 2,
+          removed: 2,
+          unified: '',
+        },
+      },
+    );
+
+    expect(items).toHaveLength(2);
+    const a = items.find((f) => f.relPath === 'src/a.ts')!;
+    expect(a).toMatchObject({ added: 4, removed: 1, edits: 2, latestCheckpointId: 'cp-new' });
+    const b = items.find((f) => f.relPath === 'src/b.ts')!;
+    expect(b).toMatchObject({ added: 2, removed: 2, edits: 1 });
+  });
 });
 
 describe('P0-3 · task_end 终态收敛', () => {

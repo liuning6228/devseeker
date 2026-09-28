@@ -121,6 +121,30 @@ export class MessageHistory {
     }
   }
 
+  /**
+   * M3.8 · 运行时提醒注入（Runtime Reminder Injector）：
+   * 追加到最后一条 user/tool 消息的末尾（对齐设计文档"user message / 工具结果末尾"）。
+   * - 纯文本消息 → 追加到 content 字符串尾部；
+   * - 带图 user 消息（content 为 ContentPart[]）→ 追加为末尾 text part（不改变消息条数）；
+   * - 全部不匹配时（极端情况）退化为追加一条合成 user 消息。
+   */
+  appendReminder(text: string): void {
+    if (!text) return;
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      const m = this.messages[i];
+      if (m.role !== 'user' && m.role !== 'tool') continue;
+      if (typeof m.content === 'string') {
+        (m as { content: string }).content += `\n\n${text}`;
+        return;
+      }
+      if (m.role === 'user' && Array.isArray(m.content)) {
+        (m.content as Array<{ type: 'text'; text: string }>).push({ type: 'text', text: `\n\n${text}` });
+        return;
+      }
+    }
+    this.messages.push({ role: 'user', content: text });
+  }
+
   /** 返回副本（防止外部修改） */
   snapshot(): Message[] {
     return this.messages.map((m) => ({ ...m }));

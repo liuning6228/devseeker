@@ -34,6 +34,7 @@ import {
   AGENT_IDENTITY_MODULE,
   THINKING_FRAMEWORK_MODULE,
   OUTPUT_STYLE_MODULE,
+  PROGRESS_NARRATION_MODULE,
   TOOL_CONTRACTS_MODULE,
   GENERAL_BEHAVIOR_MODULE,
   REFACTORING_SOP_MODULE,
@@ -49,22 +50,24 @@ import { getVariantL0Suffix } from '../variants/index.js';
  *   1. agent-identity         —— 三段式身份 + 角色 + 方法论
  *   2. thinking-framework     —— <thinking> 先思再行（V2 新增）
  *   3. output-style           —— 输出效率 + markdown 引用（V2 新增）
- *   4. tool-contracts         —— 工具契约（V2 精简）
- *   5. general-behavior       —— 通用行为（V2 精简）
- *   6. refactoring-sop        —— 跨文件重构 SOP（V2 精简为 1 条）
- *   7. i18n-comments          —— 中文注释/文档规范
- *   8. memory-policy          —— 记忆策略（V2 精简）
- *   9. [variant l0Suffix]     —— 模型专属后缀（按 modelId 注入，generic 时空）
- *  10. web-research           —— 联网纪律
+ *   4. progress-narration     —— 执行过程播报（里程碑简报，对齐关键步骤说明体验）
+ *   5. tool-contracts         —— 工具契约（V2 精简）
+ *   6. general-behavior       —— 通用行为（V2 精简）
+ *   7. refactoring-sop        —— 跨文件重构 SOP（V2 精简为 1 条）
+ *   8. i18n-comments          —— 中文注释/文档规范
+ *   9. memory-policy          —— 记忆策略（V2 精简）
+ *  10. [variant l0Suffix]     —— 模型专属后缀（按 modelId 注入，generic 时空）
+ *  11. web-research           —— 联网纪律
  *
- * 排序原则：身份塑造 → 思考引导 → 输出风格 → 工具契约 → 行为约束 → 后置策略 → 模型专属 → 联网。
- * 第 1-3 段是「塑造模型行为」，第 4-8 段是「约束模型行为」。
- * 第 9 段仅在非 generic variant 时出现。
+ * 排序原则：身份塑造 → 思考引导 → 输出风格 → 行为约束 → 工具契约 → 后置策略 → 模型专属 → 联网。
+ * 第 1-4 段是「塑造模型行为」，第 5-9 段是「约束模型行为」。
+ * 第 10 段仅在非 generic variant 时出现。
  */
 export const BASE_L0_MODULES = [
   AGENT_IDENTITY_MODULE,
   THINKING_FRAMEWORK_MODULE,
   OUTPUT_STYLE_MODULE,
+  PROGRESS_NARRATION_MODULE,
   TOOL_CONTRACTS_MODULE,
   GENERAL_BEHAVIOR_MODULE,
   REFACTORING_SOP_MODULE,

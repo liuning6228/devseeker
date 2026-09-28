@@ -11,6 +11,7 @@ import type {
   ToolDiffPayload,
   TodoItem,
 } from '../protocol';
+import { RESTORE_DIFF_TOOLCALL_PREFIX } from '../protocol';
 
 /* ─────────── 领域模型 ─────────── */
 
@@ -169,6 +170,13 @@ export interface AppState {
   acceptedFiles: string[];
   /** W-UI2 · 用户已 Reject 的文件 relPath 列表 */
   rejectedFiles: string[];
+  /**
+   * Phase 3 · webview 重载/切换会话后宿主重推的变更快照（relPath → diff）。
+   * 宿主用合成 toolCallId（`restore-*`）推送，消息流中无对应工具卡，
+   * 若按 toolCallId 路由会被丢弃 → 单独存储，供变更清单与回滚链路使用。
+   * 不注入 messages，避免聊天流出现无对应工具执行的幽灵卡片。
+   */
+  restoredDiffs: Record<string, ToolDiffPayload>;
   /** W11.4 · run_preview 工具产生的待打开预览项 */
   pendingPreviews: PendingPreview[];
   /** W12.1 · 来自 extension 的 Inline Edit 草稿推送；Composer 按 nonce 变化一次性消费 */
@@ -186,6 +194,7 @@ export const initialState: AppState = {
   todoList: [],
   acceptedFiles: [],
   rejectedFiles: [],
+  restoredDiffs: {},
   pendingPreviews: [],
   pendingApprovals: {},
   revertedHunks: new Set(),
@@ -262,6 +271,8 @@ export function reducer(state: AppState, action: Action): AppState {
         // W-UI2 · 换 session / 清历史 时清空 acceptedFiles 和 rejectedFiles
         acceptedFiles: [],
         rejectedFiles: [],
+        // Phase 3 · 恢复快照随历史重置清空（宿主随后会重推新的恢复 diff）
+        restoredDiffs: {},
         // 新建/切换会话时清除 todo、diff 预览、pending previews 等跨会话残留状态
         todoList: [],
         pendingPreviews: [],
@@ -332,11 +343,37 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'APPROVAL_CLEAR_ALL':
       return { ...state, pendingApprovals: {}, approvalRequest: undefined };
 
-    case 'TOOL_DIFF':
-      return updateToolPart(state, action.payload.toolCallId, (p) => ({
-        ...p,
-        diff: action.payload,
-      }));
+    case 'TOOL_DIFF': {
+      const relPath = action.payload.relPath;
+      const hasToolPart = state.messages.some((msg) =>
+        msg.parts.some((p) => p.kind === 'tool' && p.toolCallId === action.payload.toolCallId),
+      );
+      let next: AppState;
+      if (hasToolPart) {
+        next = updateToolPart(state, action.payload.toolCallId, (p) => ({
+          ...p,
+          diff: action.payload,
+        }));
+      } else if (action.payload.toolCallId.startsWith(RESTORE_DIFF_TOOLCALL_PREFIX)) {
+        // 恢复快照（宿主在 webview 重载/切换会话后重推，无承载工具卡）：
+        // 存入独立状态供变更清单与回滚链路使用，不注入消息流（避免出现幽灵工具卡）。
+        next = { ...state, restoredDiffs: { ...state.restoredDiffs, [relPath]: action.payload } };
+      } else {
+        // 找不到承载工具卡且非恢复推送：迟到的旧会话 diff（如任务中止后 in-flight 的推送）。
+        // 保持静默忽略，避免陈旧事件混入当前会话的变更清单。
+        return state;
+      }
+      // 该文件出现新修改：清除旧的 accept/reject 标记，回到待处理。
+      // 否则已接受/已拒绝的文件再次被修改后按钮不再出现（状态残留），用户无法确认新修改。
+      if (!next.acceptedFiles.includes(relPath) && !next.rejectedFiles.includes(relPath)) {
+        return next;
+      }
+      return {
+        ...next,
+        acceptedFiles: next.acceptedFiles.filter((p) => p !== relPath),
+        rejectedFiles: next.rejectedFiles.filter((p) => p !== relPath),
+      };
+    }
 
     case 'REVERT_RESULT':
       return patchToolByCheckpointId(state, action.checkpointId, {
@@ -809,6 +846,8 @@ function updateToolPart(
 /**
  * 按 relPath 定位 diff part 并写入 revertState。
  * 拒绝回执专用：H4 场景（无 checkpoint）无法按 checkpointId 路由。
+ * 同一消息内该文件可能有多条 diff part（多次编辑），全部标记，
+ * 保证聚合时“最新一条 diff 决定文件状态”的顺序语义成立。
  */
 function patchRevertStateByRelPath(
   state: AppState,
@@ -816,11 +855,10 @@ function patchRevertStateByRelPath(
   revertState: { ok: boolean; message?: string },
 ): AppState {
   const messages = state.messages.map((msg) => {
-    const idx = msg.parts.findIndex((p) => p.kind === 'tool' && p.diff?.relPath === relPath);
-    if (idx === -1) return msg;
-    const parts = [...msg.parts];
-    const target = parts[idx] as ToolCallPart;
-    parts[idx] = { ...target, revertState };
+    if (!msg.parts.some((p) => p.kind === 'tool' && p.diff?.relPath === relPath)) return msg;
+    const parts = msg.parts.map((p) =>
+      p.kind === 'tool' && p.diff?.relPath === relPath ? { ...p, revertState } : p,
+    );
     return { ...msg, parts };
   });
   return { ...state, messages };
@@ -834,20 +872,21 @@ function safeStringify(value: unknown): string {
   }
 }
 
-/** 根据 checkpointId 找到对应 ToolCallPart，写入 revertState */
+/**
+ * 根据 checkpointId 找到所有对应 ToolCallPart，写入 revertState。
+ * step 级 checkpoint 会覆盖同一步内多个文件/多次编辑的 diff part，
+ * 必须全部标记，否则聚合清单中部分文件仍显示“待处理”。
+ */
 function patchToolByCheckpointId(
   state: AppState,
   checkpointId: string,
   revertState: { ok: boolean; message?: string },
 ): AppState {
   const messages = state.messages.map((msg) => {
-    const idx = msg.parts.findIndex(
-      (p) => p.kind === 'tool' && p.diff?.checkpointId === checkpointId,
+    if (!msg.parts.some((p) => p.kind === 'tool' && p.diff?.checkpointId === checkpointId)) return msg;
+    const parts = msg.parts.map((p) =>
+      p.kind === 'tool' && p.diff?.checkpointId === checkpointId ? { ...p, revertState } : p,
     );
-    if (idx === -1) return msg;
-    const parts = [...msg.parts];
-    const target = parts[idx] as ToolCallPart;
-    parts[idx] = { ...target, revertState };
     return { ...msg, parts };
   });
   return { ...state, messages };

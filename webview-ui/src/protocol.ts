@@ -5,6 +5,8 @@
  * Vite 通过 resolve 能跨出 webview-ui 根目录读取 ../src/shared。
  */
 
+export { RESTORE_DIFF_TOOLCALL_PREFIX } from '../../src/shared/protocol';
+
 export type {
   TaskEvent,
   SubagentProgressEvent,

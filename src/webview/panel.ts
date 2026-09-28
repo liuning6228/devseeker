@@ -34,6 +34,7 @@ import type {
   ModeStatusPayload,
 } from './messages.js';
 import type { AskQuestionItem, TodoItem, TodoListPayload, ModelConfigPayload, ModelLevelConfigPayload, ApprovalRequestPayload } from '../shared/protocol.js';
+import { RESTORE_DIFF_TOOLCALL_PREFIX } from '../shared/protocol.js';
 import { getProviderRegistry } from '../providers/registry.js';
 import type { RawLevelSettings } from '../providers/registry.js';
 import type { IProvider } from '../providers/base.js';
@@ -443,6 +444,12 @@ export class DualMindChatPanel {
   >();
   /** Phase3 · 已恢复 diff 的 key 集合，防止 restoreDiffsForSession 重复推送 */
   private readonly restoredDiffKeys = new Set<string>();
+  /**
+   * Phase3 · 恢复代数：会话切换 / 新建 / 清空历史时递增。
+   * 进行中的 restoreDiffsForSession 在 await 边界后校验代数，
+   * 过期即中止，避免旧会话快照混入新会话的变更清单。
+   */
+  private restoreGeneration = 0;
   /** Plan 模式中 plan 已就绪，用户尚未切回 Agent（UI 头部展示"切换到 Agent"按钮） */
   private planReadyForSwitch = false;
 
@@ -2179,6 +2186,9 @@ export class DualMindChatPanel {
     this.pushSessionList();
     // 不再自动设置 currentSession = latest，
     // 用户需要在侧边栏手动点击历史会话才能恢复内容。
+    // 与“UI 回到未加载会话”保持一致：使仍进行中的旧恢复推送失效，
+    // 避免清单出现会话文件但消息流为空的错位。
+    this.restoreGeneration++;
   }
 
   private handleNewSession(): void {
@@ -2199,6 +2209,7 @@ export class DualMindChatPanel {
     this.cancelAllPendingApprovals('new session');
     this.pendingDiffs.clear();
     this.restoredDiffKeys.clear(); // B5 · 新会话清空已恢复 diff 记录
+    this.restoreGeneration++; // 使进行中的旧恢复失效
     // 新会话清空 workspaceState 中的 todo 列表，避免 webview 重新加载时恢复旧 todo
     this.setTodosAndPush([]);
     this.post({ type: 'history', messages: [] });
@@ -2226,6 +2237,7 @@ export class DualMindChatPanel {
     this.cancelAllPendingApprovals('session switched');
     this.pendingDiffs.clear();
     this.restoredDiffKeys.clear(); // B5 · 切换会话清空已恢复 diff 记录
+    this.restoreGeneration++; // 使进行中的旧恢复失效
     this.post({
       type: 'history',
       sessionId: s.id,
@@ -2292,6 +2304,7 @@ export class DualMindChatPanel {
     this.cancelAllPendingApprovals('clear history');
     this.pendingDiffs.clear();
     this.restoredDiffKeys.clear();
+    this.restoreGeneration++; // 使进行中的旧恢复失效
     this.setTodosAndPush([]);
     // P2-7 · 新会话重置语义探测节流（同一新会话允许再探测一次）
     this.semanticDebugProbeDone = false;
@@ -2826,6 +2839,8 @@ export class DualMindChatPanel {
       workspaceRoot,
       maxTurns,
       initialMessages: priorMessages.length > 0 ? priorMessages : undefined,
+      // M3.8 · stale_todo 运行时提醒的数据源基线（session 已有待办）
+      initialTodos: this.getTodos(),
       ...(hookManager ? { hookManager } : {}),
       approvalGate: this.approvalGate,
       auditSink,
@@ -5857,6 +5872,8 @@ export class DualMindChatPanel {
       log.debug({ sessionId: session.id }, '[Phase3] restoreDiffsForSession: already restored, skipping');
       return;
     }
+    // 捕获本次恢复的代数：await 期间若会话被切换/重置，代数递增 → 本次恢复中止
+    const gen = this.restoreGeneration;
     try {
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!workspaceRoot) return;
@@ -5899,6 +5916,12 @@ export class DualMindChatPanel {
 
       if (fileBeforeMap.size === 0) return;
 
+      // 会话已被切换/重置 → 本次恢复已过期，中止（避免旧会话快照混入新会话清单）
+      if (gen !== this.restoreGeneration) {
+        log.info({ sessionId: session.id }, '[Phase3] restoreDiffsForSession: superseded, aborting');
+        return;
+      }
+
       // 对每个唯一 relPath 生成 diff 并推送
       let diffIndex = 0;
       for (const [relPath, before] of fileBeforeMap) {
@@ -5908,6 +5931,12 @@ export class DualMindChatPanel {
           after = await fs.readFile(absPath, 'utf-8');
         } catch {
           after = undefined; // 文件已删除
+        }
+
+        // 读文件 await 期间可能发生会话切换 → 推送前再次校验代数
+        if (gen !== this.restoreGeneration) {
+          log.info({ sessionId: session.id }, '[Phase3] restoreDiffsForSession: superseded, aborting');
+          return;
         }
 
         // before === after → 无变更，跳过
@@ -5933,7 +5962,7 @@ export class DualMindChatPanel {
         this.post({
           type: 'tool_diff',
           payload: {
-            toolCallId: `restore-${session.id}-${diffIndex}`,
+            toolCallId: `${RESTORE_DIFF_TOOLCALL_PREFIX}${session.id}-${diffIndex}`,
             toolName: 'write_file',
             relPath,
             unified: diff.unified,

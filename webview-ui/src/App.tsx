@@ -708,9 +708,10 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
   }, [state.costSummary]);
 
   // W-UI2 · 消息流 tool 卡中提取的变更文件聚合（路径去重 + 行差累加）
+  // Phase 3 · 并入 restoredDiffs（webview 重载/切会话后宿主重推、无工具卡承载的快照）
   const changedFiles = useMemo(
-    () => aggregateChangedFiles(state.messages),
-    [state.messages],
+    () => aggregateChangedFiles(state.messages, state.restoredDiffs),
+    [state.messages, state.restoredDiffs],
   );
 
   /**
@@ -753,19 +754,19 @@ function AppInner({ onNavigate, currentView }: { onNavigate: (view: View) => voi
   // W-UI2 · 单文件 Reject：通知 extension 回滚该文件
   const handleRejectFile = useCallback((relPath: string) => {
     dispatch({ type: 'REJECT_FILE', relPath });
-    // 查找该文件的 checkpointId
-    const file = aggregateChangedFiles(state.messages).find((f) => f.relPath === relPath);
+    // 查找该文件的 checkpointId（含恢复快照：重载/切会话后同样可回滚）
+    const file = aggregateChangedFiles(state.messages, state.restoredDiffs).find((f) => f.relPath === relPath);
     postToHost({ type: 'reject_diff', relPath, checkpointId: file?.latestCheckpointId });
-  }, [state.messages]);
+  }, [state.messages, state.restoredDiffs]);
 
   // W-UI2 · Reject all：通知 extension 回滚所有文件
   const handleRejectAll = useCallback((relPaths: string[]) => {
     dispatch({ type: 'REJECT_ALL', relPaths });
-    const files = aggregateChangedFiles(state.messages)
+    const files = aggregateChangedFiles(state.messages, state.restoredDiffs)
       .filter((f) => relPaths.includes(f.relPath))
       .map((f) => ({ relPath: f.relPath, checkpointId: f.latestCheckpointId }));
     postToHost({ type: 'reject_all_diffs', files });
-  }, [state.messages]);
+  }, [state.messages, state.restoredDiffs]);
 
   // ---------- W-UI4 · 齿轮菜单装配 ----------
   const cycleMode = useCallback(() => {

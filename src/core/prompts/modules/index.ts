@@ -8,10 +8,11 @@
  * Prompt Modules 汇出（V2 · M3.14 · 14 模块抽离）
  *
  * 14 模块清单（按注入位置）：
- *   L0 稳定区（9 个）：
+ *   L0 稳定区（10 个）：
  *     1. agent-identity         —— 三段式身份 + 角色 + 方法论（V2 升级）
  *     2. thinking-framework     —— <thinking> 先思再行（V2 新增）
  *     3. output-style           —— 输出效率 + markdown 引用（V2 新增）
+ *     3b. progress-narration    —— 执行过程播报（里程碑简报，对齐关键步骤说明体验）
  *     4. tool-contracts         —— 工具契约（V2 精简）
  *     5. general-behavior       —— 通用行为（V2 精简，移出分块细则）
  *     6. refactoring-sop        —— 跨文件重构 SOP（V2 精简为 1 条原则）
@@ -34,6 +35,7 @@
 export { AGENT_IDENTITY_MODULE, buildAgentIdentityModule } from './agent-identity.js';
 export { THINKING_FRAMEWORK_MODULE } from './thinking-framework.js';
 export { OUTPUT_STYLE_MODULE } from './output-style.js';
+export { PROGRESS_NARRATION_MODULE } from './progress-narration.js';
 export { TOOL_CONTRACTS_MODULE } from './tool-contracts.js';
 export { GENERAL_BEHAVIOR_MODULE } from './general-behavior.js';
 export { REFACTORING_SOP_MODULE } from './refactoring-sop.js';
